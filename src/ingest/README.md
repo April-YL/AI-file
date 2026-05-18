@@ -15,8 +15,31 @@
 - 报告导出逻辑。
 - 真实资产数据。
 
-## 后续建议文件
+## 已实现
 
-- `load_assets.py`：读取台账文件。
-- `field_mapping.py`：维护字段映射。
-- `normalize.py`：标准化资产记录。
+| 模块 | 作用 |
+| --- | --- |
+| `models.py` | 工作表类型、分类结果、诊断结构 |
+| `constants.py` | 字段同义词、语义必需列、内容特征签名 |
+| `field_mapping.py` | 表头→标准字段；FA list 语义必需列检查 |
+| `header_detection.py` | 多行表头扫描 |
+| `sheet_classifier.py` | **名称 + 内容** 综合识别 sheet 类型 |
+| `workbook_reader.py` | 读取整本底稿并输出诊断 |
+| `cli.py` | 命令行诊断入口 |
+
+## 使用方式
+
+```powershell
+cd "D:\AI file"
+$env:PYTHONPATH = "src"
+python -m ingest.cli
+python -m ingest.cli "固定资产质检agent\案例库\某文件.xlsx"
+python -m ingest.cli --max-mb 50 --json
+```
+
+识别策略见 `docs/sheet-classification.md`。
+
+## 后续
+
+- `normalize.py`：将映射后的行转为标准资产记录对象。
+- `load_assets.py`：对外统一加载 FA list / 清单。

@@ -16,6 +16,12 @@
 | `docs/PROJECT_STRUCTURE.md` | 当前文件。说明每个文件存储什么内容以及用途。 |
 | `docs/domain-glossary.md` | 固定资产领域词典。记录字段定义、取值约束和常见业务口径。 |
 | `docs/architecture.md` | 架构说明。记录模块边界、数据流、规则结果结构和后续演进方向。 |
+| `docs/audit-workflow.md` | 固定资产底稿 SOP 与程序流程。沉淀 K.00-K.03 的执行逻辑和 Agent 质检关注点。 |
+| `docs/qc-checklist.md` | 固定资产质检 checklist。区分可自动化检查、预警和人工复核项目。 |
+| `docs/workpaper-fields.md` | 标准底稿字段与资料映射。记录各工作表字段、标准字段名和规则输入口径。 |
+| `docs/source-materials-reading-notes.md` | 资料库读取摘要。记录已读取的 Excel/PDF 文件、工作表和内容预览。 |
+| `docs/case-workpaper-diagnostic.md` | 案例库底稿读取诊断（首轮脚本输出）。 |
+| `docs/sheet-classification.md` | 工作表识别策略：名称变体 + 表头内容特征。 |
 | `docs/tasks.md` | 阶段性任务清单。记录待办事项、负责人和验收标准。 |
 | `docs/progress.md` | 项目里程碑进度。记录 M0、M1、M2 等阶段目标和当前状态。 |
 | `docs/handoff/latest.md` | 最新交接文档。记录当前进展、下一步、阻塞问题和相关文件。 |
