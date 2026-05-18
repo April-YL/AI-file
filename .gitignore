@@ -1,0 +1,18 @@
+# Cursor 本地状态（不必纳入版本库）
+.cursor/
+
+# Excel 临时/锁文件
+~$*
+
+# 系统文件
+Thumbs.db
+Desktop.ini
+
+# 环境与密钥
+.env
+.env.*
+*.pem
+
+# 日志与依赖（若后续有）
+*.log
+node_modules/
