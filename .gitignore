@@ -1,5 +1,13 @@
-# Cursor 本地状态（不必纳入版本库）
-.cursor/
+# Cursor 本地状态与项目配置
+# 保留 rules/skills/agents，便于团队共享 Agent 上下文。
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+!.cursor/skills/
+!.cursor/skills/**
+!.cursor/agents/
+!.cursor/agents/**
+!.cursor/hooks.json
 
 # Excel 临时/锁文件
 ~$*

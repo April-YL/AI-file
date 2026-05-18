@@ -1,0 +1,50 @@
+---
+name: fixed-asset-qc
+description: 执行固定资产质检 Agent 开发工作流。用于固定资产、资产台账、质检规则、规则引擎、质检报告、脱敏样例和人工复核相关任务。
+---
+
+# 固定资产质检开发工作流
+
+## 开始前
+
+1. 阅读 `AGENTS.md`。
+2. 阅读 `docs/handoff/latest.md`。
+3. 如涉及文件职责，阅读 `docs/PROJECT_STRUCTURE.md`。
+4. 如涉及字段或规则口径，阅读 `docs/domain-glossary.md`。
+
+## 添加质检规则
+
+1. 确认规则输入字段和业务口径。
+2. 在 `tests/fixtures/` 准备脱敏样例。
+3. 在 `src/rules/` 实现规则。
+4. 在 `tests/rules/` 添加通过、失败和边界测试。
+5. 更新 `docs/domain-glossary.md` 或 `docs/architecture.md` 中受影响内容。
+6. 运行测试并修复问题。
+
+## 修改数据接入
+
+1. 确认输入来源是 Excel、CSV、API 还是测试 fixture。
+2. 在 `src/ingest/` 做字段映射和基础清洗。
+3. 不在接入层写业务质检规则。
+4. 使用脱敏样例覆盖不同列名和空值情况。
+
+## 修改报告输出
+
+1. 使用统一质检问题结构。
+2. 保留 `asset_id`、`rule_id`、`field`、`severity`、`message` 和 `suggestion`。
+3. 汇总逻辑放在 `src/report/`。
+4. 如输出格式变化，更新 `docs/architecture.md`。
+
+## 收工交接
+
+每次完成阶段性开发后，更新 `docs/handoff/latest.md`：
+
+- 已完成。
+- 进行中。
+- 下一步。
+- 已知问题。
+- 相关文件。
+
+## 参考
+
+- 质检结果结构、错误码命名和样例数据约定见 `reference.md`。

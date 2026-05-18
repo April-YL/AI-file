@@ -1,0 +1,14 @@
+---
+description: Python 固定资产质检代码规范
+globs: "{src,tests}/**/*.py"
+alwaysApply: false
+---
+
+# Python 质检代码规范
+
+- `src/ingest/` 只做读取、字段映射和基础清洗，不写业务质检规则。
+- `src/rules/` 每条规则应可独立测试，并返回统一的质检问题结构。
+- `src/report/` 负责汇总和导出，不直接读取原始台账。
+- 新增或修改规则时，必须同步更新 `tests/rules/`。
+- 测试数据只能使用 `tests/fixtures/` 中的脱敏样例。
+- 金额比较默认使用 `0.01` 容差，除非 `docs/domain-glossary.md` 另有说明。
