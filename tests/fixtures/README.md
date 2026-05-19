@@ -14,6 +14,15 @@
 - 不提交真实部门、真实人员、真实供应商、合同号或发票号。
 - 资产编号使用 `FA-TEST-001`、`FA-TEST-002` 等格式。
 
+## 规则字典（脱敏）
+
+| 文件 | 说明 |
+| --- | --- |
+| `rule_dictionary_sanitized.csv` | 35 条质检规则主表（由桌面规则字典导出，示例数值已脱敏） |
+| `rule_dictionary_priority_sanitized.csv` | 人工实施优先级（P1/P2/P3） |
+
+映射与 Agent 排期见 [rule-dictionary-mapping.md](../docs/rule-dictionary-mapping.md)。
+
 ## 后续建议文件
 
 - `basic_assets.csv`：基础正常样例。

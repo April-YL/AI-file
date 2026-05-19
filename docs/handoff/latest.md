@@ -12,7 +12,7 @@
   1. **质检报告**（findings 清单、严重级别、程序/资产维度汇总、复核建议）。
   2. **底稿标注**（在原底稿副本上批注/高亮问题位置，与 findings 一一对应）。
 
-当前代码完成的是 M1 切片（ingest + 少量 FA list 规则 + JSON 报告骨架），**底稿标注尚未实现**。
+当前代码完成 **M1 切片**（ingest + 规则字典映射 + 3 条 `fa_list_*` 规则 + JSON 报告）；**Agent P1 已调整为 M2a**（整底稿流水线，汇总/K.01 规则优先），**底稿标注尚未实现**。
 
 ## 当前状态
 
@@ -20,6 +20,7 @@
 - 资料库与案例库诊断、SOP/checklist/字段映射文档已沉淀。
 - `src/ingest/`：sheet 分类、字段映射、底稿诊断 CLI、FA list CSV/行解析。
 - `src/rules/` + `src/report/`：首批 3 条 FA list 规则 + JSON 报告最小闭环。
+- 规则字典映射：`docs/rule-dictionary-mapping.md`、`src/rules/registry.py`、`tests/fixtures/rule_dictionary_*.csv`
 - **距终态差距**：全 checklist 覆盖、正式质检报告导出、**底稿标注回写**、多 sheet Excel 端到端、一键 CLI。
 
 ## 已完成
@@ -35,18 +36,21 @@
 - `src/report/`：`run_fa_list_qc`、JSON 报告结构
 - 脱敏 fixture：`tests/fixtures/fa_list_*.csv`
 
-## 进行中
+## 进行中（M2a = Agent P1）
 
-- M1：扩展 FA list / 相关表规则，Excel 行级解析与案例库回归。
-- 报告：在 JSON 骨架上定型正式质检报告字段（程序编码、检查点、finding 关联）。
+- **流水线**：`fa-qc-run` 编排；整本 Excel 多 sheet 解析（不限于 FA list）。
+- **规则优先**：汇总页 PSP/拒绝理由（AE-003）、K.01 后推表结构与异常金额（`rollforward_*`）；客户台账作可选输入，复用 `fa_list_*` 作一致性核对。
+- **必交付雏形**：程序维度报告 schema；底稿批注 v0（`*_qc_annotated.xlsx`）。
 
-## 下一步（按终态优先级）
+## 下一步（M2a 验收导向）
 
-1. **质检报告（必交付）**：定型报告 schema（程序 + 检查点 + finding）；支持 JSON 导出，后续 Excel 报告模板。
-2. **底稿标注（必交付）**：`src/report/` 增加标注模块——根据 finding 的 `source_sheet` / `source_row` / `field` 在底稿副本写入批注或高亮；默认输出 `*_qc_annotated.xlsx`，不覆盖原件。
-3. 扩展 checklist 规则（见 `docs/qc-checklist.md` 优先级）并接入多 sheet 读取。
-4. `fa-qc-run` CLI：底稿路径 → 检查 → **报告 + 标注副本**。
-5. 6 份案例底稿端到端回归；大文件（A 公司 ~42MB）性能优化后纳入。
+1. `fa-qc-run`：底稿路径 → 解析 → 检查 → **报告 JSON + 标注副本**。
+2. ingest：汇总 sheet + K.01 后推表数据对象（语义字段，不写死单元格）。
+3. rules：AE-003、`rollforward_exists` / `rollforward_columns_complete`（及与台账核对时的 `fa_list_*` 复用）。
+4. report：按 `dict_rule_code` / 程序汇总；openpyxl 批注回写。
+5. 案例库 1～2 份小型底稿端到端回归。
+
+**暂缓为主战场**：单独扩展 FA list 规则条数；TE/Canvas、证据充分性等标 NEED_REVIEW。
 
 ## 已知问题
 

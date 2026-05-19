@@ -1,0 +1,799 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from typing import Iterator
+
+from rules.models import AutomationLevel, QcIssue, Severity
+
+# 脱敏规则字典 fixture（与桌面 xlsx 结构一致）
+RULE_DICTIONARY_CSV = (
+    Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "rule_dictionary_sanitized.csv"
+)
+
+
+class ImplementationStatus(str, Enum):
+    IMPLEMENTED = "implemented"
+    PLANNED = "planned"
+    MANUAL_ONLY = "manual_only"
+
+
+class AgentPriority(str, Enum):
+    """Agent 开发排期（与字典「实施优先级」人工轨道分开）。
+
+    当前 P1 = M2a：整底稿流水线 + 汇总/K.01 优先；非 FA list 规则扩张。
+    """
+    P1 = "P1"
+    P2 = "P2"
+    P3 = "P3"
+    P4 = "P4"
+    MANUAL = "MANUAL"
+
+
+@dataclass(frozen=True)
+class RuleSpec:
+    """规则字典条目 + Agent 映射元数据。"""
+
+    dict_code: str
+    rule_id: str
+    rule_name: str
+    procedure_code: str
+    sheet_hints: tuple[str, ...]
+    automation: AutomationLevel
+    default_severity: Severity
+    problem_category: str
+    reviewer_role: str  # preparer | reviewer
+    qc_checkpoint: str
+    k1_ref: str
+    sheet_kinds: tuple[str, ...] = ()
+    manual_priority: str | None = None  # 字典实施优先级：P1-最高 等
+    agent_priority: AgentPriority = AgentPriority.MANUAL
+    implementation: ImplementationStatus = ImplementationStatus.PLANNED
+    notes: str = ""
+
+    def enrich_issue(self, issue: QcIssue) -> QcIssue:
+        """将注册表元数据写入 QcIssue（不覆盖已有 message/suggestion）。"""
+        issue.dict_rule_code = self.dict_code
+        issue.rule_name = self.rule_name
+        issue.problem_category = self.problem_category
+        issue.reviewer_role = self.reviewer_role
+        issue.qc_checkpoint = self.qc_checkpoint
+        issue.automation_level = self.automation.value
+        issue.k1_checklist_ref = self.k1_ref
+        if issue.procedure_code == "FA_LIST" and self.procedure_code != "FA_LIST":
+            issue.procedure_code = self.procedure_code
+        return issue
+
+
+def _specs() -> list[RuleSpec]:
+    """内置规则注册表（来源：脱敏规则字典 + qc-checklist 补充）。"""
+    return [
+        # --- 底稿范围、程序设计 ---
+        RuleSpec(
+            dict_code="AE-001",
+            rule_id="materiality_consistency",
+            rule_name="PM/TE/SAD一致性",
+            procedure_code="K.00",
+            sheet_hints=("K.00 Lead Sheet",),
+            sheet_kinds=("lead",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="底稿范围、程序设计",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-影响程序范围、证据程度",
+            k1_ref="K1 CheckList 第5条",
+            manual_priority="P1-最高优先级",
+            agent_priority=AgentPriority.P4,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+            notes="依赖 Canvas/A3；Agent 仅可做 TE/SAD 缺失等形式检查",
+        ),
+        RuleSpec(
+            dict_code="AE-002",
+            rule_id="risk_threshold_consistency",
+            rule_name="各认定CRA正确性",
+            procedure_code="K.00",
+            sheet_hints=("K.00 Lead Sheet",),
+            sheet_kinds=("lead",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="底稿范围、程序设计",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-影响程序范围、证据程度",
+            k1_ref="K1 CheckList 第6条",
+            manual_priority="P2-高优先级",
+            agent_priority=AgentPriority.P4,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="AE-003",
+            rule_id="psp_completion",
+            rule_name="PSP程序执行完整性",
+            procedure_code="SUMMARY",
+            sheet_hints=("所有工作表", "汇总"),
+            sheet_kinds=("summary",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="底稿范围、程序设计",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-影响程序范围、证据程度",
+            k1_ref="K1 CheckList 第7条",
+            manual_priority="P1-最高优先级",
+            agent_priority=AgentPriority.P1,
+            implementation=ImplementationStatus.PLANNED,
+            notes="M2a 优先；可 AUTO_FAIL：不执行且无拒绝理由",
+        ),
+        RuleSpec(
+            dict_code="AE-004",
+            rule_id="unexpected_movement_investigation",
+            rule_name="异常波动调查充分性",
+            procedure_code="K.00",
+            sheet_hints=("K.00 Lead Sheet",),
+            sheet_kinds=("lead",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="底稿范围、程序设计",
+            reviewer_role="reviewer",
+            qc_checkpoint="No-考虑到影响不重要",
+            k1_ref="K1 CheckList 第8条",
+            manual_priority="P3-后续扩展",
+            agent_priority=AgentPriority.P4,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="AE-005",
+            rule_id="workpaper_cleanliness",
+            rule_name="底稿清洁度",
+            procedure_code="GLOBAL",
+            sheet_hints=("所有工作表",),
+            automation=AutomationLevel.MANUAL_ONLY,
+            default_severity=Severity.WARN,
+            problem_category="底稿范围、程序设计",
+            reviewer_role="reviewer",
+            qc_checkpoint="No-考虑到影响不重要",
+            k1_ref="K1 CheckList 第9条",
+            agent_priority=AgentPriority.MANUAL,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="AE-006",
+            rule_id="workpaper_index_accuracy",
+            rule_name="底稿索引准确性",
+            procedure_code="GLOBAL",
+            sheet_hints=("所有工作表",),
+            automation=AutomationLevel.MANUAL_ONLY,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="底稿范围、程序设计",
+            reviewer_role="reviewer",
+            qc_checkpoint="Y-影响程序范围、证据程度",
+            k1_ref="K1 CheckList 第10条",
+            agent_priority=AgentPriority.MANUAL,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        # --- 错报 ---
+        RuleSpec(
+            dict_code="MT-001",
+            rule_id="fixed_asset_definition",
+            rule_name="固定资产定义符合性",
+            procedure_code="FA_LIST",
+            sheet_hints=("FA list",),
+            sheet_kinds=("fa_list",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="错报",
+            reviewer_role="reviewer",
+            qc_checkpoint="Y-错报风险",
+            k1_ref="K1 CheckList 第11条",
+            agent_priority=AgentPriority.P4,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="MT-002",
+            rule_id="special_movement_identification",
+            rule_name="特殊性质变动识别",
+            procedure_code="K.02",
+            sheet_hints=("K.02.1", "K.02.2", "新增清单", "处置清单"),
+            sheet_kinds=("addition_list", "disposal_list"),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="错报",
+            reviewer_role="reviewer",
+            qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
+            k1_ref="K1 CheckList 第12条",
+            manual_priority="P3-后续扩展",
+            agent_priority=AgentPriority.P4,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="MT-003",
+            rule_id="adjustment_testing",
+            rule_name="调整事项测试恰当性",
+            procedure_code="K.00",
+            sheet_hints=("K.00 Lead Sheet", "A3A5"),
+            automation=AutomationLevel.MANUAL_ONLY,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="错报",
+            reviewer_role="reviewer",
+            qc_checkpoint="Y-错报风险",
+            k1_ref="K1 CheckList 第13条",
+            agent_priority=AgentPriority.MANUAL,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        # --- 基础程序 / 核对 ---
+        RuleSpec(
+            dict_code="GL-001",
+            rule_id="lead_tb_reconciliation",
+            rule_name="期末账面数与TB核对",
+            procedure_code="K.00",
+            sheet_hints=("K.00 Lead Sheet",),
+            sheet_kinds=("lead", "rollforward"),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第14条",
+            manual_priority="P1-最高优先级",
+            agent_priority=AgentPriority.P4,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="GL-002",
+            rule_id="rollforward_fa_list_reconciliation",
+            rule_name="期末账面数与FA list核对",
+            procedure_code="K.01",
+            sheet_hints=("K.00 Lead Sheet", "K.01 Agree SL to GL", "FA list"),
+            sheet_kinds=("rollforward", "fa_list"),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第14条",
+            manual_priority="P1-最高优先级",
+            agent_priority=AgentPriority.P1,
+            implementation=ImplementationStatus.PLANNED,
+            notes="M2a 优先；台账/FA list 与后推核对",
+        ),
+        RuleSpec(
+            dict_code="GL-003",
+            rule_id="lead_prior_year_reconciliation",
+            rule_name="期初期末审定数与Lead核对",
+            procedure_code="K.00",
+            sheet_hints=("K.00 Lead Sheet",),
+            sheet_kinds=("lead",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第15条",
+            manual_priority="P1-最高优先级",
+            agent_priority=AgentPriority.P4,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="GL-004",
+            rule_id="depreciation_pl_reconciliation",
+            rule_name="折旧费用与利润表核对",
+            procedure_code="K.00",
+            sheet_hints=("K.00 Lead Sheet",),
+            automation=AutomationLevel.MANUAL_ONLY,
+            default_severity=Severity.WARN,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="No-考虑到影响不重要",
+            k1_ref="K1 CheckList 第16条",
+            agent_priority=AgentPriority.MANUAL,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="GL-005",
+            rule_id="rollforward_abnormal_amounts",
+            rule_name="资产异常情况识别",
+            procedure_code="FA_LIST",
+            sheet_hints=("FA list", "K.00 Lead Sheet"),
+            sheet_kinds=("fa_list", "lead"),
+            automation=AutomationLevel.AUTO_WARN,
+            default_severity=Severity.WARN,
+            problem_category="基础程序",
+            reviewer_role="reviewer",
+            qc_checkpoint="No-质检内容已被包含在第2部分第2条",
+            k1_ref="K1 CheckList 第17条",
+            agent_priority=AgentPriority.P1,
+            implementation=ImplementationStatus.PLANNED,
+            notes="M2a 优先；与 asset_amount_non_negative、负净值等合并实现",
+        ),
+        # --- FA list 数据质量（qc-checklist 补充，字典待增行）---
+        RuleSpec(
+            dict_code="FA-RC-001",
+            rule_id="fa_list_required_fields",
+            rule_name="FA list 必需字段完整",
+            procedure_code="FA_LIST",
+            sheet_hints=("FA list",),
+            sheet_kinds=("fa_list",),
+            automation=AutomationLevel.AUTO_FAIL,
+            default_severity=Severity.FAIL,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="qc-checklist FA List",
+            agent_priority=AgentPriority.P1,
+            implementation=ImplementationStatus.IMPLEMENTED,
+        ),
+        RuleSpec(
+            dict_code="FA-RC-002",
+            rule_id="unique_asset_id",
+            rule_name="资产编号唯一",
+            procedure_code="FA_LIST",
+            sheet_hints=("FA list",),
+            sheet_kinds=("fa_list",),
+            automation=AutomationLevel.AUTO_FAIL,
+            default_severity=Severity.FAIL,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="qc-checklist FA List",
+            agent_priority=AgentPriority.P1,
+            implementation=ImplementationStatus.IMPLEMENTED,
+        ),
+        RuleSpec(
+            dict_code="FA-RC-003",
+            rule_id="asset_value_consistency",
+            rule_name="金额勾稽一致",
+            procedure_code="FA_LIST",
+            sheet_hints=("FA list",),
+            sheet_kinds=("fa_list",),
+            automation=AutomationLevel.AUTO_FAIL,
+            default_severity=Severity.FAIL,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="qc-checklist FA List",
+            agent_priority=AgentPriority.P1,
+            implementation=ImplementationStatus.IMPLEMENTED,
+        ),
+        RuleSpec(
+            dict_code="FA-RC-004",
+            rule_id="asset_amount_non_negative",
+            rule_name="金额非负",
+            procedure_code="FA_LIST",
+            sheet_hints=("FA list",),
+            sheet_kinds=("fa_list",),
+            automation=AutomationLevel.AUTO_FAIL,
+            default_severity=Severity.FAIL,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="qc-checklist FA List",
+            agent_priority=AgentPriority.P1,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="FA-RC-005",
+            rule_id="useful_life_positive",
+            rule_name="使用寿命为正",
+            procedure_code="FA_LIST",
+            sheet_hints=("FA list",),
+            sheet_kinds=("fa_list",),
+            automation=AutomationLevel.AUTO_FAIL,
+            default_severity=Severity.FAIL,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="qc-checklist FA List",
+            agent_priority=AgentPriority.P1,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="FA-RC-006",
+            rule_id="salvage_rate_range",
+            rule_name="残值率区间合理",
+            procedure_code="FA_LIST",
+            sheet_hints=("FA list",),
+            sheet_kinds=("fa_list",),
+            automation=AutomationLevel.AUTO_FAIL,
+            default_severity=Severity.FAIL,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="qc-checklist FA List",
+            agent_priority=AgentPriority.P1,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="FA-RC-007",
+            rule_id="asset_start_date_reasonable",
+            rule_name="入账日期合理",
+            procedure_code="FA_LIST",
+            sheet_hints=("FA list",),
+            sheet_kinds=("fa_list",),
+            automation=AutomationLevel.AUTO_WARN,
+            default_severity=Severity.WARN,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="qc-checklist FA List",
+            agent_priority=AgentPriority.P2,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        # --- 抽样与测试（节选，完整见 docs/rule-dictionary-mapping.md）---
+        RuleSpec(
+            dict_code="SP-001",
+            rule_id="addition_population_homogeneity",
+            rule_name="交易类别区分",
+            procedure_code="K.02.1",
+            sheet_hints=("K.02.1", "K.02.2"),
+            sheet_kinds=("addition_list", "disposal_list"),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第19条",
+            manual_priority="P2-高优先级",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="SP-002",
+            rule_id="addition_rollforward_reconciliation",
+            rule_name="样本池与BKD一致性",
+            procedure_code="K.02.1",
+            sheet_hints=("K.02.1", "K.02.2"),
+            automation=AutomationLevel.AUTO_WARN,
+            default_severity=Severity.WARN,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第19条",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="SP-003",
+            rule_id="sampling_parameters",
+            rule_name="抽样工具参数设置",
+            procedure_code="K.02.1",
+            sheet_hints=("K.02.1", "K.02.2"),
+            automation=AutomationLevel.MANUAL_ONLY,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第20条",
+            manual_priority="P2-高优先级",
+            agent_priority=AgentPriority.MANUAL,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="SP-004",
+            rule_id="key_item_selection",
+            rule_name="关键项选取恰当性",
+            procedure_code="K.02.1",
+            sheet_hints=("K.02.1", "K.02.2"),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第21条",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="AT-001",
+            rule_id="addition_sample_match",
+            rule_name="测试样本与抽样输出一致",
+            procedure_code="K.02.1",
+            sheet_hints=("K.02.1",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.FAIL,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第23条",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="AT-002",
+            rule_id="addition_supporting_documentation",
+            rule_name="支持性文件充分性",
+            procedure_code="K.02.1",
+            sheet_hints=("K.02.1",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第24条",
+            manual_priority="P2-高优先级",
+            agent_priority=AgentPriority.P4,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+            notes="K1：合同/控制权转移单据编号不强制；Agent 仅宜做空白/form 检查",
+        ),
+        RuleSpec(
+            dict_code="AT-003",
+            rule_id="addition_special_nature_testing",
+            rule_name="特殊性质新增测试",
+            procedure_code="K.02.1",
+            sheet_hints=("K.02.1", "新增清单"),
+            sheet_kinds=("addition_list",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="错报",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
+            k1_ref="K1 CheckList 第25条",
+            agent_priority=AgentPriority.P4,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="AT-004",
+            rule_id="addition_exception_followup",
+            rule_name="例外情况跟进记录",
+            procedure_code="K.02.1",
+            sheet_hints=("K.02.1",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.FAIL,
+            problem_category="基础程序",
+            reviewer_role="reviewer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第26条",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="DT-001",
+            rule_id="disposal_sample_match",
+            rule_name="测试样本与抽样输出一致",
+            procedure_code="K.02.2",
+            sheet_hints=("K.02.2",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.FAIL,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第28条",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="DT-002",
+            rule_id="disposal_supporting_documentation",
+            rule_name="支持性文件充分性",
+            procedure_code="K.02.2",
+            sheet_hints=("K.02.2",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第29条",
+            manual_priority="P2-高优先级",
+            agent_priority=AgentPriority.P4,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="DT-003",
+            rule_id="disposal_special_nature_testing",
+            rule_name="特殊性质减少测试",
+            procedure_code="K.02.2",
+            sheet_hints=("K.02.2", "处置清单"),
+            sheet_kinds=("disposal_list",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="错报",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
+            k1_ref="K1 CheckList 第30条",
+            agent_priority=AgentPriority.P4,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="DT-004",
+            rule_id="disposal_exception_followup",
+            rule_name="例外情况跟进记录",
+            procedure_code="K.02.2",
+            sheet_hints=("K.02.2",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.FAIL,
+            problem_category="基础程序",
+            reviewer_role="reviewer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="K1 CheckList 第31条",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="DP-001",
+            rule_id="depreciation_policy_change",
+            rule_name="折旧政策变化识别",
+            procedure_code="K.03.3",
+            sheet_hints=("K.03.3", "折旧政策复核"),
+            sheet_kinds=("depreciation_policy",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.WARN,
+            problem_category="错报",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
+            k1_ref="K1 CheckList 第33条",
+            manual_priority="P3-后续扩展",
+            agent_priority=AgentPriority.P4,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="DP-002",
+            rule_id="depreciation_policy_list_consistency",
+            rule_name="折旧政策与清单一致性",
+            procedure_code="K.03.3",
+            sheet_hints=("K.03.3", "FA list"),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="No-非PSP程序要求",
+            k1_ref="K1 CheckList 第34条",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="DP-003",
+            rule_id="sap_precision_selection",
+            rule_name="折旧测试策略恰当性",
+            procedure_code="K.03.1",
+            sheet_hints=("K.03.1", "K.03.2"),
+            sheet_kinds=("sap", "depreciation_tod"),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="错报",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
+            k1_ref="K1 CheckList 第35条",
+            manual_priority="P2-高优先级",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="DP-004",
+            rule_id="sap_depreciation_difference",
+            rule_name="SAP折旧测试差异处理",
+            procedure_code="K.03.1",
+            sheet_hints=("K.03.1 SAP",),
+            sheet_kinds=("sap",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.NEED_REVIEW,
+            problem_category="错报",
+            reviewer_role="reviewer",
+            qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
+            k1_ref="K1 CheckList 第36条",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="DP-005",
+            rule_id="depreciation_by_item_sad",
+            rule_name="By Item折旧测试差异",
+            procedure_code="K.03.2",
+            sheet_hints=("K.03.2", "by item"),
+            sheet_kinds=("depreciation_tod",),
+            automation=AutomationLevel.AUTO_WARN,
+            default_severity=Severity.WARN,
+            problem_category="错报",
+            reviewer_role="reviewer",
+            qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
+            k1_ref="K1 CheckList 第37条",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="DP-006",
+            rule_id="depreciation_tod_sampling",
+            rule_name="TOD抽样折旧测试抽样过程",
+            procedure_code="K.03.2",
+            sheet_hints=("K.03.2 TOD",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.WARN,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
+            k1_ref="K1 CheckList 第38条",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="DP-007",
+            rule_id="depreciation_tod_difference",
+            rule_name="TOD抽样折旧测试差异",
+            procedure_code="K.03.2",
+            sheet_hints=("K.03.2 TOD",),
+            automation=AutomationLevel.REVIEW,
+            default_severity=Severity.FAIL,
+            problem_category="基础程序",
+            reviewer_role="reviewer",
+            qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
+            k1_ref="K1 CheckList 第39条",
+            agent_priority=AgentPriority.P3,
+            implementation=ImplementationStatus.PLANNED,
+        ),
+        RuleSpec(
+            dict_code="DL-001",
+            rule_id="first_delivery_standard",
+            rule_name="首次交付标准",
+            procedure_code="GLOBAL",
+            sheet_hints=("所有工作表",),
+            automation=AutomationLevel.MANUAL_ONLY,
+            default_severity=Severity.FAIL,
+            problem_category="交付风险",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-交付风险",
+            k1_ref="K1 CheckList 第45条",
+            manual_priority="P3-后续扩展",
+            agent_priority=AgentPriority.MANUAL,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+        RuleSpec(
+            dict_code="DL-002",
+            rule_id="final_delivery_standard",
+            rule_name="整体交付标准",
+            procedure_code="GLOBAL",
+            sheet_hints=("所有工作表",),
+            automation=AutomationLevel.MANUAL_ONLY,
+            default_severity=Severity.FAIL,
+            problem_category="交付风险",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-交付风险",
+            k1_ref="K1 CheckList 第48条",
+            agent_priority=AgentPriority.MANUAL,
+            implementation=ImplementationStatus.MANUAL_ONLY,
+        ),
+    ]
+
+
+_REGISTRY: dict[str, RuleSpec] = {}
+_RULE_ID_INDEX: dict[str, RuleSpec] = {}
+
+
+def _build_index() -> None:
+    if _REGISTRY:
+        return
+    for spec in _specs():
+        _REGISTRY[spec.dict_code] = spec
+        _RULE_ID_INDEX[spec.rule_id] = spec
+
+
+def all_specs() -> list[RuleSpec]:
+    _build_index()
+    return list(_REGISTRY.values())
+
+
+def get_by_dict_code(code: str) -> RuleSpec | None:
+    _build_index()
+    return _REGISTRY.get(code)
+
+
+def get_by_rule_id(rule_id: str) -> RuleSpec | None:
+    _build_index()
+    return _RULE_ID_INDEX.get(rule_id)
+
+
+def iter_by_agent_priority(priority: AgentPriority) -> Iterator[RuleSpec]:
+    for spec in all_specs():
+        if spec.agent_priority == priority:
+            yield spec
+
+
+def iter_implemented() -> Iterator[RuleSpec]:
+    for spec in all_specs():
+        if spec.implementation == ImplementationStatus.IMPLEMENTED:
+            yield spec
+
+
+def attach_rule_metadata(issues: list[QcIssue]) -> list[QcIssue]:
+    """为 issues 附加规则字典元数据（按 rule_id 查找）。"""
+    for issue in issues:
+        spec = get_by_rule_id(issue.rule_id)
+        if spec:
+            spec.enrich_issue(issue)
+    return issues

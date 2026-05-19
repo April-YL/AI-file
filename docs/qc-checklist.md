@@ -2,6 +2,8 @@
 
 本文沉淀资料库 `K1 check list.xlsx` 和标准底稿中的核心检查点。后续实现规则时，应优先从“可自动化检查”开始，无法仅靠结构化数据判断的项目进入人工复核。
 
+完整规则字典（35 条 + Agent 映射）见 [rule-dictionary-mapping.md](rule-dictionary-mapping.md) 与 `tests/fixtures/rule_dictionary_sanitized.csv`。
+
 ## 检查点分级
 
 | 等级 | 含义 | Agent 处理 |

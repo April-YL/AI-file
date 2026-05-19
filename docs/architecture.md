@@ -2,7 +2,9 @@
 
 固定资产质检 Agent 第一版采用清晰的三段式架构：数据接入、规则质检、报告输出。每个模块保持边界清楚，便于后续接入更多数据源和规则。
 
-业务流程和底稿口径以 `docs/audit-workflow.md`、`docs/qc-checklist.md` 和 `docs/workpaper-fields.md` 为准。
+业务流程和底稿口径以 `docs/audit-workflow.md`、`docs/qc-checklist.md`、`docs/workpaper-fields.md` 和 `docs/rule-dictionary-mapping.md` 为准。
+
+业务规则需求以脱敏规则字典（`tests/fixtures/rule_dictionary_sanitized.csv`）为准；代码注册表见 `src/rules/registry.py`。
 
 ## 数据流
 
@@ -53,9 +55,14 @@ MVP 阶段建议每个问题包含以下字段：
   "asset_id": "FA-TEST-001",
   "procedure_code": "FA_LIST",
   "source_sheet": "FA list",
-  "rule_id": "required_fields",
+  "rule_id": "fa_list_required_fields",
+  "dict_rule_code": "FA-RC-001",
+  "rule_name": "FA list 必需字段完整",
   "field": "asset_name",
   "severity": "FAIL",
+  "automation_level": "AUTO_FAIL",
+  "problem_category": "基础程序",
+  "reviewer_role": "preparer",
   "message": "资产名称不能为空",
   "suggestion": "补充资产名称后重新提交质检"
 }
@@ -67,22 +74,17 @@ MVP 阶段建议每个问题包含以下字段：
 - 字段级问题写入 `field`。
 - 跨字段问题可将 `field` 设为 `null` 或组合字段名，例如 `original_value/net_value`。
 
-## 首批规则来源
+## 规则实现阶段
 
-首批自动化规则来自 `docs/qc-checklist.md`：
+| 阶段 | 说明 |
+| --- | --- |
+| **M1（已完成）** | 3 条 `fa_list_*` + `run_fa_list_qc`；适用于 FA list sheet 或客户外挂台账（统一 `AssetRecord`） |
+| **M2a（Agent P1）** | `fa-qc-run` 编排；整本底稿解析；**汇总页 PSP（AE-003）**、**K.01 后推（`rollforward_*`）**；报告 + 底稿批注 |
+| **M2b+** | K.02、折旧、qc-checklist 其余 `AUTO_*` 项 |
 
-- `fa_list_required_fields`
-- `unique_asset_id`
-- `asset_amount_non_negative`
-- `asset_value_consistency`
-- `useful_life_positive`
-- `salvage_rate_range`
-- `asset_start_date_reasonable`
-- `addition_required_fields`
-- `disposal_required_fields`
-- `depreciation_required_fields`
+`docs/qc-checklist.md` 与 `docs/rule-dictionary-mapping.md` 为规则全集索引；实现顺序以 **M2a 流水线 + 汇总/K.01** 为准，而非 FA list 规则数量。
 
-涉及 Canvas、CRA、TE/SAD 外部一致性、证据充分性、拒绝执行理由恰当性等事项，先进入人工复核。
+涉及 Canvas、CRA、TE/SAD 外部一致性、证据充分性等事项，优先 `NEED_REVIEW`，不阻塞 M2a。
 
 ## 当前不做
 

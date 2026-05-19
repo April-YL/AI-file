@@ -25,10 +25,13 @@
 }
 ```
 
+## 已实现文件
+
+- `models.py`：`QcIssue`、`Severity`、`AutomationLevel`
+- `registry.py`：规则字典 → `RuleSpec` 注册表（见 `docs/rule-dictionary-mapping.md`）
+- `fa_list_required_fields.py`、`unique_asset_id.py`、`asset_value_consistency.py`
+- `runner.py`：`run_fa_list_rules`（执行后自动 `attach_rule_metadata`）
+
 ## 后续建议文件
 
-- `models.py`：定义资产记录和质检问题数据结构。
-- `required_fields.py`：必填字段校验。
-- `unique_asset_id.py`：资产编码唯一性校验。
-- `value_consistency.py`：原值、累计折旧、净值关系校验。
-- `runner.py`：统一执行规则。
+- `asset_amount_non_negative.py` 等（见 registry 中 `agent_priority=P1` 且 `planned` 项）

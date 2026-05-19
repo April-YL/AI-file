@@ -4,6 +4,7 @@ from rules.asset_value_consistency import check_asset_value_consistency
 from rules.fa_list_required_fields import check_fa_list_required_fields
 from ingest.models import AssetRecord
 from rules.models import ColumnContext, QcIssue
+from rules.registry import attach_rule_metadata
 from rules.unique_asset_id import check_unique_asset_id
 
 FA_LIST_RULE_IDS = (
@@ -21,4 +22,4 @@ def run_fa_list_rules(
     issues.extend(check_fa_list_required_fields(records, ctx))
     issues.extend(check_unique_asset_id(records, ctx))
     issues.extend(check_asset_value_consistency(records, ctx))
-    return issues
+    return attach_rule_metadata(issues)

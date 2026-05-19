@@ -51,11 +51,12 @@ git status -sb
 | --- | --- | --- |
 | M0 | 项目骨架、Cursor 规则/Skill、文档目录 | 已完成 |
 | M0.5 | 资料库/SOP/checklist 沉淀、案例诊断 | 已完成 |
-| M1 | 读取器 + 首批规则 + 报告 JSON 骨架 | 进行中 |
-| M2 | 定型质检报告 + **底稿标注回写** + 扩展 checklist 规则 | 待开发 |
-| M3+ | 一键 CLI、案例库端到端、多文件/影像等 | 待规划 |
+| M1 | ingest 诊断、规则字典映射、3 条 `fa_list_*`、JSON 报告骨架 | 已完成 |
+| **M2a（Agent P1）** | **整底稿流水线** + 报告/标注雏形；规则优先 **汇总 + K.01** | **进行中** |
+| M2b+ | K.02 新增/处置、折旧逻辑、38 checkpoint 扩展 | 待开发 |
+| M3+ | 案例库全量回归、影像等 | 待规划 |
 
-> **终态验收**以「质检报告 + 底稿标注」双交付为准；M1 仅为通向终态的技术切片。
+> **终态验收**以「质检报告 + 底稿标注」双交付为准。客户台账与 FA list 均为 ingest 输入路径，**不是**当前 P1 主线。
 
 ### 已有成品（可查阅 / 可运行）
 
@@ -68,7 +69,7 @@ git status -sb
 | 案例诊断报告 | [case-workpaper-diagnostic.md](case-workpaper-diagnostic.md) | 6 份脱敏底稿首轮结论 |
 | 读取器 | `src/ingest/` | 分类、映射、`diagnose_workbook`、FA list CSV 解析 |
 | 诊断 CLI | `src/ingest/cli.py` | 命令 `fa-qc-diagnose` |
-| 规则引擎（首批） | `src/rules/` | FA list 三条规则 + `run_fa_list_rules` |
+| 规则引擎 | `src/rules/` | 3 条 `fa_list_*`（M1）；registry 35+ 条映射；M2a 优先汇总/K.01 |
 | 报告骨架 | `src/report/` | `run_fa_list_qc`、JSON 汇总（**无底稿标注**） |
 | 单元测试 | `tests/ingest/`、`tests/rules/` | 分类、映射、规则与集成测试 |
 | 脱敏 fixture | `tests/fixtures/fa_list_*.csv` | 规则与闭环测试用 |
@@ -79,9 +80,9 @@ git status -sb
 | --- | --- |
 | **底稿标注（必交付）** | `src/report/` 待增加批注/高亮回写，输出 `*_qc_annotated.xlsx` |
 | **正式质检报告（必交付）** | 面向业务的报告导出（Excel 等）；当前主要为 JSON 结构 |
-| 全 checklist 规则 | `src/rules/` 仅覆盖 FA list 首批 3 条 |
-| Excel 多 sheet 端到端 | FA list 行级解析需与 `workbook_reader` 合并 |
-| 一键质检 CLI | `fa-qc-run`：底稿 → 报告 + 标注副本 |
+| **M2a 流水线** | `fa-qc-run`、整本 Excel 解析、汇总/K.01 规则、底稿标注 |
+| 全 checklist 规则 | 大部分仍为 planned / manual_only |
+| 客户台账路径 | 与 FA list 共用 `fa_list_*`，作 K.01 一致性核对输入 |
 | 案例库回归 | 6 份小型底稿全链路；42MB 大文件待性能优化 |
 
 ## 5. 本地环境（可选）
