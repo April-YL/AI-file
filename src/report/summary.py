@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from ingest.models import AssetRecord
+from rules.models import QcIssue, Severity
+
+_SEVERITY_RANK = {
+    Severity.FAIL: 4,
+    Severity.NEED_REVIEW: 3,
+    Severity.WARN: 2,
+    Severity.PASS: 1,
+}
+
+
+def worst_severity(severities: list[Severity]) -> Severity:
+    if not severities:
+        return Severity.PASS
+    return max(severities, key=lambda s: _SEVERITY_RANK[s])
+
+
+@dataclass
+class AssetResult:
+    asset_id: str
+    severity: Severity
+    issue_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "asset_id": self.asset_id,
+            "severity": self.severity.value,
+            "issue_count": self.issue_count,
+        }
+
+
+@dataclass
+class ReportSummary:
+    total_records: int
+    pass_count: int
+    warn_count: int
+    fail_count: int
+    need_review_count: int
+    overall_severity: Severity
+    by_rule: dict[str, int] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "total_records": self.total_records,
+            "pass_count": self.pass_count,
+            "warn_count": self.warn_count,
+            "fail_count": self.fail_count,
+            "need_review_count": self.need_review_count,
+            "overall_severity": self.overall_severity.value,
+            "by_rule": self.by_rule,
+        }
+
+
+@dataclass
+class QcReport:
+    source_file: str
+    source_sheet: str
+    procedure_code: str
+    rule_ids: list[str]
+    issues: list[QcIssue]
+    asset_results: list[AssetResult]
+    summary: ReportSummary
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_file": self.source_file,
+            "source_sheet": self.source_sheet,
+            "procedure_code": self.procedure_code,
+            "rule_ids": self.rule_ids,
+            "issues": [i.to_dict() for i in self.issues],
+            "asset_results": [a.to_dict() for a in self.asset_results],
+            "summary": self.summary.to_dict(),
+        }
+
+
+def build_report(
+    *,
+    source_file: str,
+    source_sheet: str,
+    procedure_code: str,
+    rule_ids: list[str],
+    records: list[AssetRecord],
+    issues: list[QcIssue],
+) -> QcReport:
+    issues_by_asset: dict[str, list[QcIssue]] = {}
+    sheet_level: list[QcIssue] = []
+
+    for issue in issues:
+        if issue.asset_id:
+            issues_by_asset.setdefault(issue.asset_id, []).append(issue)
+        else:
+            sheet_level.append(issue)
+
+    asset_results: list[AssetResult] = []
+    pass_count = warn_count = fail_count = need_review_count = 0
+
+    seen_assets: set[str] = set()
+    for record in records:
+        aid = record.asset_id or record.identity()
+        seen_assets.add(aid)
+        row_issues = issues_by_asset.get(aid, [])
+        sev = worst_severity([i.severity for i in row_issues])
+        asset_results.append(
+            AssetResult(
+                asset_id=aid,
+                severity=sev,
+                issue_count=len(row_issues),
+            )
+        )
+        if sev == Severity.PASS:
+            pass_count += 1
+        elif sev == Severity.WARN:
+            warn_count += 1
+        elif sev == Severity.FAIL:
+            fail_count += 1
+        else:
+            need_review_count += 1
+
+    for issue in sheet_level:
+        if issue.severity == Severity.WARN:
+            warn_count += 1
+        elif issue.severity == Severity.FAIL:
+            fail_count += 1
+        elif issue.severity == Severity.NEED_REVIEW:
+            need_review_count += 1
+
+    by_rule: dict[str, int] = {}
+    for issue in issues:
+        by_rule[issue.rule_id] = by_rule.get(issue.rule_id, 0) + 1
+
+    all_severities = [i.severity for i in issues]
+    if records and not issues:
+        overall = Severity.PASS
+    else:
+        overall = worst_severity(all_severities) if all_severities else Severity.PASS
+
+    summary = ReportSummary(
+        total_records=len(records),
+        pass_count=pass_count,
+        warn_count=warn_count,
+        fail_count=fail_count,
+        need_review_count=need_review_count,
+        overall_severity=overall,
+        by_rule=by_rule,
+    )
+
+    return QcReport(
+        source_file=source_file,
+        source_sheet=source_sheet,
+        procedure_code=procedure_code,
+        rule_ids=rule_ids,
+        issues=issues,
+        asset_results=asset_results,
+        summary=summary,
+    )

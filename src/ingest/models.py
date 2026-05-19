@@ -21,6 +21,30 @@ class SheetKind(str, Enum):
 
 
 @dataclass
+class AssetRecord:
+    """标准化 FA list 行记录（ingest 输出、rules 输入）。"""
+
+    source_row: int | None = None
+    asset_id: str | None = None
+    asset_name: str | None = None
+    asset_category: str | None = None
+    start_date: str | None = None
+    useful_life_months: str | None = None
+    salvage_rate: str | None = None
+    original_value: str | None = None
+    accumulated_depreciation: str | None = None
+    impairment_provision: str | None = None
+    net_value: str | None = None
+
+    def identity(self) -> str:
+        if self.asset_id and str(self.asset_id).strip():
+            return str(self.asset_id).strip()
+        if self.asset_name and str(self.asset_name).strip():
+            return f"name:{str(self.asset_name).strip()}"
+        return f"row:{self.source_row or '?'}"
+
+
+@dataclass
 class FieldMapping:
     standard_field: str
     source_header: str
