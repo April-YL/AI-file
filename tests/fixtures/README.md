@@ -23,6 +23,16 @@
 
 映射与 Agent 排期见 [rule-dictionary-mapping.md](../docs/rule-dictionary-mapping.md)。
 
+## FA list 样例
+
+| 文件 | 说明 |
+| --- | --- |
+| `fa_list_mixed.csv` | 混合 PASS/WARN/FAIL，规则集成测试主 fixture |
+| `fa_list_mixed.xlsx` | 同上内容的 Excel（`FA list` sheet），供 `fa-qc-run` Demo |
+| `workbook_psp_demo.xlsx` | FA list + `汇总` 页（含 PSP 不执行缺理由样例），整本流水线 Demo |
+| `fa_list_valid.csv` | 基本通过样例 |
+| `fa_list_no_asset_id.csv` | 无资产编号列，触发 NEED_REVIEW |
+
 ## 后续建议文件
 
 - `basic_assets.csv`：基础正常样例。

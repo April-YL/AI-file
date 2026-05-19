@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ingest.models import AssetRecord
 from rules.models import QcIssue, Severity
+
+if TYPE_CHECKING:
+    from llm.review import LlmEnrichment
 
 _SEVERITY_RANK = {
     Severity.FAIL: 4,
@@ -65,9 +68,10 @@ class QcReport:
     issues: list[QcIssue]
     asset_results: list[AssetResult]
     summary: ReportSummary
+    llm_enrichment: LlmEnrichment | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "source_file": self.source_file,
             "source_sheet": self.source_sheet,
             "procedure_code": self.procedure_code,
@@ -76,6 +80,9 @@ class QcReport:
             "asset_results": [a.to_dict() for a in self.asset_results],
             "summary": self.summary.to_dict(),
         }
+        if self.llm_enrichment is not None:
+            data["llm_enrichment"] = self.llm_enrichment.to_dict()
+        return data
 
 
 def build_report(

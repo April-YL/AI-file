@@ -1,30 +1,23 @@
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from ingest.models import AssetRecord
 from rules.models import ColumnContext, QcIssue, Severity
+from rules.parsing import (
+    amount_tolerance,
+    is_blank,
+    parse_amount,
+    record_is_empty_data_row,
+)
 
 RULE_ID = "asset_value_consistency"
-DEFAULT_TOLERANCE = Decimal("0.01")
-
-
-def _parse_amount(value: str | None) -> Decimal | None:
-    if value is None:
-        return None
-    text = str(value).strip().replace(",", "")
-    if not text:
-        return None
-    try:
-        return Decimal(text)
-    except InvalidOperation:
-        return None
 
 
 def check_asset_value_consistency(
     records: list[AssetRecord],
     ctx: ColumnContext,
-    tolerance: Decimal = DEFAULT_TOLERANCE,
+    tolerance: Decimal | None = None,
 ) -> list[QcIssue]:
     issues: list[QcIssue] = []
     amount_fields = ("original_value", "accumulated_depreciation", "net_value")
@@ -47,14 +40,20 @@ def check_asset_value_consistency(
         return issues
 
     for record in records:
+        if record_is_empty_data_row(record, ctx.mapped_fields):
+            continue
+
         aid = record.asset_id or record.identity()
-        original = _parse_amount(record.original_value)
-        accumulated = _parse_amount(record.accumulated_depreciation)
-        impairment = _parse_amount(record.impairment_provision)
-        net = _parse_amount(record.net_value)
+        original = parse_amount(record.original_value)
+        accumulated = parse_amount(record.accumulated_depreciation)
+        impairment = parse_amount(record.impairment_provision)
+        net = parse_amount(record.net_value)
 
         if impairment is None:
             impairment = Decimal("0")
+
+        if original is None and accumulated is None and net is None:
+            continue
 
         if original is None or accumulated is None or net is None:
             issues.append(
@@ -74,7 +73,8 @@ def check_asset_value_consistency(
 
         expected = original - accumulated - impairment
         diff = abs(expected - net)
-        if diff > tolerance:
+        tol = tolerance if tolerance is not None else amount_tolerance(original)
+        if diff > tol:
             issues.append(
                 QcIssue(
                     asset_id=aid,
@@ -83,7 +83,7 @@ def check_asset_value_consistency(
                     severity=Severity.FAIL,
                     message=(
                         f"净值与原值减累计折旧不一致："
-                        f"净值={net}，计算值={expected}，差异={diff}"
+                        f"净值={net}，计算值={expected}，差异={diff}（允差={tol}）"
                     ),
                     suggestion="核对原值、累计折旧、减值准备与净值口径",
                     procedure_code=ctx.procedure_code,

@@ -4,19 +4,25 @@ import json
 from pathlib import Path
 
 from ingest.records import FaListDataset
+from llm.config import LlmConfig, load_llm_config
+from llm.review import enrich_report_with_llm
 from report.summary import QcReport, build_report
 from rules.models import ColumnContext
 from rules.runner import FA_LIST_RULE_IDS, run_fa_list_rules
 
 
-def run_fa_list_qc(dataset: FaListDataset) -> QcReport:
+def run_fa_list_qc(
+    dataset: FaListDataset,
+    *,
+    llm: bool | None = None,
+) -> QcReport:
     ctx = ColumnContext(
         mapped_fields={m.standard_field for m in dataset.mapped_fields},
         source_sheet=dataset.source_sheet,
         procedure_code="FA_LIST",
     )
     issues = run_fa_list_rules(dataset.records, ctx)
-    return build_report(
+    report = build_report(
         source_file=dataset.source_file,
         source_sheet=dataset.source_sheet,
         procedure_code="FA_LIST",
@@ -24,6 +30,10 @@ def run_fa_list_qc(dataset: FaListDataset) -> QcReport:
         records=dataset.records,
         issues=issues,
     )
+    config = load_llm_config(cli_enabled=llm)
+    if config.enabled:
+        report = enrich_report_with_llm(report, config, summary=None)
+    return report
 
 
 def export_report_json(report: QcReport, path: str | Path, *, indent: int = 2) -> None:

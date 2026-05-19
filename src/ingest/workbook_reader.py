@@ -11,15 +11,33 @@ from ingest.models import SheetClassification, SheetKind, WorkbookDiagnostic
 from ingest.sheet_classifier import classify_sheet, score_by_name
 
 
-def _read_sheet_rows(ws, max_rows: int = 100) -> list[tuple[Any, ...]]:
-    max_row = min(ws.max_row or 0, max_rows)
-    max_col = min(ws.max_column or 0, 100)
-    if max_row == 0:
+def read_worksheet_rows(
+    ws,
+    *,
+    max_rows: int | None = 100,
+    max_col: int = 100,
+) -> list[tuple[Any, ...]]:
+    """读取工作表行（values_only）。max_rows=None 时读取至 max_row。"""
+    sheet_max_row = ws.max_row or 0
+    if sheet_max_row == 0:
         return []
-    rows = []
-    for row in ws.iter_rows(min_row=1, max_row=max_row, max_col=max_col, values_only=True):
+    limit_row = sheet_max_row if max_rows is None else min(sheet_max_row, max_rows)
+    limit_col = min(ws.max_column or 0, max_col)
+    if limit_row == 0:
+        return []
+    rows: list[tuple[Any, ...]] = []
+    for row in ws.iter_rows(
+        min_row=1,
+        max_row=limit_row,
+        max_col=limit_col,
+        values_only=True,
+    ):
         rows.append(row)
     return rows
+
+
+def _read_sheet_rows(ws, max_rows: int = 100) -> list[tuple[Any, ...]]:
+    return read_worksheet_rows(ws, max_rows=max_rows)
 
 
 def diagnose_workbook(path: str | Path, max_rows: int = 100) -> WorkbookDiagnostic:

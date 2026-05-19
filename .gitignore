@@ -12,6 +12,16 @@
 # Excel 临时/锁文件
 ~$*
 
+# 本地生成的质检报告
+*_qc_report.json
+qc_report.json
+
+# Python 构建产物
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
 # 本地资料库/案例库（体积大，可能包含脱敏但不适合直接入库的底稿）
 固定资产质检agent/资料库/
 固定资产质检agent/案例库/

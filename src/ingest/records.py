@@ -5,9 +5,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import openpyxl
+
 from ingest.field_mapping import map_headers
 from ingest.header_detection import scan_rows_for_headers
 from ingest.models import AssetRecord, FieldMapping, SheetKind
+from ingest.sheet_classifier import classify_sheet
+from ingest.workbook_reader import read_worksheet_rows
 
 _RECORD_FIELDS = (
     "asset_id",
@@ -104,3 +108,79 @@ def load_fa_list_csv(path: str | Path, *, source_sheet: str = "FA list") -> FaLi
         source_sheet=source_sheet,
     )
     return dataset
+
+
+@dataclass
+class FaListSheetCandidate:
+    sheet_name: str
+    confidence: float
+    rows: list[tuple[Any, ...]]
+
+
+def find_fa_list_sheets(
+    path: str | Path,
+    *,
+    max_rows: int | None = None,
+) -> list[FaListSheetCandidate]:
+    """扫描工作簿，返回识别为 FA list 的工作表（按 confidence 降序）。"""
+    path = Path(path)
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    candidates: list[FaListSheetCandidate] = []
+    try:
+        for ws in wb.worksheets:
+            rows = read_worksheet_rows(ws, max_rows=max_rows)
+            kind, confidence, *_ = classify_sheet(ws.title, rows)
+            if kind == SheetKind.FA_LIST:
+                candidates.append(
+                    FaListSheetCandidate(
+                        sheet_name=ws.title,
+                        confidence=confidence,
+                        rows=rows,
+                    )
+                )
+    finally:
+        wb.close()
+    candidates.sort(key=lambda c: c.confidence, reverse=True)
+    return candidates
+
+
+def load_fa_list_from_workbook(
+    path: str | Path,
+    *,
+    sheet_name: str | None = None,
+    max_rows: int | None = None,
+) -> FaListDataset:
+    """从 Excel 底稿读取 FA list 工作表并解析为 AssetRecord 列表。"""
+    path = Path(path)
+    candidates = find_fa_list_sheets(path, max_rows=max_rows)
+
+    if sheet_name:
+        match = next((c for c in candidates if c.sheet_name == sheet_name), None)
+        if match is None:
+            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+            try:
+                ws = wb[sheet_name]
+                rows = read_worksheet_rows(ws, max_rows=max_rows)
+            finally:
+                wb.close()
+            return parse_fa_list_rows(
+                rows,
+                source_file=str(path),
+                source_sheet=sheet_name,
+            )
+        chosen = match
+    elif candidates:
+        chosen = candidates[0]
+    else:
+        return FaListDataset(
+            source_file=str(path),
+            source_sheet="",
+            mapped_fields=[],
+            records=[],
+        )
+
+    return parse_fa_list_rows(
+        chosen.rows,
+        source_file=str(path),
+        source_sheet=chosen.sheet_name,
+    )

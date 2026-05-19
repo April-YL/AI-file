@@ -8,6 +8,7 @@ from ingest.constants import (
 
 from ingest.models import AssetRecord
 from rules.models import ColumnContext, QcIssue, Severity
+from rules.parsing import is_blank, record_has_identity, record_is_empty_data_row
 
 RULE_ID = "fa_list_required_fields"
 
@@ -70,56 +71,39 @@ def _sheet_level_issues(ctx: ColumnContext) -> list[QcIssue]:
     return issues
 
 
-def _row_empty(value: str | None) -> bool:
-    if value is None:
-        return True
-    return not str(value).strip()
-
-
 def _row_level_issues(
     record: AssetRecord,
     ctx: ColumnContext,
 ) -> list[QcIssue]:
     present = ctx.mapped_fields
+    if record_is_empty_data_row(record, present):
+        return []
+
     issues: list[QcIssue] = []
     aid = record.asset_id or record.identity()
 
-    if FA_LIST_REQUIRED_IDENTITY[0] in present and _row_empty(record.asset_id):
-        if FA_LIST_REQUIRED_IDENTITY[1] not in present or _row_empty(record.asset_name):
-            issues.append(
-                QcIssue(
-                    asset_id=aid,
-                    rule_id=RULE_ID,
-                    field="asset_id|asset_name",
-                    severity=Severity.FAIL,
-                    message="资产编号与资产名称均为空",
-                    suggestion="至少填写固定资产编号或资产名称",
-                    procedure_code=ctx.procedure_code,
-                    source_sheet=ctx.source_sheet,
-                    source_row=record.source_row,
-                )
+    has_id_col = FA_LIST_REQUIRED_IDENTITY[0] in present
+    has_name_col = FA_LIST_REQUIRED_IDENTITY[1] in present
+    if (has_id_col or has_name_col) and not record_has_identity(record):
+        issues.append(
+            QcIssue(
+                asset_id=aid,
+                rule_id=RULE_ID,
+                field="asset_id|asset_name",
+                severity=Severity.FAIL,
+                message="资产编号与资产名称均为空",
+                suggestion="至少填写固定资产编号或资产名称",
+                procedure_code=ctx.procedure_code,
+                source_sheet=ctx.source_sheet,
+                source_row=record.source_row,
             )
-    elif FA_LIST_REQUIRED_IDENTITY[1] in present and _row_empty(record.asset_name):
-        if FA_LIST_REQUIRED_IDENTITY[0] not in present or _row_empty(record.asset_id):
-            issues.append(
-                QcIssue(
-                    asset_id=aid,
-                    rule_id=RULE_ID,
-                    field="asset_id|asset_name",
-                    severity=Severity.FAIL,
-                    message="资产编号与资产名称均为空",
-                    suggestion="至少填写固定资产编号或资产名称",
-                    procedure_code=ctx.procedure_code,
-                    source_sheet=ctx.source_sheet,
-                    source_row=record.source_row,
-                )
-            )
+        )
 
     for field_name in _ROW_CORE:
         if field_name not in present:
             continue
         value = getattr(record, field_name, None)
-        if _row_empty(value):
+        if is_blank(value):
             issues.append(
                 QcIssue(
                     asset_id=aid,
@@ -138,7 +122,7 @@ def _row_level_issues(
         if field_name not in present:
             continue
         value = getattr(record, field_name, None)
-        if _row_empty(value):
+        if is_blank(value):
             issues.append(
                 QcIssue(
                     asset_id=aid,

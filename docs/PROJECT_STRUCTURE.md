@@ -27,6 +27,8 @@
 | `docs/progress.md` | 项目里程碑进度。记录 M0、M1、M2 等阶段目标和当前状态。 |
 | `docs/handoff/latest.md` | 最新交接文档。记录当前进展、下一步、阻塞问题和相关文件。 |
 | `docs/decisions/ADR-0001-mvp-scope.md` | 第一条架构决策记录。说明 MVP 范围和暂不做的内容。 |
+| `docs/decisions/ADR-0002-llm-agent-evolution.md` | 大模型 Agent 混合架构与分阶段演进决策。 |
+| `docs/llm-agent-roadmap.md` | M3/M4 路线图：规则 vs LLM 分工、模块与安全清单。 |
 
 ## Cursor 配置
 

@@ -28,10 +28,12 @@
 ## 已实现文件
 
 - `models.py`：`QcIssue`、`Severity`、`AutomationLevel`
-- `registry.py`：规则字典 → `RuleSpec` 注册表（见 `docs/rule-dictionary-mapping.md`）
-- `fa_list_required_fields.py`、`unique_asset_id.py`、`asset_value_consistency.py`
+- `parsing.py`：金额解析、空行跳过、相对允差
+- `registry.py`：规则字典 → `RuleSpec` 注册表
+- FA list：`fa_list_required_fields`、`unique_asset_id`、`asset_value_consistency`、`asset_amount_non_negative`、`useful_life_positive`、`salvage_rate_range`
+- 汇总页：`psp_completion`（AE-003）
 - `runner.py`：`run_fa_list_rules`（执行后自动 `attach_rule_metadata`）
 
 ## 后续建议文件
 
-- `asset_amount_non_negative.py` 等（见 registry 中 `agent_priority=P1` 且 `planned` 项）
+- `asset_start_date_reasonable.py`（FA-RC-007）、K.01 `rollforward_*` 等

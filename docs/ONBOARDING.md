@@ -107,7 +107,25 @@ fa-qc-diagnose "路径\到\底稿.xlsx" --json
 规则 + 报告最小闭环（脱敏 CSV fixture）：
 
 ```powershell
-python -c "from pathlib import Path; from ingest.records import load_fa_list_csv; from report.export_json import run_fa_list_qc; r=run_fa_list_qc(load_fa_list_csv(Path('tests/fixtures/fa_list_mixed.csv'))); print(r.summary.overall_severity.value, len(r.issues))"
+fa-qc-run tests/fixtures/fa_list_mixed.csv
+```
+
+### 大模型增强（公网 OpenAI 兼容，M3a）
+
+复制 `.env.example` 为 `.env`，填写 `FA_QC_LLM_API_KEY`（勿提交 `.env`）。
+
+```powershell
+$env:FA_QC_LLM_API_KEY = "sk-..."
+$env:FA_QC_LLM_BASE_URL = "https://api.openai.com/v1"   # 或其他兼容端点
+$env:FA_QC_LLM_MODEL = "gpt-4o-mini"
+
+fa-qc-run tests/fixtures/fa_list_no_asset_id.csv --llm
+```
+
+报告 JSON 将增加 `llm_enrichment`（`executive_summary`、`need_review_notes`）。默认不调用 API；`--no-llm` 可覆盖环境变量。
+
+```powershell
+pytest tests/ingest tests/rules tests/llm -q
 ```
 
 ## 6. 本地资料（不在 Git 中）
@@ -120,6 +138,8 @@ python -c "from pathlib import Path; from ingest.records import load_fa_list_csv
 | `固定资产质检agent/案例库/` | 脱敏行业案例 Excel |
 
 ## 7. 新 AI 会话推荐开场白
+
+在 **Claude** 中开发：先读 [CLAUDE_START.md](CLAUDE_START.md)（阅读顺序 + 可粘贴开场白）。
 
 复制到 Cursor / Claude / Codex 第一条消息：
 

@@ -8,6 +8,8 @@
 
 ## 数据流
 
+### 当前（M1 / M2a）
+
 ```text
 固定资产标准底稿/台账/样例数据
         |
@@ -20,6 +22,19 @@ src/rules/       执行质检规则，产生结构化问题
         v
 src/report/      汇总结果，输出报告或人工复核清单
 ```
+
+### 目标（M3+ 大模型 Agent）
+
+```text
+底稿/台账
+    → ingest → rules → findings
+                    ↘
+                     llm/（可选，OpenAI 兼容 API）→ 语义复核 / 复核建议
+                    ↗
+              report → JSON + 标注副本
+```
+
+编排入口仍为 **`fa-qc-run`（本地 CLI）**；不依赖 Cursor。详见 [llm-agent-roadmap.md](llm-agent-roadmap.md) 与 [decisions/ADR-0002-llm-agent-evolution.md](decisions/ADR-0002-llm-agent-evolution.md)。
 
 ## 模块职责
 
@@ -45,6 +60,13 @@ src/report/      汇总结果，输出报告或人工复核清单
 - 生成错误明细、资产级结论和统计摘要。
 - 区分自动化失败、预警和人工复核项。
 - 后续支持导出 Excel、JSON 或对接人工复核系统。
+
+### `src/llm/`（M3 规划，未实现）
+
+- 调用可配置 **LLM API**（OpenAI 兼容 `base_url`）。
+- 处理 `REVIEW` / `NEED_REVIEW` 类检查点（如 AE-003 PSP、证据充分性）。
+- 脱敏与 prompt 管理；**不**替代 `rules` 中的确定性校验。
+- 默认关闭（`FA_QC_LLM_ENABLED=false`）。
 
 ## 质检问题结构
 
@@ -80,7 +102,9 @@ MVP 阶段建议每个问题包含以下字段：
 | --- | --- |
 | **M1（已完成）** | 3 条 `fa_list_*` + `run_fa_list_qc`；适用于 FA list sheet 或客户外挂台账（统一 `AssetRecord`） |
 | **M2a（Agent P1）** | `fa-qc-run` 编排；整本底稿解析；**汇总页 PSP（AE-003）**、**K.01 后推（`rollforward_*`）**；报告 + 底稿批注 |
-| **M2b+** | K.02、折旧、qc-checklist 其余 `AUTO_*` 项 |
+| **M2b** | K.02、折旧、qc-checklist 其余 `AUTO_*` 项 |
+| **M3（大模型 Agent）** | `src/llm/` + API 配置；`--llm` 增强 NEED_REVIEW；详见 [llm-agent-roadmap.md](llm-agent-roadmap.md) |
+| **M4** | 内网 Web/API 产品化 |
 
 `docs/qc-checklist.md` 与 `docs/rule-dictionary-mapping.md` 为规则全集索引；实现顺序以 **M2a 流水线 + 汇总/K.01** 为准，而非 FA list 规则数量。
 
@@ -96,7 +120,8 @@ MVP 阶段建议每个问题包含以下字段：
 
 ## 后续演进
 
+- **大模型 Agent（已规划）**：规则 + LLM API 混合；见 ADR-0002。
 - 增加资产类别枚举和折旧年限规则。
 - 接入影像、合同、发票等非结构化材料。
 - 增加人工复核状态流转。
-- 提供 API 服务或 Web 页面。
+- 提供内网 API 服务或 Web 页面（与 Cursor 解耦）。

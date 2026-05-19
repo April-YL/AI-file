@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from llm.client import LlmClientError, chat_completion_json
+from llm.config import LlmConfig
+from llm.prompts import SYSTEM_PROMPT, build_review_user_prompt
+from ingest.summary_sheet import SummarySheetDataset
+from llm.redact import redact_issues_for_llm, redact_programs_for_llm
+from report.summary import QcReport
+from rules.models import Severity
+
+
+@dataclass
+class LlmEnrichment:
+    """大模型对报告的增强（不改变 rules 的 severity）。"""
+
+    model: str
+    executive_summary: str
+    need_review_notes: list[dict[str, Any]] = field(default_factory=list)
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "model": self.model,
+            "executive_summary": self.executive_summary,
+            "need_review_notes": self.need_review_notes,
+        }
+        if self.error:
+            data["error"] = self.error
+        return data
+
+
+def _programs_to_llm_payload(summary: SummarySheetDataset | None) -> list[dict[str, Any]]:
+    if summary is None:
+        return []
+    rows = []
+    for p in summary.programs:
+        rows.append(
+            {
+                "procedure_name": p.procedure_name,
+                "sheet_ref": p.sheet_ref,
+                "execution_status": p.execution_status,
+                "waiver_reason": p.waiver_reason,
+                "notes": p.notes,
+                "is_psp": p.is_psp,
+                "source_row": p.source_row,
+            }
+        )
+    return redact_programs_for_llm(rows)
+
+
+def enrich_report_with_llm(
+    report: QcReport,
+    config: LlmConfig,
+    *,
+    summary: SummarySheetDataset | None = None,
+) -> QcReport:
+    """在报告上附加 LLM 复核摘要；失败时写入 error，不中断规则报告。"""
+    if not config.enabled:
+        return report
+
+    issues_payload = redact_issues_for_llm([i.to_dict() for i in report.issues])
+    user_prompt = build_review_user_prompt(
+        source_file=report.source_file,
+        procedure_code=report.procedure_code,
+        issues=issues_payload,
+        summary_programs=_programs_to_llm_payload(summary),
+    )
+
+    try:
+        result = chat_completion_json(
+            config,
+            system=SYSTEM_PROMPT,
+            user=user_prompt,
+        )
+        enrichment = LlmEnrichment(
+            model=config.model,
+            executive_summary=str(result.get("executive_summary", "")).strip(),
+            need_review_notes=_normalize_notes(result.get("need_review_notes", [])),
+        )
+    except LlmClientError as e:
+        enrichment = LlmEnrichment(
+            model=config.model,
+            executive_summary="",
+            need_review_notes=[],
+            error=str(e),
+        )
+
+    return _attach_enrichment(report, enrichment)
+
+
+def _normalize_notes(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    notes: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        notes.append(
+            {
+                "rule_id": item.get("rule_id"),
+                "dict_rule_code": item.get("dict_rule_code"),
+                "llm_note": item.get("llm_note", ""),
+                "suggested_action": item.get("suggested_action", ""),
+            }
+        )
+    return notes
+
+
+def _attach_enrichment(report: QcReport, enrichment: LlmEnrichment) -> QcReport:
+    report.llm_enrichment = enrichment
+    return report
+
+
+def count_need_review(report: QcReport) -> int:
+    return sum(1 for i in report.issues if i.severity == Severity.NEED_REVIEW)

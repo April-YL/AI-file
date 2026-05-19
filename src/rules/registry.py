@@ -120,8 +120,8 @@ def _specs() -> list[RuleSpec]:
             k1_ref="K1 CheckList 第7条",
             manual_priority="P1-最高优先级",
             agent_priority=AgentPriority.P1,
-            implementation=ImplementationStatus.PLANNED,
-            notes="M2a 优先；可 AUTO_FAIL：不执行且无拒绝理由",
+            implementation=ImplementationStatus.IMPLEMENTED,
+            notes="M3b：不执行且无拒绝理由 → FAIL；执行状态空 → NEED_REVIEW",
         ),
         RuleSpec(
             dict_code="AE-004",
@@ -367,7 +367,7 @@ def _specs() -> list[RuleSpec]:
             qc_checkpoint="Y-审计基础程序",
             k1_ref="qc-checklist FA List",
             agent_priority=AgentPriority.P1,
-            implementation=ImplementationStatus.PLANNED,
+            implementation=ImplementationStatus.IMPLEMENTED,
         ),
         RuleSpec(
             dict_code="FA-RC-005",
@@ -383,7 +383,7 @@ def _specs() -> list[RuleSpec]:
             qc_checkpoint="Y-审计基础程序",
             k1_ref="qc-checklist FA List",
             agent_priority=AgentPriority.P1,
-            implementation=ImplementationStatus.PLANNED,
+            implementation=ImplementationStatus.IMPLEMENTED,
         ),
         RuleSpec(
             dict_code="FA-RC-006",
@@ -399,7 +399,7 @@ def _specs() -> list[RuleSpec]:
             qc_checkpoint="Y-审计基础程序",
             k1_ref="qc-checklist FA List",
             agent_priority=AgentPriority.P1,
-            implementation=ImplementationStatus.PLANNED,
+            implementation=ImplementationStatus.IMPLEMENTED,
         ),
         RuleSpec(
             dict_code="FA-RC-007",

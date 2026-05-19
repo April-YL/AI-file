@@ -1,0 +1,40 @@
+from pathlib import Path
+
+import openpyxl
+import pytest
+
+from report.pipeline import run_workbook_qc_from_path
+from rules.models import Severity
+
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+
+
+@pytest.fixture
+def workbook_demo(tmp_path: Path) -> Path:
+    path = tmp_path / "workbook_demo.xlsx"
+    wb = openpyxl.Workbook()
+    ws_sum = wb.active
+    ws_sum.title = "汇总"
+    ws_sum.append(["程序", "工作表", "是否执行", "不执行原因"])
+    ws_sum.append(["K.01 后推", "K.01", "是", ""])
+    ws_sum.append(["PSP-折旧测试", "K.03.1", "否", ""])
+    ws_sum.append(["PSP-新增", "K.02.1", "否", "已提供合同约定的购置清单"])
+    ws_fa = wb.create_sheet("FA list")
+    with (FIXTURES / "fa_list_mixed.csv").open(encoding="utf-8-sig") as f:
+        for line in f:
+            ws_fa.append(line.strip().split(","))
+    wb.save(path)
+    wb.close()
+    return path
+
+
+def test_workbook_qc_includes_psp_and_fa_list(workbook_demo: Path):
+    report = run_workbook_qc_from_path(str(workbook_demo), llm=False)
+    rule_ids = {i.rule_id for i in report.issues}
+    assert "psp_completion" in rule_ids or any(
+        i.dict_rule_code == "AE-003" for i in report.issues
+    )
+    assert "fa_list_required_fields" in rule_ids
+    assert report.procedure_code == "WORKBOOK"
+    severities = {i.severity for i in report.issues}
+    assert Severity.FAIL in severities

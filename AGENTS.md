@@ -19,6 +19,16 @@
 | 质检报告 | 结构化 findings 清单 + 汇总（程序维度、资产/行维度） | 进行中（JSON 结构已通，正式报告与 Excel 待完善） |
 | 底稿标注 | 将 findings 回写至底稿对应位置（批注、高亮或专用标注 sheet） | **未开始** |
 
+## 演进方向：大模型 Agent（M3+）
+
+终态 Agent **不是** Cursor 内置助手，而是**本地/内网独立程序** + **可配置 LLM API**（OpenAI 兼容端点，支持私有化）。
+
+- **M2（当前～近期）**：规则引擎 + `fa-qc-run` + 报告/标注（确定性为主）。
+- **M3**：新增 `src/llm/`，对 `REVIEW` / `NEED_REVIEW` 项做语义复核与建议；默认 `FA_QC_LLM_ENABLED=false`。
+- **原则**：金额勾稽、唯一性等仍由 `rules` 判定；LLM 不单独推翻 FAIL。
+
+路线图：[docs/llm-agent-roadmap.md](docs/llm-agent-roadmap.md) · 决策：[docs/decisions/ADR-0002-llm-agent-evolution.md](docs/decisions/ADR-0002-llm-agent-evolution.md)
+
 ## 当前阶段：M1 已完成切片 → **M2a 进行中**
 
 **M1（已完成的技术切片）**：ingest 诊断与字段映射、规则字典注册表、3 条资产台账类规则（`fa_list_*`，适用于标准底稿 FA list **或** 客户外挂台账）、JSON 报告骨架。
@@ -45,6 +55,7 @@
 - `src/ingest/`：读取底稿与辅助文件、字段映射、基础清洗；不写具体质检规则。
 - `src/rules/`：按 checklist 执行规则，产出统一 finding 结构；不处理文件导入导出。
 - `src/report/`：汇总 findings、生成质检报告；**负责底稿标注回写**（批注/高亮/标注副本），不实现业务规则本身。
+- `src/llm/`（M3 规划）：LLM API 客户端与语义复核；不替代 `rules` 确定性逻辑。
 - `tests/fixtures/`：仅存放脱敏样例数据。
 - `tests/rules/`：存放规则单元测试。
 
