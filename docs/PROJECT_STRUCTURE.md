@@ -13,6 +13,7 @@
 
 | 路径 | 作用 |
 | --- | --- |
+| `docs/ONBOARDING.md` | 新人上手指南。5–10 分钟了解进度、成品、命令与 AI 会话开场白。 |
 | `docs/PROJECT_STRUCTURE.md` | 当前文件。说明每个文件存储什么内容以及用途。 |
 | `docs/domain-glossary.md` | 固定资产领域词典。记录字段定义、取值约束和常见业务口径。 |
 | `docs/architecture.md` | 架构说明。记录模块边界、数据流、规则结果结构和后续演进方向。 |
@@ -58,4 +59,4 @@
 
 - 聊天中形成的长期结论，必须沉淀到 `docs/`、`.cursor/rules/` 或 `.cursor/skills/`。
 - 模块职责变化时，优先更新 `docs/architecture.md` 和本文。
-- 每次开始新任务前，先阅读 `AGENTS.md`、`docs/handoff/latest.md` 和本文。
+- 新人加入先阅读 `docs/ONBOARDING.md`，再读 `AGENTS.md`、`docs/handoff/latest.md` 和本文。

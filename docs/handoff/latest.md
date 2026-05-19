@@ -1,6 +1,6 @@
 # 最新交接
 
-> 每次收工前更新本文。新会话或新成员接手时，先读 `AGENTS.md`、`docs/PROJECT_STRUCTURE.md` 和本文。
+> 每次收工前更新本文。新成员接手先读 `docs/ONBOARDING.md`，再读 `AGENTS.md` 和本文。
 
 ## 当前状态
 
@@ -8,7 +8,8 @@
 - 已创建固定资产质检 Agent 项目骨架。
 - 已读取资料库中的固定资产标准底稿、SOP、checklist 和程序执行资料。
 - 已对案例库中 6 份较小脱敏底稿完成读取诊断，暂跳过 42MB 的 A 公司底稿。
-- 当前处于业务资料沉淀与规则设计阶段，尚未开始实现业务代码。
+- 已实现 `src/ingest/` 轻量读取器（sheet 分类、字段映射、底稿诊断 CLI）。
+- 当前处于 M1：在读取器基础上实现首批质检规则与报告结构。
 
 ## 已完成
 
@@ -26,18 +27,22 @@
 - MVP 范围 ADR：`docs/decisions/ADR-0001-mvp-scope.md`
 - Cursor 规则、Skill 和子 Agent 初始配置
 - 源码与测试目录说明
+- 上手文档：`docs/ONBOARDING.md`
+- Sheet 识别策略：`docs/sheet-classification.md`
+- `pyproject.toml` 与 `src/ingest/`（含 `fa-qc-diagnose`）
+- `tests/ingest/` 分类与映射单测
 
 ## 进行中
 
-- 基于案例库诊断结果，字段同义词和 sheet 识别模式已初步确认。
-- 下一步应实现轻量读取器，将诊断逻辑落到 `src/ingest/`。
+- 用案例库回归验证 ingest 在更多 sheet 变体下的识别准确率。
+- 准备 `tests/fixtures/` 脱敏样例，供规则层使用。
 
 ## 下一步
 
-1. 初始化 Python 工程配置，例如 `pyproject.toml`、依赖和测试命令。
-2. 在 `src/ingest/` 实现标准底稿 sheet 分类、表头定位和字段映射。
-3. 先支持 6 份小型案例底稿，再回头处理 42MB 的 A 公司底稿。
-4. 实现第一批自动化规则：字段完整性、资产编号唯一、金额非负、金额关系、使用寿命、残值率。
+1. 实现第一批规则：`fa_list_required_fields`、`unique_asset_id`、`asset_value_consistency` 等。
+2. 在 `src/report/` 输出统一质检问题结构（JSON 优先）。
+3. 用 6 份小型案例底稿跑通「读取 → 规则 → 报告」最小闭环。
+4. 优化大文件（A 公司约 42MB）读取性能后再纳入诊断。
 
 ## 已知问题
 
@@ -48,6 +53,7 @@
 
 ## 相关文件
 
+- `docs/ONBOARDING.md`
 - `AGENTS.md`
 - `docs/PROJECT_STRUCTURE.md`
 - `docs/domain-glossary.md`

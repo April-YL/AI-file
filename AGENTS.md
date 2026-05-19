@@ -51,6 +51,6 @@
 
 ```text
 继续固定资产质检 Agent 开发。
-请先阅读 AGENTS.md、docs/handoff/latest.md 和 docs/PROJECT_STRUCTURE.md。
+请先阅读 docs/ONBOARDING.md、AGENTS.md、docs/handoff/latest.md 和 docs/PROJECT_STRUCTURE.md。
 当前任务是：<写清楚具体任务、分支、涉及文件和验收标准>。
 ```
