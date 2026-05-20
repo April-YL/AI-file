@@ -46,3 +46,8 @@ python -m ingest.cli --max-mb 50 --json
 - 输出 `column_bindings`（`procedure` / `sheet_ref` / `execution_status` / `waiver_reason` / `notes`）、`last_data_row`、`notes`。
 - 表头匹配时 **忽略空列**，避免 `"" in "程序"` 误命中。
 - `load_assets.py`：对外统一加载 FA list / 清单。
+
+## K.00 Lead Sheet（锚点分块）
+
+- `lead_sheet_blocks.py`：按**标签锚点**识别 6 块（基础信息、CRA/TT、预期分析、两期引导主表、波动说明、调整汇总），**不依赖固定行号**。
+- `lead_sheet.py`：输出 `LeadSheetDataset`（`blocks`、`basic_info_fields`、`cra_rows`、`expectations`、`movement_rows` 等）；`load_lead_from_workbook` 默认读前 200 行。

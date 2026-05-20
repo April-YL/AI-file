@@ -102,8 +102,28 @@ def _lead_summary(lead: LeadSheetDataset | None) -> dict[str, Any] | None:
         return None
     return {
         "source_sheet": lead.source_sheet,
+        "block_count": len(lead.blocks),
+        "blocks": [
+            {
+                "kind": b.kind.value,
+                "anchor_row": b.anchor_row,
+                "start_row": b.start_row,
+                "end_row": b.end_row,
+                "confidence": b.confidence,
+            }
+            for b in lead.blocks
+        ],
+        "basic_info_fields": len(lead.basic_info_fields),
         "materiality_items": len(lead.materiality),
         "cra_rows": len(lead.cra_rows),
+        "expectation_rows": len(lead.expectations),
+        "movement_rows": len(lead.movement_rows),
+        "adjustment_rows": len(lead.adjustment_rows),
+        "layout_variant": lead.layout_variant,
+        "volatility_amount_source": (
+            lead.volatility.amount_source if lead.volatility else None
+        ),
+        "notes": lead.notes,
     }
 
 
@@ -160,7 +180,12 @@ def load_workbook_ingest(
         summary = None
 
     lead = load_lead_from_workbook(path, sheet_name=lead_sheet)
-    if not lead.source_sheet and not lead.materiality and not lead.cra_rows:
+    if (
+        not lead.source_sheet
+        and not lead.blocks
+        and not lead.materiality
+        and not lead.cra_rows
+    ):
         lead = None
 
     reconciliations = run_workbook_reconciliations(

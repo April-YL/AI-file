@@ -33,7 +33,12 @@ def load_workbook_context(
         fa = None
     if not summary.programs and not summary.header_row:
         summary = None
-    if not lead.source_sheet and not lead.materiality and not lead.cra_rows:
+    if (
+        not lead.source_sheet
+        and not lead.blocks
+        and not lead.materiality
+        and not lead.cra_rows
+    ):
         lead = None
     return WorkbookQcContext(
         source_file=str(path),

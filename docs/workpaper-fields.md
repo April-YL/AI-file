@@ -34,7 +34,7 @@
 | 工作表 | 说明 | 对应模块 |
 | --- | --- | --- |
 | `汇总` | 程序目录、是否执行、不执行原因和注意事项 | 标准 K1 SWP 版式：B/C 程序编号与说明、F「程序页」、G「执行」、H「不执行的原因」、I「注意事项」；ingest 另兼容四列简版（`summary_sheet.py` `layout=classic`）。**AE-003**：G 列为已执行时，`run_workbook_qc` 将「程序页/工作表」与工作簿内 sheet 名称做规范化与模糊匹配（`psp_sheet_matcher`）；confidence 不足为 `NEED_REVIEW`，无匹配为 `FAIL`；可选对目标表前若干行非空单元格过少发 `WARN`（空表/未完成提示）。 |
-| `K.00 Lead Sheet` | 基础信息、两期变动、预期分析 | `src/ingest/`、`src/rules/` |
+| `K.00 Lead Sheet` | 基础信息、两期变动、预期分析 | 标准版含 **认定/CRA/TT** 表 + ARP + 两期引导主表；**简版**（案例 A）可省略 CRA 区，**波动幅度金额直接 link TE** 而非 TT。ingest：`lead_sheet_blocks.py` + `lead_sheet.py`（`layout_variant=no_cra_te_volatility`） |
 | `K.01 Agree SL to GL` | 后推明细表与总账/明细账/清单核对 | `src/rules/` |
 | `FA list` | 固定资产明细清单 | `src/ingest/`、`src/rules/` |
 | `K.02.1 新增测试` | 新增详细测试 | `src/report/`、人工复核 |
@@ -44,6 +44,13 @@
 | `K.03.1 SAP` | 折旧实质性分析程序 | `src/report/`、人工复核 |
 | `K.03.2 折旧测试TOD` | 折旧详细测试 | `src/rules/` |
 | `K.03.3 折旧政策复核` | 折旧政策合理性复核 | 人工复核 |
+
+### K.00 Lead Sheet 版式变体
+
+| 版式 | 特征 | Agent 识别 |
+| --- | --- | --- |
+| **标准** | 基础信息 → 认定/CRA/TT → ARP → 两期引导主表；波动幅度金额通常来自 **TT**（或 TE 百分比推导） | `layout_variant=standard`（默认） |
+| **简版（无 CRA 区）** | 省略认定/CRA/TT 表（tickmark 图例替代）；**波动幅度 (CNY) 直接取上方 TE** | `layout_variant=no_cra_te_volatility`；`volatility.amount_source=te`（案例库 A 已人工确认） |
 
 ## 通用标准字段
 

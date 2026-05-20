@@ -22,11 +22,12 @@
 - 已阅读资料库中的固定资产标准底稿、SOP、checklist 和程序执行资料。
 - 已沉淀 `docs/audit-workflow.md`、`docs/qc-checklist.md`、`docs/workpaper-fields.md`。
 - 已实现 `src/ingest/`、`src/rules/`（含 registry）、`src/report/`（JSON）及对应测试。
+- **M2a 已落地**：`fa-qc-run` / UI、汇总页 ingest + AE-003、`summary_sheet_section`。
+- **K.00 Lead ingest（2026-05-20）**：锚点 6 块、`LeadSheetDataset` 扩展、案例库版式回归；规则规划见 `docs/planning/lead-qc-rules.md`。
 
 ## 下一阶段目标（M2a）
 
-1. 实现 `fa-qc-run`：整本固定资产底稿 → findings → 报告 + 标注副本。
-2. ingest 支持汇总 sheet、K.01 后推表（及可选客户台账）结构化提取。
-3. 优先实现 AE-003（PSP）、K.01 后推类规则；`fa_list_*` 用于台账↔后推一致性时复用。
-4. 定型程序维度质检报告；底稿单元格批注 v0。
-5. 案例库小型底稿端到端回归。
+1. **Lead 规则**：`lead_required_fields`、`lead_sheet_section`、预期/异常波动（AE-004）等（见规划文档）。
+2. K.01 后推规则：`rollforward_exists` / `rollforward_columns_complete`；Lead↔K.01 勾稽。
+3. 定型程序维度质检报告；底稿单元格批注 v0。
+4. 案例库小型底稿端到端回归。

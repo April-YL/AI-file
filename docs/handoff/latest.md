@@ -39,6 +39,10 @@
 - ingest：K.01 后推（`RollforwardColumnBinding` / 期初·期末合计、表头期初·期末加权识别）
 - ingest：**汇总页单主表**（表头行打分遍历、列角色 `column_bindings`、`last_data_row`、连续空行结束主表、空列表头误匹配修复）
 - rules：**AE-003** `psp_completion` + `psp_sheet_matcher`：汇总页标「已执行」时与工作簿 sheet 名称规范化/模糊勾稽；读盘路径与表名由 `run_workbook_qc` 传入；弱匹配 `NEED_REVIEW`、无匹配 `FAIL`、目标表过空 `WARN`
+- ingest：**K.00 Lead 锚点分块**（`lead_sheet_blocks.py` + 扩展 `LeadSheetDataset`：6 块基础信息/CRA/预期+波动门槛/引导主表/波动说明/调整汇总；默认读 200 行）
+- ingest：**Lead 版式变体** `no_cra_te_volatility`（案例 A：无 CRA 区，波动幅度金额 = TE）；`-`/`N/A` 空串不再误匹配锚点（修复 cra/mov/exp 全 0）
+- ingest：**案例库 K1 SWP 回归**（B/C/D/E/F/G：cra≈5、mov≈4、exp≈7；A：cra=0、layout=no_cra_te_volatility）
+- 文档：**Lead 质检规则规划** `docs/planning/lead-qc-rules.md`（模块—规则映射、实施顺序、待确认项；**明日实现**）
 - report：**`summary_sheet_section`**（JSON / 人工核对 HTML / `fa-qc-run` 终端 / Streamlit「汇总页 (PSP)」页签）：汇总页 ingest 元数据、程序表、列绑定、AE-003 整体结论与 findings
 - **本地 UI**：`fa-qc-ui`（`src/report/ui_app.py`）、`scripts/start-ui.bat`、根目录 `启动质检界面.bat`；多文件上传、问题清单/人工核对/HTML 预览与下载
 - **Lead + 人工核对**：`lead_sheet.py`、`manual_review.py`、`export_review_html.py`；AE-001/002 规则与 `workbook_with_lead.xlsx` fixture
@@ -50,13 +54,13 @@
   - `field_mapping_policy.py`：按 sheet 禁止误映射；使用寿命/date 误匹配防护
   - 回归：`tests/fixtures/field_mapping_case_headers.json` + `test_field_mapping.py`
   - **待做**：对案例库 6 份底稿重跑 `fa-qc-diagnose` 更新 `case-workpaper-diagnostic.md`
-- **整底稿流水线**：K.01 后推 ingest 已具备（`RollforwardColumnBinding` / 期初·期末合计、`sheet_classifier` 期初/期末表头加权）；**下一步 ingest**：K.00 Lead 内分块（基础信息 / CRA / 两期 lead 表等）
+- **Lead 质检规则（明日）**：见 `docs/planning/lead-qc-rules.md`；首批 `lead_required_fields` + `lead_sheet_section` + AE-002 简版跳过
 
 ## 下一步（M2a 验收导向）
 
-1. **ingest（优先）**：按 `docs/case-workpaper-diagnostic.md` 完善字段映射；新增/更新 `tests/ingest/test_field_mapping.py` 与脱敏 fixture
-2. ingest：K.01 后推表数据对象
-3. rules：`rollforward_exists` / `rollforward_columns_complete`
+1. **rules（Lead，优先）**：`lead_required_fields` → `lead_sheet_section` → AE-002 简版逻辑 → `lead_expectation_analysis` / AE-004 确定性子集（见规划文档）
+2. rules：`rollforward_exists` / `rollforward_columns_complete`（K.01）
+3. **ingest**：按 `docs/case-workpaper-diagnostic.md` 完善字段映射；案例库 `fa-qc-diagnose` 更新
 4. report：Excel 报告 + openpyxl 批注回写
 5. 案例库 1～2 份小型底稿端到端回归（`fa-qc-run` / UI）
 
@@ -110,12 +114,13 @@
 - `tests/rules/`、`tests/ingest/`、`tests/fixtures/`
 - `docs/ONBOARDING.md`
 - `docs/llm-agent-roadmap.md` — 三层 LLM 分工与 M3c 任务（C1–C9）
+- `docs/planning/lead-qc-rules.md` — K.00 分模块质检点与 M2 实现顺序（2026-05-20）
 
 ## Demo 命令（本次收工验证）
 
 ```powershell
 pip install -e ".[dev,ui]"
-pytest tests/ingest tests/rules -q
+pytest tests/ingest/test_lead_sheet.py tests/ingest/test_summary_sheet.py tests/rules -q
 
 # 图形界面（选文件 → 一键质检）
 fa-qc-ui
