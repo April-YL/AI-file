@@ -18,6 +18,9 @@
 qc_report.json
 .tmp_qc_out
 
+# 本地临时检查输出（非 fixture）
+_summary_check*.txt
+
 # Python 虚拟环境
 .venv/
 venv/
