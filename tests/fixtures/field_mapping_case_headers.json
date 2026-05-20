@@ -1,0 +1,22 @@
+{
+  "description": "案例库诊断中出现的表头样例（脱敏），用于回归字段映射",
+  "cases": [
+    {"header": "卡片编码", "sheet_kind": "fa_list", "expect": "asset_id"},
+    {"header": "入账日期", "sheet_kind": "fa_list", "expect": "start_date"},
+    {"header": "预计残值", "sheet_kind": "fa_list", "expect": "salvage_rate"},
+    {"header": "使用年限(月)", "sheet_kind": "fa_list", "expect": "useful_life_months"},
+    {"header": "未税成本", "sheet_kind": "fa_list", "expect": "original_value"},
+    {"header": "账面价值", "sheet_kind": "fa_list", "expect": "net_value"},
+    {"header": "残值率(%)", "sheet_kind": "fa_list", "expect": "salvage_rate"},
+    {"header": "旧系统编码（序列号）", "sheet_kind": "fa_list", "expect": "asset_id"},
+    {"header": "规格型号（资产主号文本）", "sheet_kind": "fa_list", "expect": "asset_name"},
+    {"header": "计划使用年限", "sheet_kind": "fa_list", "expect": "useful_life_months"},
+    {"header": "增加方式", "sheet_kind": "fa_list", "expect": null},
+    {"header": "资本开始折旧的日期 （即使用寿命开始时间）", "sheet_kind": "depreciation_tod", "expect": null},
+    {"header": "业务日期", "sheet_kind": "disposal_list", "expect": "disposal_date"},
+    {"header": "单据编号", "sheet_kind": "disposal_list", "expect": null},
+    {"header": "处置情况", "sheet_kind": "disposal_list", "expect": "disposal_method"},
+    {"header": "变动方式", "sheet_kind": "addition_list", "expect": "addition_method"},
+    {"header": "变动方式", "sheet_kind": "disposal_list", "expect": "disposal_method"}
+  ]
+}

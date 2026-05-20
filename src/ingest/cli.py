@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+from ingest.workbook_ingest import load_workbook_ingest
 from ingest.workbook_reader import diagnose_workbook
 
 
@@ -37,6 +38,11 @@ def main() -> None:
         action="store_true",
         help="输出 JSON",
     )
+    parser.add_argument(
+        "--ingest",
+        action="store_true",
+        help="输出整本底稿结构 + 加载摘要 + 勾稽关系（JSON 时合并 ingest 段）",
+    )
     args = parser.parse_args()
 
     files: list[Path] = []
@@ -63,7 +69,11 @@ def main() -> None:
             results.append({"path": str(f), "skipped": True, "reason": f"size>{args.max_mb}MB"})
             continue
         diag = diagnose_workbook(f)
-        results.append(diag.to_dict())
+        item = diag.to_dict()
+        if args.ingest:
+            ctx = load_workbook_ingest(f)
+            item["ingest"] = ctx.to_dict()
+        results.append(item)
 
     if args.json:
         print(json.dumps(results, ensure_ascii=False, indent=2))

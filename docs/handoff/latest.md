@@ -42,7 +42,11 @@
 
 ## 进行中（M2a = Agent P1）
 
-- **字段映射与读取准确性**（接入主线）：扩展 `FIELD_SYNONYMS`、案例库表头回归、`fa-qc-diagnose` 对比 `missing_required` / `unmapped_headers`
+- **字段映射与读取准确性**（接入主线，已起步）：
+  - 扩展 `FIELD_SYNONYMS`（案例库表头：卡片编码、入账日期、未税成本、处置情况等）
+  - `field_mapping_policy.py`：按 sheet 禁止误映射；使用寿命/date 误匹配防护
+  - 回归：`tests/fixtures/field_mapping_case_headers.json` + `test_field_mapping.py`
+  - **待做**：对案例库 6 份底稿重跑 `fa-qc-diagnose` 更新 `case-workpaper-diagnostic.md`
 - **整底稿流水线**：K.01 后推 ingest 待做
 - **必交付雏形**：底稿批注 v0（`*_qc_annotated.xlsx`）、Excel 质检报告
 
@@ -58,11 +62,30 @@
 
 ## 后续方向（M3 大模型 Agent）
 
-- 已采纳 ADR-0002；**M3a 骨架已落地**：`src/llm/`、`fa-qc-run --llm`、`llm_enrichment` 报告段。
-- 公网 OpenAI 兼容：配置见 `.env.example`（`FA_QC_LLM_BASE_URL` / `API_KEY` / `MODEL`）。
-- **M3b 已做（规则层）**：汇总页解析、`psp_completion`（AE-003）、Excel 整本 `run_workbook_qc`；`--llm` 时附带汇总程序表上下文。
-- **人工核对摘录**：Lead 表摘录 PM/TE/SAD、CRA/TT → 报告 `manual_review_sections`（AE-001/002）+ 配套 HTML 页。
-- **M3c 待做**：LLM tool calling、K.01 `rollforward_*`。
+- 已采纳 ADR-0002；详见 **[docs/llm-agent-roadmap.md](llm-agent-roadmap.md)**（含**三层 LLM 分工**：映射 / 规则语义 / checklist）。
+- **M3a 已落地**：`src/llm/config.py`、`client.py`、`redact.py`；`fa-qc-run --llm` → 报告 `llm_enrichment`（**层 4 叙述**）。
+- **M3b 已做（规则层）**：汇总页、`psp_completion`（AE-003）、整本 `run_workbook_qc`；`--llm` 时附带汇总程序表上下文。
+- **人工核对摘录**：Lead → `manual_review_sections`（AE-001/002）+ HTML 页。
+
+### M3c 任务列表（三层 LLM + 编排）
+
+> 完整说明与验收标准见 [llm-agent-roadmap.md § M3c](llm-agent-roadmap.md#m3c--三层-llm--agent-编排)。**severity 仍仅由 rules 判定**；LLM 不将 FAIL 改为 PASS。
+
+| ID | 状态 | 任务 | 负责人 | 依赖 |
+| --- | --- | --- | --- | --- |
+| C1 | 待做 | `src/llm/map_headers.py` + 映射 prompt + mock 单测 | 待定 | M3a |
+| C2 | 待做 | ingest 挂钩：`--llm-map`；超阈值 `unmapped_headers` 触发；finding `ingest_header_mapping_review` | 待定 | C1、M2a 字段映射 |
+| C3 | 待做 | `src/llm/rule_review.py`：AE-003 等 `NEED_REVIEW` 附加 `llm_rationale`；`--llm-rules` | 待定 | M3a |
+| C4 | 待做 | `src/llm/checklist_assess.py`：对照 registry/checklist 输出 `checklist_assessments[]`；`--llm-checklist` | 待定 | 业务口径 |
+| C5 | 待做 | `src/llm/orchestrate.py`：串联 C1–C4 + `review.py`；`--llm-all` | 待定 | C1–C4 |
+| C6 | 待做 | 报告 schema 扩展（`checklist_assessments`、issue 上 `llm_*` 可选字段）；JSON/HTML 展示 | 待定 | C4 |
+| C7 | 待做 | Tool use：`get_sheet_summary`、`list_findings`、`get_checklist_item`；调用审计日志 | 待定 | C5 |
+| C8 | 待做 | UI 细粒度 LLM 勾选（映射 / 规则 / checklist / 报告） | 待定 | C5 |
+| C9 | 待做 | `tests/llm/` 扩充；与 ADR-0002、roadmap 对齐 | 待定 | C1–C8 |
+
+**建议实施顺序**：C1→C2（配合字段映射）→ C3 → C4→C6 → C5/C7/C8。
+
+**与 M2a 并行**：K.01 `rollforward_*`、Excel 报告、底稿批注仍为规则/报告主线，**不阻塞** M3c 文档与 C1 原型。
 
 ## 已知问题
 
@@ -84,6 +107,7 @@
 - `src/ingest/`、`src/rules/`、`src/report/`
 - `tests/rules/`、`tests/ingest/`、`tests/fixtures/`
 - `docs/ONBOARDING.md`
+- `docs/llm-agent-roadmap.md` — 三层 LLM 分工与 M3c 任务（C1–C9）
 
 ## Demo 命令（本次收工验证）
 

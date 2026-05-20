@@ -102,10 +102,29 @@ def classify_sheet(
     if name_kind == SheetKind.SKIP:
         return name_kind, 1.0, name_score, 0.0, name_hint, None
 
-    content_kind, content_score, header_row, _ = score_by_content(
+    content_kind, content_score, header_row, content_cells = score_by_content(
         rows,
         sheet_kind_hint=name_kind if name_score >= 0.7 else None,
     )
+
+    # 名称明确为 FA list 时，不因仅含金额列而被判为后推表（K.01 不会命名为 FA list）
+    if (
+        name_kind == SheetKind.FA_LIST
+        and name_score >= 0.85
+        and content_kind == SheetKind.ROLLFORWARD
+    ):
+        fa_sig = CONTENT_SIGNATURES[SheetKind.FA_LIST]
+        fa_hit = count_signature_fields(content_cells, fa_sig, SheetKind.FA_LIST)
+        if fa_hit >= 3:
+            confidence = min(0.96, 0.35 * name_score + 0.45 * (fa_hit / max(len(fa_sig), 1)) + 0.2)
+            return (
+                SheetKind.FA_LIST,
+                confidence,
+                name_score,
+                content_score,
+                name_hint,
+                header_row,
+            )
 
     # 内容优先；名称一致时加分
     if content_score >= 0.45 and content_kind != SheetKind.UNCLASSIFIED:

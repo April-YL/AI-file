@@ -117,6 +117,8 @@
 
 **禁止自动映射**（需结合 sheet 类型）：`单据编号`→`asset_id`（处置清单多为业务单号）；长段程序说明文字→任意字段。
 
+**实现说明**（代码）：同义词见 `src/ingest/constants.py`；按 sheet 限制见 `src/ingest/field_mapping_policy.py`；案例库表头回归见 `tests/fixtures/field_mapping_case_headers.json`。
+
 ### 字段对照表（标准底稿参考）
 
 | 原始字段 | 标准字段名 | 类型 | 标准底稿中通常必需 | 质检方向 |

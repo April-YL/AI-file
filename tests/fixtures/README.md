@@ -23,6 +23,12 @@
 
 映射与 Agent 排期见 [rule-dictionary-mapping.md](../docs/rule-dictionary-mapping.md)。
 
+## 字段映射回归
+
+| 文件 | 说明 |
+| --- | --- |
+| `field_mapping_case_headers.json` | 案例库诊断表头样例（header + sheet_kind + 期望标准字段） |
+
 ## FA list 样例
 
 | 文件 | 说明 |
