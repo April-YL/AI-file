@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ingest.models import AssetRecord
+from report.manual_review import ManualReviewSection
 from rules.models import QcIssue, Severity
 
 if TYPE_CHECKING:
@@ -69,6 +70,7 @@ class QcReport:
     asset_results: list[AssetResult]
     summary: ReportSummary
     llm_enrichment: LlmEnrichment | None = None
+    manual_review_sections: list[ManualReviewSection] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -82,6 +84,11 @@ class QcReport:
         }
         if self.llm_enrichment is not None:
             data["llm_enrichment"] = self.llm_enrichment.to_dict()
+        if self.manual_review_sections:
+            data["manual_review_sections"] = [
+                s.to_dict() if hasattr(s, "to_dict") else s
+                for s in self.manual_review_sections
+            ]
         return data
 
 

@@ -85,8 +85,8 @@ def _specs() -> list[RuleSpec]:
             k1_ref="K1 CheckList 第5条",
             manual_priority="P1-最高优先级",
             agent_priority=AgentPriority.P4,
-            implementation=ImplementationStatus.MANUAL_ONLY,
-            notes="依赖 Canvas/A3；Agent 仅可做 TE/SAD 缺失等形式检查",
+            implementation=ImplementationStatus.IMPLEMENTED,
+            notes="摘录 PM/TE/SAD 至报告 manual_review_sections；Canvas 人工比对",
         ),
         RuleSpec(
             dict_code="AE-002",
@@ -103,7 +103,8 @@ def _specs() -> list[RuleSpec]:
             k1_ref="K1 CheckList 第6条",
             manual_priority="P2-高优先级",
             agent_priority=AgentPriority.P4,
-            implementation=ImplementationStatus.MANUAL_ONLY,
+            implementation=ImplementationStatus.IMPLEMENTED,
+            notes="摘录认定 CRA/TT 至报告；人工与 Canvas 核对",
         ),
         RuleSpec(
             dict_code="AE-003",

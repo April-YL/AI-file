@@ -40,6 +40,8 @@ def test_iter_implemented_includes_fa_and_psp_rules():
         "useful_life_positive",
         "salvage_rate_range",
         "psp_completion",
+        "materiality_consistency",
+        "risk_threshold_consistency",
     }
 
 

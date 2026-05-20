@@ -104,7 +104,35 @@ fa-qc-diagnose "路径\到\底稿.xlsx" --json
 
 默认跳过大于 20MB 的文件；JSON 输出便于脚本处理。
 
-规则 + 报告最小闭环（脱敏 CSV fixture）：
+### 图形界面（推荐业务同事使用）
+
+**推荐**（项目内虚拟环境；**不要用** `.\scripts\start-ui.ps1`，易被 PowerShell 策略拦截）：
+
+```cmd
+cd /d "d:\AI file"
+scripts\start-ui.bat
+```
+
+或双击项目根目录 **`启动质检界面.bat`**，或 `scripts\start-ui.bat`。
+
+若必须用 PowerShell 脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "d:\AI file\scripts\start-ui.ps1"
+```
+
+首次会自动创建 `.venv` 并安装依赖。浏览器打开 http://localhost:8501 → 选底稿 →「开始质检」。
+
+若坚持用全局 Python：
+
+```powershell
+pip install -e ".[ui]"
+fa-qc-ui
+```
+
+安装若报 `WinError 32`：先关闭所有 `fa-qc-ui`/Streamlit 窗口和终端，再重试；或改用上面的 `start-ui.ps1`。
+
+规则 + 报告最小闭环（命令行）：
 
 ```powershell
 fa-qc-run tests/fixtures/fa_list_mixed.csv

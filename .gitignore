@@ -14,7 +14,13 @@
 
 # 本地生成的质检报告
 *_qc_report.json
+*_qc_review.html
 qc_report.json
+.tmp_qc_out
+
+# Python 虚拟环境
+.venv/
+venv/
 
 # Python 构建产物
 __pycache__/

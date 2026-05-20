@@ -13,6 +13,7 @@ from ingest.records import (
 )
 from llm.config import LlmConfigError, load_llm_config
 from report.export_json import export_report_json
+from report.export_review_html import export_review_html
 from report.pipeline import run_input_qc
 
 
@@ -27,6 +28,15 @@ def load_input(path: Path, *, sheet_name: str | None = None) -> FaListDataset:
 
 def default_output_path(input_path: Path) -> Path:
     return input_path.with_name(f"{input_path.stem}_qc_report.json")
+
+
+def review_html_path_for(json_path: Path) -> Path:
+    stem = json_path.stem
+    if stem.endswith("_qc_report"):
+        stem = stem[: -len("_qc_report")] + "_qc_review"
+    else:
+        stem = stem + "_qc_review"
+    return json_path.with_name(stem + ".html")
 
 
 def print_summary(report, output_path: Path) -> None:
@@ -51,7 +61,10 @@ def print_summary(report, output_path: Path) -> None:
             print(f"LLM: error — {le.error}")
         elif le.executive_summary:
             print(f"LLM summary: {le.executive_summary[:200]}{'...' if len(le.executive_summary) > 200 else ''}")
-    print(f"Report: {output_path}")
+    if getattr(report, "manual_review_sections", None):
+        n = len(report.manual_review_sections)
+        print(f"Manual review sections: {n} (AE-001 PM/TE/SAD, AE-002 CRA/TT)")
+    print(f"Report JSON: {output_path}")
 
 
 def main() -> None:
@@ -79,6 +92,16 @@ def main() -> None:
         "--summary-sheet",
         default=None,
         help="指定汇总工作表名称（仅 Excel，默认自动识别）",
+    )
+    parser.add_argument(
+        "--lead-sheet",
+        default=None,
+        help="指定 K.00 Lead 工作表名称（仅 Excel，默认自动识别）",
+    )
+    parser.add_argument(
+        "--no-html",
+        action="store_true",
+        help="不生成人工核对 HTML 报告",
     )
     llm_group = parser.add_mutually_exclusive_group()
     llm_group.add_argument(
@@ -126,6 +149,7 @@ def main() -> None:
                 str(input_path),
                 fa_sheet=args.sheet,
                 summary_sheet=args.summary_sheet,
+                lead_sheet=args.lead_sheet,
                 llm=llm_flag,
             )
         else:
@@ -138,6 +162,10 @@ def main() -> None:
         sys.exit(4)
     output_path = (args.output or default_output_path(input_path)).resolve()
     export_report_json(report, output_path)
+    if not args.no_html:
+        html_path = review_html_path_for(output_path).resolve()
+        export_review_html(report, html_path)
+        print(f"Review HTML: {html_path}")
     print_summary(report, output_path)
 
     if report.summary.overall_severity.value == "FAIL":
