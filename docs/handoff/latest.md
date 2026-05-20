@@ -36,7 +36,10 @@
 - `src/report/`：`run_fa_list_qc`、JSON 报告结构
 - 脱敏 fixture：`tests/fixtures/fa_list_*.csv`、`tests/fixtures/fa_list_mixed.xlsx`
 - **M2a Demo**：`fa-qc-run`（`report/cli.py`）、`load_fa_list_from_workbook`、`read_worksheet_rows`
-- `tests/ingest/test_records_workbook.py` — Excel FA list 读取与 CSV 一致性
+- ingest：K.01 后推（`RollforwardColumnBinding` / 期初·期末合计、表头期初·期末加权识别）
+- ingest：**汇总页单主表**（表头行打分遍历、列角色 `column_bindings`、`last_data_row`、连续空行结束主表、空列表头误匹配修复）
+- rules：**AE-003** `psp_completion` + `psp_sheet_matcher`：汇总页标「已执行」时与工作簿 sheet 名称规范化/模糊勾稽；读盘路径与表名由 `run_workbook_qc` 传入；弱匹配 `NEED_REVIEW`、无匹配 `FAIL`、目标表过空 `WARN`
+- report：**`summary_sheet_section`**（JSON / 人工核对 HTML / `fa-qc-run` 终端 / Streamlit「汇总页 (PSP)」页签）：汇总页 ingest 元数据、程序表、列绑定、AE-003 整体结论与 findings
 - **本地 UI**：`fa-qc-ui`（`src/report/ui_app.py`）、`scripts/start-ui.bat`、根目录 `启动质检界面.bat`；多文件上传、问题清单/人工核对/HTML 预览与下载
 - **Lead + 人工核对**：`lead_sheet.py`、`manual_review.py`、`export_review_html.py`；AE-001/002 规则与 `workbook_with_lead.xlsx` fixture
 
@@ -47,8 +50,7 @@
   - `field_mapping_policy.py`：按 sheet 禁止误映射；使用寿命/date 误匹配防护
   - 回归：`tests/fixtures/field_mapping_case_headers.json` + `test_field_mapping.py`
   - **待做**：对案例库 6 份底稿重跑 `fa-qc-diagnose` 更新 `case-workpaper-diagnostic.md`
-- **整底稿流水线**：K.01 后推 ingest 待做
-- **必交付雏形**：底稿批注 v0（`*_qc_annotated.xlsx`）、Excel 质检报告
+- **整底稿流水线**：K.01 后推 ingest 已具备（`RollforwardColumnBinding` / 期初·期末合计、`sheet_classifier` 期初/期末表头加权）；**下一步 ingest**：K.00 Lead 内分块（基础信息 / CRA / 两期 lead 表等）
 
 ## 下一步（M2a 验收导向）
 
@@ -64,7 +66,7 @@
 
 - 已采纳 ADR-0002；详见 **[docs/llm-agent-roadmap.md](llm-agent-roadmap.md)**（含**三层 LLM 分工**：映射 / 规则语义 / checklist）。
 - **M3a 已落地**：`src/llm/config.py`、`client.py`、`redact.py`；`fa-qc-run --llm` → 报告 `llm_enrichment`（**层 4 叙述**）。
-- **M3b 已做（规则层）**：汇总页、`psp_completion`（AE-003）、整本 `run_workbook_qc`；`--llm` 时附带汇总程序表上下文。
+- **M3b 已做（规则层）**：汇总页、`psp_completion`（AE-003，含 sheet 名称勾稽与空表 WARN）、整本 `run_workbook_qc`；`--llm` 时附带汇总程序表上下文。
 - **人工核对摘录**：Lead → `manual_review_sections`（AE-001/002）+ HTML 页。
 
 ### M3c 任务列表（三层 LLM + 编排）

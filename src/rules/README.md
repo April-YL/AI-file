@@ -31,7 +31,7 @@
 - `parsing.py`：金额解析、空行跳过、相对允差
 - `registry.py`：规则字典 → `RuleSpec` 注册表
 - FA list：`fa_list_required_fields`、`unique_asset_id`、`asset_value_consistency`、`asset_amount_non_negative`、`useful_life_positive`、`salvage_rate_range`
-- 汇总页：`psp_completion`（AE-003）
+- 汇总页：`psp_completion`（AE-003）；`psp_sheet_matcher`（程序页引用与工作表标题规范化、模糊匹配、内部 sheet 过滤；供「已执行」与工作表勾稽）
 - `runner.py`：`run_fa_list_rules`（执行后自动 `attach_rule_metadata`）
 
 ## 后续建议文件

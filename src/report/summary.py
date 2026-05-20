@@ -62,6 +62,8 @@ class ReportSummary:
 
 @dataclass
 class QcReport:
+    """固定资产质检报告。``summary_sheet_section`` 为整本底稿中汇总页解析 + AE-003 勾稽摘要。"""
+
     source_file: str
     source_sheet: str
     procedure_code: str
@@ -71,6 +73,7 @@ class QcReport:
     summary: ReportSummary
     llm_enrichment: LlmEnrichment | None = None
     manual_review_sections: list[ManualReviewSection] = field(default_factory=list)
+    summary_sheet_section: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -82,6 +85,8 @@ class QcReport:
             "asset_results": [a.to_dict() for a in self.asset_results],
             "summary": self.summary.to_dict(),
         }
+        if self.summary_sheet_section is not None:
+            data["summary_sheet_section"] = self.summary_sheet_section
         if self.llm_enrichment is not None:
             data["llm_enrichment"] = self.llm_enrichment.to_dict()
         if self.manual_review_sections:
@@ -100,6 +105,7 @@ def build_report(
     rule_ids: list[str],
     records: list[AssetRecord],
     issues: list[QcIssue],
+    summary_sheet_section: dict[str, Any] | None = None,
 ) -> QcReport:
     issues_by_asset: dict[str, list[QcIssue]] = {}
     sheet_level: list[QcIssue] = []
@@ -171,4 +177,5 @@ def build_report(
         issues=issues,
         asset_results=asset_results,
         summary=summary,
+        summary_sheet_section=summary_sheet_section,
     )

@@ -24,7 +24,8 @@
 | `field_mapping.py` | 表头→标准字段；FA list 语义必需列检查 |
 | `header_detection.py` | 多行表头扫描 |
 | `sheet_classifier.py` | **名称 + 内容** 综合识别 sheet 类型 |
-| `workbook_reader.py` | 读取整本底稿并输出诊断 |
+| `rollforward_sheet.py` | K.01 后推：`RollforwardSheetDataset`、期初/期末列绑定、合计行提取 |
+| `workbook_reader.py` | 读取整本底稿并输出诊断；`list_workbook_sheet_titles`（read_only，仅表名列表，供汇总页与工作表勾稽） |
 | `cli.py` | 命令行诊断入口 |
 
 ## 使用方式
@@ -39,7 +40,9 @@ python -m ingest.cli --max-mb 50 --json
 
 识别策略见 `docs/sheet-classification.md`。
 
-## 后续
+## 汇总页（单主表）
 
-- `normalize.py`：将映射后的行转为标准资产记录对象。
+- `summary_sheet.py`：在前 50 行内打分选取 **程序 +（是否执行 或 不执行原因）** 表头行，可跳过表题；主表在遇到 **连续 3 个空行** 后结束，避免吞掉表下说明。
+- 输出 `column_bindings`（`procedure` / `sheet_ref` / `execution_status` / `waiver_reason` / `notes`）、`last_data_row`、`notes`。
+- 表头匹配时 **忽略空列**，避免 `"" in "程序"` 误命中。
 - `load_assets.py`：对外统一加载 FA list / 清单。

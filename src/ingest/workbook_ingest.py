@@ -65,6 +65,16 @@ def _rollforward_summary(rf: RollforwardSheetDataset | None) -> dict[str, Any] |
         "source_sheet": rf.source_sheet,
         "header_row": rf.header_row,
         "total_row": rf.total_row,
+        "amount_column_bindings": [
+            {
+                "measure": b.measure,
+                "period_role": b.period_role.value,
+                "column_index": b.column_index,
+                "source_header": b.source_header,
+            }
+            for b in rf.amount_column_bindings
+        ],
+        "opening_totals": {k: str(v) for k, v in rf.opening_totals.items() if v is not None},
         "ending_totals": {k: str(v) for k, v in rf.ending_totals.items() if v is not None},
         "notes": rf.notes,
     }
@@ -75,7 +85,15 @@ def _summary_summary(summary: SummarySheetDataset | None) -> dict[str, Any] | No
         return None
     return {
         "source_sheet": summary.source_sheet,
+        "header_row": summary.header_row,
+        "layout": summary.layout,
+        "last_data_row": summary.last_data_row,
         "program_count": len(summary.programs),
+        "column_bindings": [
+            {"role": b.role, "source_header": b.source_header, "column_index": b.column_index}
+            for b in summary.column_bindings
+        ],
+        "notes": summary.notes,
     }
 
 

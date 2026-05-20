@@ -55,6 +55,14 @@ def print_summary(report, output_path: Path) -> None:
             by_code[code] = by_code.get(code, 0) + 1
         codes = ", ".join(f"{k}={v}" for k, v in sorted(by_code.items()))
         print(f"By dict_rule_code: {codes}")
+    if getattr(report, "summary_sheet_section", None):
+        sec = report.summary_sheet_section
+        psp = (sec or {}).get("psp_completion") or {}
+        print(
+            f"汇总页: sheet={sec.get('source_sheet')!r} 程序行={sec.get('program_count')} "
+            f"layout={sec.get('layout')!r} | AE-003: {psp.get('overall_severity')} "
+            f"({psp.get('issue_count', 0)} findings)"
+        )
     if getattr(report, "llm_enrichment", None):
         le = report.llm_enrichment
         if le.error:

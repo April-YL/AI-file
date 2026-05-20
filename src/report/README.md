@@ -15,8 +15,12 @@
 - 业务规则判断。
 - 真实业务数据。
 
+## 已实现（节选）
+
+- `summary.py`：`QcReport`、`build_report`（含 `summary_sheet_section` 可选块）
+- `summary_sheet_report.py`：汇总页解析摘要 + AE-003 结论，写入 JSON/HTML/UI
+- `export_json.py`、`export_review_html.py`、`cli.py`、`pipeline.py`、`ui_app.py`
+
 ## 后续建议文件
 
-- `summary.py`：汇总资产级结果。
-- `export_json.py`：导出 JSON 报告。
-- `export_excel.py`：导出 Excel 报告。
+- `export_excel.py`：导出 Excel 报告

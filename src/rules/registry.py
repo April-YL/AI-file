@@ -122,7 +122,7 @@ def _specs() -> list[RuleSpec]:
             manual_priority="P1-最高优先级",
             agent_priority=AgentPriority.P1,
             implementation=ImplementationStatus.IMPLEMENTED,
-            notes="M3b：不执行且无拒绝理由 → FAIL；执行状态空 → NEED_REVIEW",
+            notes="不执行且无理由→FAIL；执行为是时勾稽工作簿 sheet（名称规范化/模糊匹配/表头非空密度 WARN）",
         ),
         RuleSpec(
             dict_code="AE-004",

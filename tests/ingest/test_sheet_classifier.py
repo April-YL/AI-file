@@ -30,3 +30,26 @@ def test_fa_list_name_wins_over_rollforward_content():
     kind, confidence, *_ = classify_sheet("FA list", rows)
     assert kind == SheetKind.FA_LIST
     assert confidence >= 0.85
+
+
+def test_name_rollforward_houtui():
+    k, s, _ = score_by_name("固定资产后推表")
+    assert k == SheetKind.ROLLFORWARD
+    assert s >= 0.85
+
+
+def test_period_headers_favor_rollforward_on_unnamed_sheet():
+    rows = [
+        (
+            "固定资产编号",
+            "固定资产名称",
+            "期初原值",
+            "期末原值",
+            "期初累计折旧",
+            "期末累计折旧",
+            "期末净值",
+        ),
+        ("FA-TEST-001", "设备A", 100, 120, 30, 36, 84),
+    ]
+    kind, *_ = classify_sheet("Sheet1", rows)
+    assert kind == SheetKind.ROLLFORWARD

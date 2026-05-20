@@ -33,7 +33,7 @@
 
 | 工作表 | 说明 | 对应模块 |
 | --- | --- | --- |
-| `汇总` | 程序目录、是否执行、不执行原因和注意事项 | `src/report/`、人工复核 |
+| `汇总` | 程序目录、是否执行、不执行原因和注意事项 | 标准 K1 SWP 版式：B/C 程序编号与说明、F「程序页」、G「执行」、H「不执行的原因」、I「注意事项」；ingest 另兼容四列简版（`summary_sheet.py` `layout=classic`）。**AE-003**：G 列为已执行时，`run_workbook_qc` 将「程序页/工作表」与工作簿内 sheet 名称做规范化与模糊匹配（`psp_sheet_matcher`）；confidence 不足为 `NEED_REVIEW`，无匹配为 `FAIL`；可选对目标表前若干行非空单元格过少发 `WARN`（空表/未完成提示）。 |
 | `K.00 Lead Sheet` | 基础信息、两期变动、预期分析 | `src/ingest/`、`src/rules/` |
 | `K.01 Agree SL to GL` | 后推明细表与总账/明细账/清单核对 | `src/rules/` |
 | `FA list` | 固定资产明细清单 | `src/ingest/`、`src/rules/` |

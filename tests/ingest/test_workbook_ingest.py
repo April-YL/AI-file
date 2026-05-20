@@ -95,6 +95,23 @@ def test_rollforward_total_row():
     rf = parse_rollforward_rows(rows, source_sheet="K.01")
     assert rf.total_row == 3
     assert rf.ending_totals.get("net_value") == Decimal("900")
+    assert len(rf.amount_column_bindings) == 3
+    assert all(b.period_role.value == "unknown" for b in rf.amount_column_bindings)
+
+
+def test_rollforward_opening_ending_bindings_and_totals():
+    rows = [
+        ("类别", "期初原值", "期末原值", "期初累计折旧", "期末累计折旧", "期末净值"),
+        ("机器", 1000, 1200, 200, 240, 960),
+        ("合计", 1000, 1200, 200, 240, 960),
+    ]
+    rf = parse_rollforward_rows(rows, source_sheet="K.01")
+    roles = {b.period_role.value for b in rf.amount_column_bindings}
+    assert "opening" in roles
+    assert "ending" in roles
+    assert rf.opening_totals.get("original_value") == Decimal("1000")
+    assert rf.ending_totals.get("original_value") == Decimal("1200")
+    assert rf.ending_totals.get("net_value") == Decimal("960")
 
 
 def test_reconciliation_match(reconciliation_workbook: Path):

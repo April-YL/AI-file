@@ -43,6 +43,15 @@
 | `PSP` | 规定的实质性程序 | 检查是否执行或是否有充分拒绝执行理由 |
 | `OSP` | 其他实质性程序 | 盘点、权属、减值等可作为后续扩展 |
 
+## K.01 后推表 ingest 对象
+
+| 类型 / 字段 | 含义 |
+| --- | --- |
+| `RollforwardPeriodRole` | `opening`（期初）、`movement`（本期增加/减少/折旧/调整等）、`ending`（期末）、`unknown`（未标注时期） |
+| `RollforwardColumnBinding` | `measure`（`original_value` / `accumulated_depreciation` / `impairment_provision` / `net_value`）+ `period_role` + 源列 |
+| `RollforwardSheetDataset.amount_column_bindings` | 后推表全部推断出的金额列绑定，供「列完整性」类规则使用 |
+| `opening_totals` / `ending_totals` | 优先自「合计」行按期初/期末列抽取；无明确期初/期末列时回退到单列映射或明细加总 |
+
 ## 质检结果
 
 | 结论 | 含义 | 处理方式 |

@@ -177,7 +177,7 @@ for name, bundle in results.items():
             use_container_width=True,
         )
 
-        tab1, tab2, tab3 = st.tabs(["问题清单", "人工核对摘录", "HTML 预览"])
+        tab1, tab2, tab3, tab4 = st.tabs(["问题清单", "汇总页 (PSP)", "人工核对摘录", "HTML 预览"])
 
         with tab1:
             issues = data.get("issues", [])
@@ -200,6 +200,42 @@ for name, bundle in results.items():
                 st.success("未发现 issues。")
 
         with tab2:
+            sec = data.get("summary_sheet_section")
+            if not sec:
+                st.warning("本文件未写入汇总页块（未识别汇总表或当前为 CSV-only 流程）。")
+            else:
+                psp = sec.get("psp_completion") or {}
+                st.markdown(
+                    f"**工作表** `{sec.get('source_sheet')}` · **版式** `{sec.get('layout')}` · **程序行** {sec.get('program_count')}"
+                )
+                st.metric(
+                    "AE-003 结论",
+                    psp.get("overall_severity", "—"),
+                    help="psp_completion 规则；无 finding 时为 PASS",
+                )
+                st.caption(f"AE-003 finding 数：{psp.get('issue_count', 0)}")
+                if sec.get("ingest_notes"):
+                    with st.expander("ingest 说明"):
+                        for n in sec["ingest_notes"]:
+                            st.text(n)
+                binds = sec.get("column_bindings") or []
+                if binds:
+                    st.subheader("列绑定")
+                    st.dataframe(binds, use_container_width=True, hide_index=True)
+                progs = sec.get("programs") or []
+                if progs:
+                    st.subheader("程序表（解析结果）")
+                    st.dataframe(progs, use_container_width=True, hide_index=True)
+                if sec.get("programs_truncated"):
+                    st.caption(
+                        f"仅展示前 {sec.get('programs_in_report')} 行（共 {sec.get('program_count')} 行）。"
+                    )
+                psp_issues = psp.get("issues") or []
+                if psp_issues:
+                    st.subheader("AE-003 findings")
+                    st.dataframe(psp_issues, use_container_width=True, hide_index=True)
+
+        with tab3:
             sections = data.get("manual_review_sections", [])
             if not sections:
                 st.warning("本文件无人工核对摘录（CSV 或缺少 Lead 表）。")
@@ -212,7 +248,7 @@ for name, bundle in results.items():
                 for note in sec.get("notes") or []:
                     st.warning(note)
 
-        with tab3:
+        with tab4:
             st.components.v1.html(
                 bundle["html_bytes"].decode("utf-8"),
                 height=600,

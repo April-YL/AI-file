@@ -5,6 +5,15 @@ from enum import Enum
 from typing import Any
 
 
+class RollforwardPeriodRole(str, Enum):
+    """K.01 后推表列在时间维度上的语义（用于列完整性规则）。"""
+
+    OPENING = "opening"
+    MOVEMENT = "movement"
+    ENDING = "ending"
+    UNKNOWN = "unknown"
+
+
 class SheetKind(str, Enum):
     FA_LIST = "fa_list"
     ADDITION_LIST = "addition_list"
@@ -49,6 +58,16 @@ class FieldMapping:
     standard_field: str
     source_header: str
     column_index: int
+
+
+@dataclass
+class RollforwardColumnBinding:
+    """后推表金额列：标准金额口径 + 期初/变动/期末语义 + 源列。"""
+
+    measure: str
+    period_role: RollforwardPeriodRole
+    column_index: int
+    source_header: str
 
 
 @dataclass

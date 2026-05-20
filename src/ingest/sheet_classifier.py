@@ -42,12 +42,33 @@ def score_by_name(sheet_name: str) -> tuple[SheetKind, float, str | None]:
         return SheetKind.FA_LIST, 0.85, "name_fa_list_variant"
     if "k.00" in n or "lead sheet" in n:
         return SheetKind.LEAD, 0.88, "name_lead"
-    if "k.01" in n or ("agree" in n and "gl" in n):
+    if "k.01" in n or ("agree" in n and "gl" in n) or "后推" in raw:
         return SheetKind.ROLLFORWARD, 0.85, "name_rollforward"
     if "汇总" in raw:
         return SheetKind.SUMMARY, 0.8, "name_summary"
 
     return SheetKind.UNCLASSIFIED, 0.0, None
+
+
+def _rollforward_period_bonus(header_cells: list) -> float:
+    """表头含期初/期末/本期变动等时抬高 K.01 与「仅有金额列的 FA list」的区分度。"""
+    if not header_cells:
+        return 0.0
+    opening = any("期初" in str(t) for _, t in header_cells)
+    ending = any("期末" in str(t) or "年末" in str(t) for _, t in header_cells)
+    movement_tokens = (
+        "本期增加",
+        "本期减少",
+        "购置",
+        "处置",
+        "报废",
+        "计提折旧",
+        "本期折旧",
+        "审计调整",
+        "账表调整",
+    )
+    movement = any(any(m in str(t) for m in movement_tokens) for _, t in header_cells)
+    return 0.15 * (int(opening) + int(ending) + int(movement))
 
 
 def score_by_content(
@@ -72,7 +93,11 @@ def score_by_content(
         if not cells:
             continue
         hit = count_signature_fields(cells, sig, sheet_kind=kind)
-        score = hit / max(len(sig), 1)
+        base_score = hit / max(len(sig), 1)
+        tie_score = base_score
+        if kind == SheetKind.ROLLFORWARD:
+            tie_score = min(1.35, base_score + _rollforward_period_bonus(cells))
+        score = tie_score
         if score > best_score:
             best_score = score
             best_kind = kind
@@ -87,7 +112,7 @@ def score_by_content(
             best_kind = SheetKind.DEPRECIATION_TOD
             best_score = max(best_score, 0.85)
 
-    return best_kind, best_score, best_row, best_cells
+    return best_kind, min(1.0, best_score), best_row, best_cells
 
 
 def classify_sheet(

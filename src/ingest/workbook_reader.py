@@ -36,6 +36,18 @@ def read_worksheet_rows(
     return rows
 
 
+def list_workbook_sheet_titles(path: str | Path) -> list[str]:
+    """仅读取工作簿的工作表名称列表（read_only，用于汇总页与 sheet 勾稽）。"""
+    path = Path(path)
+    if path.suffix.lower() not in (".xlsx", ".xlsm", ".xlsb"):
+        return []
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        return [ws.title for ws in wb.worksheets]
+    finally:
+        wb.close()
+
+
 def _read_sheet_rows(ws, max_rows: int = 100) -> list[tuple[Any, ...]]:
     return read_worksheet_rows(ws, max_rows=max_rows)
 

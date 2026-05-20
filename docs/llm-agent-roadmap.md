@@ -170,6 +170,7 @@ UI 侧（规划）：与 CLI 对齐，勾选「映射增强 / 规则语义 / Che
 | --- | --- | --- |
 | 汇总页解析 | ingest `summary_sheet.py` | ✅ |
 | PSP 执行/拒绝理由（规则） | AE-003 `psp_completion` | ✅ FAIL/WARN/NEED_REVIEW |
+| PSP「已执行」↔ 底稿 sheet 勾稽 | AE-003 `psp_sheet_matcher` + `list_workbook_sheet_titles` | ✅ 名称变体/模糊匹配；表前若干行非空过少 → WARN |
 | Excel 整本流水线 | `report/pipeline.py` | ✅ |
 | LLM 汇总上下文 | `llm/review.py` + prompts | ✅ `--llm` 时附带程序表 |
 | LLM 专属 PSP 语义判定 | AE-003 | 待加强（**M3c 层 2**） |

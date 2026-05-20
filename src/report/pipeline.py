@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from ingest.workbook_context import WorkbookQcContext, load_workbook_context
+from ingest.workbook_reader import list_workbook_sheet_titles
 from llm.config import load_llm_config
 from llm.review import enrich_report_with_llm
 from report.manual_review import build_manual_review_sections
 from report.summary import QcReport, build_report
+from report.summary_sheet_report import build_summary_sheet_section
 from rules.materiality_consistency import check_materiality_consistency
 from rules.models import ColumnContext
 from rules.psp_completion import check_psp_completion
@@ -42,10 +46,29 @@ def run_workbook_qc(
         source_sheet = ctx.fa_list.source_sheet
 
     if ctx.summary:
-        issues.extend(attach_rule_metadata(check_psp_completion(ctx.summary)))
+        sheet_titles: list[str] | None = None
+        wb_for_psp: str | None = None
+        if Path(ctx.source_file).suffix.lower() in (".xlsx", ".xlsm", ".xlsb"):
+            wb_for_psp = ctx.source_file
+            try:
+                sheet_titles = list_workbook_sheet_titles(ctx.source_file)
+            except Exception:
+                sheet_titles = None
+                wb_for_psp = None
+        psp_issues = attach_rule_metadata(
+            check_psp_completion(
+                ctx.summary,
+                workbook_sheet_titles=sheet_titles,
+                workbook_path=wb_for_psp,
+            )
+        )
+        issues.extend(psp_issues)
+        summary_sheet_section = build_summary_sheet_section(ctx.summary, psp_issues)
         rule_ids.append("psp_completion")
         if not source_sheet:
             source_sheet = ctx.summary.source_sheet
+    else:
+        summary_sheet_section = None
 
     if ctx.lead:
         issues.extend(attach_rule_metadata(check_materiality_consistency(ctx.lead)))
@@ -64,6 +87,7 @@ def run_workbook_qc(
         rule_ids=list(dict.fromkeys(rule_ids)),
         records=records,
         issues=issues,
+        summary_sheet_section=summary_sheet_section,
     )
     report.manual_review_sections = build_manual_review_sections(ctx.lead)
 

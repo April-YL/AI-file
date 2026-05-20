@@ -33,7 +33,7 @@
 | `depreciation_tod` | K.03.2、折旧测试、by item | 出现 `current_depreciation` + 使用寿命/残值率 + 原值；by item 表头更完整 |
 | `depreciation_tod_sample` | K.03.2 折旧测试TOD（无 by item） | 偏样本测试：样本数量、样本类型、差异、证据描述；资产字段不完整 |
 | `lead` | K.00、Lead | TE、SAD、客户名称、期末、分析日期 |
-| `rollforward` | K.01、Agree SL to GL | 后推、期初、本期增加、原值、累计折旧 |
+| `rollforward` | K.01、Agree SL to GL、名称含「后推」 | 后推、期初、本期增加、原值、累计折旧；表头含期初/期末/本期变动时内容分加权，便于与「仅金额列的 FA list」区分 |
 | `summary` | 汇总 | 程序页、执行、不执行的原因 |
 | `sap` | K.03.1、SAP | CRA、实质性分析程序、实体类型 |
 | `depreciation_policy` | K.03.3、折旧政策复核 | 折旧方法、使用寿命、预计净残值、政策 |

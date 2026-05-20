@@ -47,7 +47,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | AE-001 | materiality_consistency | PM/TE/SAD一致性 | K.00 | P4 | REVIEW | manual_only |
 | AE-002 | risk_threshold_consistency | 各认定CRA正确性 | K.00 | P4 | REVIEW | manual_only |
-| AE-003 | psp_completion | PSP程序执行完整性 | SUMMARY | P3 | REVIEW | planned |
+| AE-003 | psp_completion | PSP程序执行完整性 | SUMMARY | P3 | REVIEW | **implemented** |
 | AE-004 | unexpected_movement_investigation | 异常波动调查充分性 | K.00 | P4 | REVIEW | manual_only |
 | AE-005 | workpaper_cleanliness | 底稿清洁度 | GLOBAL | MANUAL | MANUAL_ONLY | manual_only |
 | AE-006 | workpaper_index_accuracy | 底稿索引准确性 | GLOBAL | MANUAL | MANUAL_ONLY | manual_only |

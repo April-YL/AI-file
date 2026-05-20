@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 from ingest.summary_sheet import PspProgramRow, SummarySheetDataset
 from rules.models import QcIssue, Severity
+from rules.psp_sheet_matcher import count_non_empty_cells, find_matching_sheet
 
 RULE_ID = "psp_completion"
 
 _MIN_WAIVER_LEN = 8
+_MIN_SHEET_MATCH_SCORE = 0.48
+_STRONG_SHEET_MATCH_SCORE = 0.72
+_MIN_SUBSTANCE_CELLS = 8
+
+_K_SEGMENT = re.compile(r"[kK]\.\d+(?:\.\d+)*[a-zA-Z]?")
 
 _SKIP_PROCEDURE_NAMES = frozenset(
     {
@@ -60,7 +67,125 @@ def _normalize_status(raw: str | None) -> str:
     return "ambiguous"
 
 
-def _check_program_row(row: PspProgramRow, source_sheet: str) -> list[QcIssue]:
+def _fallback_sheet_ref_from_procedure(name: str | None) -> str | None:
+    if not name:
+        return None
+    m = _K_SEGMENT.search(name)
+    return m.group(0) if m else None
+
+
+def _ref_for_sheet_match(row: PspProgramRow) -> str | None:
+    ref = (row.sheet_ref or "").strip()
+    if ref:
+        return ref
+    return _fallback_sheet_ref_from_procedure(row.procedure_name)
+
+
+def _check_yes_program_sheet(
+    row: PspProgramRow,
+    source_sheet: str,
+    *,
+    workbook_sheet_titles: Sequence[str] | None,
+    workbook_path: str | None,
+) -> list[QcIssue]:
+    """已执行程序与工作表名称及表内非空内容的形式勾稽（可选，需传入 sheet 列表）。"""
+    issues: list[QcIssue] = []
+    if workbook_sheet_titles is None:
+        return issues
+
+    label = row.procedure_name
+    if row.sheet_ref:
+        label = f"{label} ({row.sheet_ref})"
+
+    ref = _ref_for_sheet_match(row)
+    if not ref:
+        issues.append(
+            QcIssue(
+                asset_id=None,
+                rule_id=RULE_ID,
+                field="sheet_ref",
+                severity=Severity.NEED_REVIEW,
+                message=f"程序「{label}」标为已执行，但程序页/工作表引用为空，无法与底稿工作表勾稽",
+                suggestion="补充程序页列或与底稿一致的工作表引用（含 K.xx 程序页编号）",
+                procedure_code="SUMMARY",
+                source_sheet=source_sheet,
+                source_row=row.source_row,
+            )
+        )
+        return issues
+
+    titles_list = list(workbook_sheet_titles)
+    if not titles_list:
+        return issues
+
+    matched, score, _reason = find_matching_sheet(ref, titles_list)
+    if matched is None or score < _MIN_SHEET_MATCH_SCORE:
+        issues.append(
+            QcIssue(
+                asset_id=None,
+                rule_id=RULE_ID,
+                field="sheet_ref",
+                severity=Severity.FAIL,
+                message=(
+                    f"程序「{label}」标为已执行，但工作簿中未找到与程序页引用「{ref}」"
+                    "相匹配的工作表（已做名称规范化与模糊匹配）"
+                ),
+                suggestion="核对程序页名称与底稿工作表名称是否一致，或修正汇总页超链接目标",
+                procedure_code="SUMMARY",
+                source_sheet=source_sheet,
+                source_row=row.source_row,
+            )
+        )
+        return issues
+
+    if score < _STRONG_SHEET_MATCH_SCORE:
+        issues.append(
+            QcIssue(
+                asset_id=None,
+                rule_id=RULE_ID,
+                field="sheet_ref",
+                severity=Severity.NEED_REVIEW,
+                message=(
+                    f"程序「{label}」对应的底稿页可能为「{matched}」"
+                    f"（名称匹配置信度约 {score:.0%}），请人工确认是否为正确工作表"
+                ),
+                suggestion="确认汇总页程序页与打开底稿后的实际表名一致",
+                procedure_code="SUMMARY",
+                source_sheet=source_sheet,
+                source_row=row.source_row,
+            )
+        )
+
+    if workbook_path and matched:
+        ncells = count_non_empty_cells(workbook_path, matched, max_rows=40)
+        if 0 <= ncells < _MIN_SUBSTANCE_CELLS:
+            issues.append(
+                QcIssue(
+                    asset_id=None,
+                    rule_id=RULE_ID,
+                    field="sheet_substance",
+                    severity=Severity.WARN,
+                    message=(
+                        f"程序「{label}」对应工作表「{matched}」前若干行有效内容较少"
+                        f"（非空单元格约 {ncells} 个），请确认是否已实质执行并完成底稿"
+                    ),
+                    suggestion="检查该工作表是否为空模板或未保存结果",
+                    procedure_code="SUMMARY",
+                    source_sheet=source_sheet,
+                    source_row=row.source_row,
+                )
+            )
+
+    return issues
+
+
+def _check_program_row(
+    row: PspProgramRow,
+    source_sheet: str,
+    *,
+    workbook_sheet_titles: Sequence[str] | None = None,
+    workbook_path: str | None = None,
+) -> list[QcIssue]:
     issues: list[QcIssue] = []
     status = _normalize_status(row.execution_status)
     label = row.procedure_name
@@ -146,10 +271,25 @@ def _check_program_row(row: PspProgramRow, source_sheet: str) -> list[QcIssue]:
             )
         )
 
+    if status == "yes":
+        issues.extend(
+            _check_yes_program_sheet(
+                row,
+                source_sheet,
+                workbook_sheet_titles=workbook_sheet_titles,
+                workbook_path=workbook_path,
+            )
+        )
+
     return issues
 
 
-def check_psp_completion(dataset: SummarySheetDataset) -> list[QcIssue]:
+def check_psp_completion(
+    dataset: SummarySheetDataset,
+    *,
+    workbook_sheet_titles: Sequence[str] | None = None,
+    workbook_path: str | None = None,
+) -> list[QcIssue]:
     issues: list[QcIssue] = []
     if not dataset.programs:
         issues.append(
@@ -170,6 +310,13 @@ def check_psp_completion(dataset: SummarySheetDataset) -> list[QcIssue]:
     targets = [p for p in programs if p.is_psp] or programs
 
     for row in targets:
-        issues.extend(_check_program_row(row, dataset.source_sheet))
+        issues.extend(
+            _check_program_row(
+                row,
+                dataset.source_sheet or "汇总",
+                workbook_sheet_titles=workbook_sheet_titles,
+                workbook_path=workbook_path,
+            )
+        )
 
     return issues
