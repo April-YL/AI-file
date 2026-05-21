@@ -28,7 +28,8 @@
 | `docs/handoff/latest.md` | 最新交接文档。记录当前进展、下一步、阻塞问题和相关文件。 |
 | `docs/decisions/ADR-0001-mvp-scope.md` | 第一条架构决策记录。说明 MVP 范围和暂不做的内容。 |
 | `docs/decisions/ADR-0002-llm-agent-evolution.md` | 大模型 Agent 混合架构与分阶段演进决策。 |
-| `docs/llm-agent-roadmap.md` | M3/M4 路线图：规则 vs LLM 分工、模块与安全清单。 |
+| `docs/llm-agent-roadmap.md` | M3/M4 路线图；**产品优先级**（规则 P0，llm-rules/checklist P1，报告叙述 P3）。 |
+| `docs/planning/lead-qc-rules.md` | K.00 Lead 分模块质检规划、SOP 对照与待建 rule_id。 |
 
 ## Cursor 配置
 

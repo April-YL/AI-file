@@ -23,9 +23,15 @@
 
 终态 Agent **不是** Cursor 内置助手，而是**本地/内网独立程序** + **可配置 LLM API**（OpenAI 兼容端点，支持私有化）。
 
-- **M2（当前～近期）**：规则引擎 + `fa-qc-run` + 报告/标注（确定性为主）。
-- **M3**：新增 `src/llm/`，对 `REVIEW` / `NEED_REVIEW` 项做语义复核与建议；默认 `FA_QC_LLM_ENABLED=false`。
-- **原则**：金额勾稽、唯一性等仍由 `rules` 判定；LLM 不单独推翻 FAIL。
+**产品优先级（2026-05-21）**：
+
+1. **质检点执行准确**最重要：`ingest` 读对 + `rules` 逐条判对（`AUTO_FAIL`/`AUTO_WARN`/有据的 `NEED_REVIEW`）。
+2. **LLM 服务全过程**：ingest 映射、**规则语义**（`--llm-rules`）、**checklist 评估**（`--llm-checklist`）——不是报告摘要为主。
+3. **报告叙述**（`--llm` / `llm_enrichment`）已实现但**优先级最低**；不替代规则、不提升各检查点判定准确性。
+
+- **M2a（当前）**：规则引擎 + 整底稿流水线（Lead/K.01 规则为 P0）。
+- **M3c（高优先级）**：`src/llm/rule_review.py`、`checklist_assess.py` 等挂在具体质检点。
+- **原则**：金额勾稽、唯一性、必填等由 `rules` 判定；LLM **不得**单独将 FAIL 改为 PASS。默认 `FA_QC_LLM_ENABLED=false`。
 
 路线图：[docs/llm-agent-roadmap.md](docs/llm-agent-roadmap.md) · 决策：[docs/decisions/ADR-0002-llm-agent-evolution.md](docs/decisions/ADR-0002-llm-agent-evolution.md)
 
@@ -55,7 +61,7 @@
 - `src/ingest/`：读取底稿与辅助文件、字段映射、基础清洗；不写具体质检规则。
 - `src/rules/`：按 checklist 执行规则，产出统一 finding 结构；不处理文件导入导出。
 - `src/report/`：汇总 findings、生成质检报告；**负责底稿标注回写**（批注/高亮/标注副本），不实现业务规则本身。
-- `src/llm/`（M3 规划）：LLM API 客户端与语义复核；不替代 `rules` 确定性逻辑。
+- `src/llm/`（M3）：API、脱敏；**优先**规则语义与 checklist（规划 `--llm-rules` / `--llm-checklist`）；层 4 报告叙述（`--llm`）为可选低优先级。
 - `tests/fixtures/`：仅存放脱敏样例数据。
 - `tests/rules/`：存放规则单元测试。
 

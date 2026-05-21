@@ -58,40 +58,48 @@
 
 ## 下一步（M2a 验收导向）
 
-1. **rules（Lead，优先）**：`lead_required_fields` → `lead_sheet_section` → AE-002 简版逻辑 → `lead_expectation_analysis` / AE-004 确定性子集（见规划文档）
-2. rules：`rollforward_exists` / `rollforward_columns_complete`（K.01）
-3. **ingest**：按 `docs/case-workpaper-diagnostic.md` 完善字段映射；案例库 `fa-qc-diagnose` 更新
+1. **rules（Lead/K.01，P0，优先于 LLM）**：`lead_required_fields` → `lead_sheet_section` → AE-004 等（见 `docs/planning/lead-qc-rules.md`）；`rollforward_*`
+2. **M3c（P1）**：`--llm-rules`、`--llm-checklist`（见 roadmap）；**非**优先扩展 `--llm` 报告叙述
+3. **ingest**：案例库字段映射回归
 4. report：Excel 报告 + openpyxl 批注回写
-5. 案例库 1～2 份小型底稿端到端回归（`fa-qc-run` / UI）
+5. 案例库端到端回归（`fa-qc-run` / UI）
 
-**暂缓为主战场**：单独扩展 FA list 规则条数；TE/Canvas、证据充分性等标 NEED_REVIEW（**M3 由大模型 Agent 承接**）。
+**暂缓为主战场**：单独扩展 FA list 规则条数。
+
+## 产品优先级：LLM 与质检准确度（2026-05-21 确认）
+
+| 优先级 | 内容 |
+| --- | --- |
+| **P0** | **质检点判对**：`rules`（Lead `lead_*`、K.01 `rollforward_*`、AE-003 等）+ ingest 稳定 |
+| **P1** | **LLM 挂质检点**：`--llm-rules`（语义项）、`--llm-checklist`（逐条 K1） |
+| **P2** | `--llm-map`（表头映射） |
+| **P3** | `--llm` 报告叙述（`llm_enrichment`，**已实现但非重点**） |
+
+**说明**：勾选「大模型增强」**不等于**全流程已用模型把关；当前 `--llm` 仅在规则跑完后写摘要，**不提升各检查点 FAIL/WARN 判定**。终态见 [llm-agent-roadmap.md](llm-agent-roadmap.md)。
 
 ## 后续方向（M3 大模型 Agent）
 
-- 已采纳 ADR-0002；详见 **[docs/llm-agent-roadmap.md](llm-agent-roadmap.md)**（含**三层 LLM 分工**：映射 / 规则语义 / checklist）。
-- **M3a 已落地**：`src/llm/config.py`、`client.py`、`redact.py`；`fa-qc-run --llm` → 报告 `llm_enrichment`（**层 4 叙述**）。
-- **M3b 已做（规则层）**：汇总页、`psp_completion`（AE-003，含 sheet 名称勾稽与空表 WARN）、整本 `run_workbook_qc`；`--llm` 时附带汇总程序表上下文。
-- **人工核对摘录**：Lead → `manual_review_sections`（AE-001/002）+ HTML 页。
+- 已采纳 ADR-0002（含 2026-05-21 优先级补充）；详见 **[docs/llm-agent-roadmap.md](llm-agent-roadmap.md)**。
+- **M3a 已落地**：`src/llm/` 基础设施；`--llm` → 层 4 `llm_enrichment`（低优先级）。
+- **M3b（规则层，P0）**：AE-003 ✅；Lead 自动规则、K.01 后推规则 **待做**（见 `docs/planning/lead-qc-rules.md`）。
+- **人工核对摘录**：Lead AE-001/002 + HTML（Canvas 仍人工）。
 
-### M3c 任务列表（三层 LLM + 编排）
+### M3c 任务列表（LLM 主战场：ingest / 规则语义 / checklist）
 
-> 完整说明与验收标准见 [llm-agent-roadmap.md § M3c](llm-agent-roadmap.md#m3c--三层-llm--agent-编排)。**severity 仍仅由 rules 判定**；LLM 不将 FAIL 改为 PASS。
+> **severity 仅由 rules 判定**；LLM 不将 FAIL 改为 PASS。完整说明见 [llm-agent-roadmap.md § M3c](llm-agent-roadmap.md#m3c--三层-llm产品主战场)。
 
-| ID | 状态 | 任务 | 负责人 | 依赖 |
-| --- | --- | --- | --- | --- |
-| C1 | 待做 | `src/llm/map_headers.py` + 映射 prompt + mock 单测 | 待定 | M3a |
-| C2 | 待做 | ingest 挂钩：`--llm-map`；超阈值 `unmapped_headers` 触发；finding `ingest_header_mapping_review` | 待定 | C1、M2a 字段映射 |
-| C3 | 待做 | `src/llm/rule_review.py`：AE-003 等 `NEED_REVIEW` 附加 `llm_rationale`；`--llm-rules` | 待定 | M3a |
-| C4 | 待做 | `src/llm/checklist_assess.py`：对照 registry/checklist 输出 `checklist_assessments[]`；`--llm-checklist` | 待定 | 业务口径 |
-| C5 | 待做 | `src/llm/orchestrate.py`：串联 C1–C4 + `review.py`；`--llm-all` | 待定 | C1–C4 |
-| C6 | 待做 | 报告 schema 扩展（`checklist_assessments`、issue 上 `llm_*` 可选字段）；JSON/HTML 展示 | 待定 | C4 |
-| C7 | 待做 | Tool use：`get_sheet_summary`、`list_findings`、`get_checklist_item`；调用审计日志 | 待定 | C5 |
-| C8 | 待做 | UI 细粒度 LLM 勾选（映射 / 规则 / checklist / 报告） | 待定 | C5 |
-| C9 | 待做 | `tests/llm/` 扩充；与 ADR-0002、roadmap 对齐 | 待定 | C1–C8 |
+| ID | 优先级 | 状态 | 任务 |
+| --- | --- | --- | --- |
+| — | **P0** | 进行中 | M2a Lead/K.01 **确定性规则**（不依赖 LLM） |
+| C3 | **P1** | 待做 | `rule_review.py` + `--llm-rules` |
+| C4 | **P1** | 待做 | `checklist_assess.py` + `--llm-checklist` |
+| C6 | P1 | 待做 | 报告展示 `checklist_assessments`、issue 上 `llm_*` |
+| C1–C2 | P2 | 待做 | `map_headers` + `--llm-map` |
+| C5,C7,C8 | P1 后 | 待做 | 编排、Tool、UI 细分开关 |
+| C9 | 持续 | 待做 | `tests/llm/` |
+| 层 4 | **P3** | 已实现 | `review.py` / `--llm`（维持，不加大投入） |
 
-**建议实施顺序**：C1→C2（配合字段映射）→ C3 → C4→C6 → C5/C7/C8。
-
-**与 M2a 并行**：K.01 `rollforward_*`、Excel 报告、底稿批注仍为规则/报告主线，**不阻塞** M3c 文档与 C1 原型。
+**建议实施顺序**：**P0 Lead/K.01 规则** → C3 → C4 → C6 → C1/C2 → C5/C7/C8。
 
 ## 已知问题
 

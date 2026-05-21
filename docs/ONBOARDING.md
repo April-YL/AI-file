@@ -138,19 +138,30 @@ fa-qc-ui
 fa-qc-run tests/fixtures/fa_list_mixed.csv
 ```
 
-### 大模型增强（公网 OpenAI 兼容，M3a）
+### 大模型 API（M3，可选）
+
+**请先读** [llm-agent-roadmap.md](llm-agent-roadmap.md) § 产品优先级：
+
+- **最重要**：每个质检点由 **`rules` 判对**（Lead/K.01 等确定性规则，M2a P0）。
+- **LLM 终态**：挂在 **ingest 映射、`--llm-rules` 语义质检点、`--llm-checklist` 逐条评估**——不是报告摘要。
+- **`--llm`（层 4）**：规则跑完后的文字摘要，**已实现、优先级最低**；勾选它**不能**代替 Lead 等规则实现。
 
 复制 `.env.example` 为 `.env`，填写 `FA_QC_LLM_API_KEY`（勿提交 `.env`）。
 
 ```powershell
-$env:FA_QC_LLM_API_KEY = "sk-..."
-$env:FA_QC_LLM_BASE_URL = "https://api.openai.com/v1"   # 或其他兼容端点
-$env:FA_QC_LLM_MODEL = "gpt-4o-mini"
+# 团队验收基线（推荐）：纯规则
+fa-qc-run tests/fixtures/workbook_with_lead.xlsx
 
-fa-qc-run tests/fixtures/fa_list_no_asset_id.csv --llm
+# 层 4 报告叙述（可选，低优先级；已实现）
+# $env:FA_QC_LLM_API_KEY = "sk-..."
+# fa-qc-run tests/fixtures/workbook_with_lead.xlsx --llm
+
+# M3c 规划（高优先级，尚未实现）
+# fa-qc-run 底稿.xlsx --llm-rules
+# fa-qc-run 底稿.xlsx --llm-checklist
 ```
 
-报告 JSON 将增加 `llm_enrichment`（`executive_summary`、`need_review_notes`）。默认不调用 API；`--no-llm` 可覆盖环境变量。
+`--llm-rules` / `--llm-checklist` 落地后，`severity` 仍仅由 `rules` 决定；LLM 在 issue 上附加 `llm_rationale` 或输出 `checklist_assessments[]`。
 
 ```powershell
 pytest tests/ingest tests/rules tests/llm -q

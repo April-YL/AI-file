@@ -18,7 +18,8 @@
 | --- | --- | --- |
 | **M2 确定性** | 结构、日期逻辑、数值勾稽、GAM 区间、超门槛未调查 | `FAIL` / `WARN` |
 | **M2 摘录** | 需与 A3/Canvas/CRA 表比对但无输入 | `NEED_REVIEW` + `manual_review_sections` |
-| **M3 / LLM** | 预期是否合理、波动说明是否充分、调整是否恰当 | `NEED_REVIEW` + `llm_enrichment`（不单独推翻 FAIL） |
+| **M3 / LLM（层 2，`--llm-rules`，规划）** | 预期是否合理、波动说明是否充分、调整是否恰当 | 规则先标 `NEED_REVIEW`；LLM 挂 `llm_rationale`（**不**改 severity） |
+| **M2 确定性（P0，优先）** | 必填、超门槛、GAM、Lead↔K.01、Notes 一致性等 | `FAIL`/`WARN` 由 `rules` 判定 |
 
 ---
 

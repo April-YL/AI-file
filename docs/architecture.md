@@ -27,14 +27,19 @@ src/report/      汇总结果，输出报告或人工复核清单
 
 ```text
 底稿/台账
-    → ingest → rules → findings
-                    ↘
-                     llm/（可选，OpenAI 兼容 API）→ 语义复核 / 复核建议
-                    ↗
-              report → JSON + 标注副本
+    → ingest ──(+ 可选 llm-map)──→ 结构化数据
+    → rules  ──→ findings（severity 仅由此判定）
+              ↘
+               llm-rules / llm-checklist（可选，语义项 + 逐条 checklist）
+              ↗
+    → report → JSON + HTML + 标注副本
+              ↘
+               llm 层 4 叙述（可选，低优先级；不改变 severity）
 ```
 
-编排入口仍为 **`fa-qc-run`（本地 CLI）**；不依赖 Cursor。详见 [llm-agent-roadmap.md](llm-agent-roadmap.md) 与 [decisions/ADR-0002-llm-agent-evolution.md](decisions/ADR-0002-llm-agent-evolution.md)。
+**产品优先级**：质检点准确 = **rules + ingest**；LLM 主战场为 **规则语义 + checklist**，非报告摘要。详见 [llm-agent-roadmap.md](llm-agent-roadmap.md) § 产品优先级。
+
+编排入口仍为 **`fa-qc-run`（本地 CLI）**；不依赖 Cursor。
 
 ## 模块职责
 
@@ -61,11 +66,18 @@ src/report/      汇总结果，输出报告或人工复核清单
 - 区分自动化失败、预警和人工复核项。
 - 后续支持导出 Excel、JSON 或对接人工复核系统。
 
-### `src/llm/`（M3 规划，未实现）
+### `src/llm/`（M3，部分实现）
 
-- 调用可配置 **LLM API**（OpenAI 兼容 `base_url`）。
-- 处理 `REVIEW` / `NEED_REVIEW` 类检查点（如 AE-003 PSP、证据充分性）。
-- 脱敏与 prompt 管理；**不**替代 `rules` 中的确定性校验。
+| 能力 | 状态 | 优先级 |
+| --- | --- | --- |
+| `config` / `client` / `redact` | 已实现 | 基础设施 |
+| `rule_review`（`--llm-rules`） | **待做** | **P1** |
+| `checklist_assess`（`--llm-checklist`） | **待做** | **P1** |
+| `map_headers`（`--llm-map`） | 待做 | P2 |
+| `review` + `workbook_payload`（`--llm`，层 4 叙述） | 已实现 | **P3（低）** |
+
+- 调用可配置 **LLM API**（OpenAI 兼容）；脱敏后仅传结构化摘录 + findings。
+- **不**替代 `rules` 中 `AUTO_FAIL` / `AUTO_WARN`；**不**将 FAIL 改为 PASS。
 - 默认关闭（`FA_QC_LLM_ENABLED=false`）。
 
 ## 质检问题结构

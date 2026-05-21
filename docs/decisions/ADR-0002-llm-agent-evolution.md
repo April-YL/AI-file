@@ -47,7 +47,7 @@
 | **M2a（当前）** | 整底稿流水线 + 规则为主 | `fa-qc-run`、汇总/K.01 规则、批注副本 |
 | **M3a** | LLM 基础设施 | `src/llm/`、配置、脱敏、mock 单测、`--llm on/off` |
 | **M3b** | 语义复核 | AE-003 PSP/拒绝理由、NEED_REVIEW 项复核建议 |
-| **M3c** | Agent 编排 | 多步 tool calling：查 sheet 摘要 → 对照 checklist → 写报告段落 |
+| **M3c** | Agent 编排 | `--llm-rules` / `--llm-checklist` / `--llm-map`；层 4 报告叙述为可选低优先级 |
 | **M4** | 产品化 | 内网 Web UI / API；可选仅内网模型 |
 
 ## 模块边界（规划）
@@ -76,6 +76,16 @@ src/report/     # 扩展：合并 llm_notes、agent_summary
 - `AGENTS.md` 增加大模型 Agent 终态描述。  
 - `pyproject.toml` 将增加 optional dependency `llm`（`httpx` / `openai`）。  
 - 规则单测保持无网络；LLM 单测使用 mock。
+
+## 补充（2026-05-21）：产品优先级
+
+团队确认：
+
+1. **质检点执行准确**优先于报告可读性；准确度主梁为 **`rules` + `ingest`**（如 Lead `lead_*`、K.01 `rollforward_*`）。
+2. LLM 应服务 **ingest 映射、规则语义（层 2）、checklist（层 3）**，贯穿质检全过程。
+3. **层 4 报告叙述**（当前 `--llm` / `llm_enrichment`）已实现但**不作为主战场**；不提升各检查点 `severity` 判定。
+
+实施顺序：P0 确定性规则 → M3c C3/C4 → C1/C2 → 层 4 维持可选。详见 [llm-agent-roadmap.md](../llm-agent-roadmap.md) § 产品优先级。
 
 ## 相关文档
 
