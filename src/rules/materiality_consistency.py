@@ -23,27 +23,7 @@ def check_materiality_consistency(lead: LeadSheetDataset | None) -> list[QcIssue
         ]
 
     issues: list[QcIssue] = []
-    keys = {c.field_key: c for c in lead.materiality}
-    for field_key, label in (
-        ("te", "TE"),
-        ("sad", "SAD"),
-        ("pm", "PM"),
-    ):
-        cap = keys.get(field_key)
-        if cap is None or not cap.workpaper_value:
-            issues.append(
-                QcIssue(
-                    asset_id=None,
-                    rule_id=RULE_ID,
-                    field=field_key,
-                    severity=Severity.WARN,
-                    message=f"Lead 表未摘录到 {label} 底稿值",
-                    suggestion="在 Lead 表补充该字段或见报告 AE-001 摘录区手工记录",
-                    procedure_code="K.00",
-                    source_sheet=lead.source_sheet,
-                )
-            )
-
+    # TE/SAD 缺项由 lead_required_fields 判定 FAIL；此处仅摘录 + Canvas 人工核对
     issues.append(
         QcIssue(
             asset_id=None,

@@ -22,6 +22,9 @@ def check_risk_threshold_consistency(lead: LeadSheetDataset | None) -> list[QcIs
             )
         ]
 
+    if lead.layout_variant == "no_cra_te_volatility":
+        return []
+
     issues: list[QcIssue] = []
     if not lead.cra_rows:
         issues.append(

@@ -40,6 +40,8 @@
 | `SAD` | 名义金额或差异汇总门槛 | 差异超过该金额通常需要调查 |
 | `TT` | 测试阈值 | 决定测试范围或样本总体的重要参数 |
 | `CRA` | Combined Risk Assessment | 影响 SAP 精确度、证据水平和是否需要 TOD |
+| `CRA` → GAM 四档 | 底稿常见枚举 Minimal/Low/Moderate/High 映射为 lowest/low/moderate/high | `lead_tt_gam_range` 按 TT/TE 比例核对建议区间（资产/收入账户） |
+| 整体 TT | 「所有相关认定」Threshold | `lead_tt_overall_min`：应等于各认定 TT 最小值（排除 0） |
 | `PSP` | 规定的实质性程序 | 检查是否执行或是否有充分拒绝执行理由 |
 | `OSP` | 其他实质性程序 | 盘点、权属、减值等可作为后续扩展 |
 

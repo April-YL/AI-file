@@ -6,8 +6,10 @@ from typing import Any
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
 from llm.prompts import SYSTEM_PROMPT, build_review_user_prompt
-from ingest.summary_sheet import SummarySheetDataset
 from llm.redact import redact_issues_for_llm, redact_programs_for_llm
+from llm.workbook_payload import build_workbook_llm_payload, payload_section_names
+from ingest.summary_sheet import SummarySheetDataset
+from ingest.workbook_context import WorkbookQcContext
 from report.summary import QcReport
 from rules.models import Severity
 
@@ -19,6 +21,8 @@ class LlmEnrichment:
     model: str
     executive_summary: str
     need_review_notes: list[dict[str, Any]] = field(default_factory=list)
+    lead_focus_notes: list[str] = field(default_factory=list)
+    workbook_sections: list[str] = field(default_factory=list)
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -26,6 +30,8 @@ class LlmEnrichment:
             "model": self.model,
             "executive_summary": self.executive_summary,
             "need_review_notes": self.need_review_notes,
+            "lead_focus_notes": self.lead_focus_notes,
+            "workbook_sections": self.workbook_sections,
         }
         if self.error:
             data["error"] = self.error
@@ -56,17 +62,33 @@ def enrich_report_with_llm(
     config: LlmConfig,
     *,
     summary: SummarySheetDataset | None = None,
+    workbook: WorkbookQcContext | None = None,
 ) -> QcReport:
     """在报告上附加 LLM 复核摘要；失败时写入 error，不中断规则报告。"""
     if not config.enabled:
         return report
 
     issues_payload = redact_issues_for_llm([i.to_dict() for i in report.issues])
+    workbook_excerpt = None
+    section_names: list[str] = []
+    if workbook is not None:
+        workbook_excerpt = build_workbook_llm_payload(
+            workbook,
+            procedure_code=report.procedure_code,
+            summary_sheet_section=report.summary_sheet_section,
+            manual_review_sections=[
+                s.to_dict() if hasattr(s, "to_dict") else s
+                for s in (report.manual_review_sections or [])
+            ],
+        )
+        section_names = payload_section_names(workbook_excerpt)
+
     user_prompt = build_review_user_prompt(
         source_file=report.source_file,
         procedure_code=report.procedure_code,
         issues=issues_payload,
         summary_programs=_programs_to_llm_payload(summary),
+        workbook_excerpt=workbook_excerpt,
     )
 
     try:
@@ -79,12 +101,16 @@ def enrich_report_with_llm(
             model=config.model,
             executive_summary=str(result.get("executive_summary", "")).strip(),
             need_review_notes=_normalize_notes(result.get("need_review_notes", [])),
+            lead_focus_notes=_normalize_lead_notes(result.get("lead_focus_notes", [])),
+            workbook_sections=section_names,
         )
     except LlmClientError as e:
         enrichment = LlmEnrichment(
             model=config.model,
             executive_summary="",
             need_review_notes=[],
+            lead_focus_notes=[],
+            workbook_sections=section_names,
             error=str(e),
         )
 
@@ -107,6 +133,12 @@ def _normalize_notes(raw: Any) -> list[dict[str, Any]]:
             }
         )
     return notes
+
+
+def _normalize_lead_notes(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [str(x).strip() for x in raw if str(x).strip()]
 
 
 def _attach_enrichment(report: QcReport, enrichment: LlmEnrichment) -> QcReport:

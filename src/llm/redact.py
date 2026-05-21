@@ -8,12 +8,16 @@ _ASSET_ID_PATTERN = re.compile(
     r"\b(FA-TEST-\d+|FA-\d{3,}|CARD-\d+)\b",
     re.IGNORECASE,
 )
+# 中文公司名后缀（保留结构，隐藏具体客户名）
+_CLIENT_NAME_PATTERN = re.compile(r"[\u4e00-\u9fff]{2,30}(公司|集团|有限|股份)")
 
 
 def redact_text(text: str) -> str:
     if not text:
         return text
-    return _ASSET_ID_PATTERN.sub("[ASSET_ID]", text)
+    out = _ASSET_ID_PATTERN.sub("[ASSET_ID]", text)
+    out = _CLIENT_NAME_PATTERN.sub("[CLIENT]", out)
+    return out
 
 
 def redact_issue_dict(issue: dict[str, Any]) -> dict[str, Any]:
@@ -40,3 +44,14 @@ def redact_program_row(row: dict[str, Any]) -> dict[str, Any]:
 
 def redact_programs_for_llm(programs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [redact_program_row(p) for p in programs]
+
+
+def redact_value_tree(value: Any) -> Any:
+    """递归脱敏 dict/list/str，供整底稿 LLM payload 使用。"""
+    if isinstance(value, dict):
+        return {k: redact_value_tree(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact_value_tree(v) for v in value]
+    if isinstance(value, str):
+        return redact_text(value)
+    return value

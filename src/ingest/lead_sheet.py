@@ -175,6 +175,46 @@ class LeadMovementRow:
 
 
 @dataclass
+class CheckWithA3AccountLine:
+    """引导表账户行与 Check with A3 / Diff 按金额列对齐的摘录。"""
+
+    account_label: str
+    amount_role: str | None
+    movement_value: str | None = None
+    a3_value: str | None = None
+    diff_value: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "account_label": self.account_label,
+            "amount_role": self.amount_role,
+            "movement_value": self.movement_value,
+            "a3_value": self.a3_value,
+            "diff_value": self.diff_value,
+        }
+
+
+@dataclass
+class LeadCheckWithA3:
+    """K.00 引导主表末尾 Check with A3、Diff 与 Notes 区。"""
+
+    check_source_row: int | None = None
+    diff_source_row: int | None = None
+    notes_source_row: int | None = None
+    notes_text: str | None = None
+    lines: list[CheckWithA3AccountLine] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "check_source_row": self.check_source_row,
+            "diff_source_row": self.diff_source_row,
+            "notes_source_row": self.notes_source_row,
+            "notes_text": self.notes_text,
+            "lines": [ln.to_dict() for ln in self.lines],
+        }
+
+
+@dataclass
 class AdjustmentSummaryRow:
     adjustment_type: str | None
     source_row: int
@@ -200,6 +240,7 @@ class LeadSheetDataset:
     volatility: VolatilityThreshold | None = None
     movement_bindings: list[LeadMovementColumnBinding] = field(default_factory=list)
     movement_rows: list[LeadMovementRow] = field(default_factory=list)
+    check_with_a3: LeadCheckWithA3 | None = None
     fluctuation_notes: str | None = None
     adjustment_rows: list[AdjustmentSummaryRow] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -270,6 +311,11 @@ _ACCOUNT_MOVEMENT_LABELS = (
     "减值准备",
     "净值",
 )
+
+_AMOUNT_ROLES_FOR_A3 = ("audited_ending", "book_balance", "unaudited")
+
+_CHECK_WITH_A3_LABEL_HINTS = ("checkwitha3", "checkwitha3", "与a3核对", "核对a3")
+_DIFF_ROW_LABEL_HINTS = ("diff", "diff.")
 
 
 def _cell_str(value: Any) -> str | None:
@@ -596,10 +642,150 @@ def _extract_expectations(
     return expectations, vol_out
 
 
+def _is_check_with_a3_label(text: str) -> bool:
+    n = _norm(text)
+    if not n:
+        return False
+    if n in _DIFF_ROW_LABEL_HINTS:
+        return False
+    return "checkwitha3" in n or "checkwitha3" in n.replace(" ", "")
+
+
+def _is_diff_row_label(text: str) -> bool:
+    n = _norm(text)
+    return n in _DIFF_ROW_LABEL_HINTS
+
+
+def _is_notes_row_label(text: str) -> bool:
+    n = _norm(text)
+    return n.startswith("notes") or n in ("说明", "备注")
+
+
+def _row_amount_values_by_role(
+    scope: list[tuple[Any, ...]],
+    row_idx: int,
+    role_cols: dict[str, int],
+) -> dict[str, str | None]:
+    values: dict[str, str | None] = {}
+    for role, col in role_cols.items():
+        if role in ("account_label", "gl_code", "sheet_ref"):
+            continue
+        values[role] = _get_cell(scope, row_idx, col)
+    return values
+
+
+def _primary_amount_role(values: dict[str, str | None]) -> tuple[str | None, str | None]:
+    for role in _AMOUNT_ROLES_FOR_A3:
+        val = values.get(role)
+        if val is not None and str(val).strip():
+            return role, val
+    return None, None
+
+
+def _collect_notes_after_diff(
+    scope: list[tuple[Any, ...]],
+    start_r: int,
+    label_col: int,
+) -> tuple[int | None, str | None]:
+    parts: list[str] = []
+    notes_row: int | None = None
+    for r in range(start_r, min(start_r + 8, len(scope))):
+        row = scope[r]
+        label = _get_cell(scope, r, label_col)
+        if label and (_is_check_with_a3_label(label) or _is_diff_row_label(label)):
+            continue
+        if label and _is_notes_row_label(label):
+            notes_row = r
+            for c in range(len(row)):
+                if c == label_col:
+                    continue
+                text = _cell_str(row[c]) if c < len(row) else None
+                if text and len(text) > 2:
+                    parts.append(text)
+            continue
+        if notes_row is not None or parts:
+            for c in range(len(row)):
+                text = _cell_str(row[c]) if c < len(row) else None
+                if not text:
+                    continue
+                n = _norm(text)
+                if _is_notes_row_label(text) or n in ("波动说明",):
+                    break
+                if len(text) >= 4:
+                    parts.append(text)
+            if parts and r > (notes_row or start_r):
+                break
+    text = "\n".join(parts).strip() if parts else None
+    return notes_row, text or None
+
+
+def _extract_check_with_a3(
+    scope: list[tuple[Any, ...]],
+    *,
+    role_cols: dict[str, int],
+    movement_rows: list[LeadMovementRow],
+    row_offset: int,
+    start_r: int,
+) -> LeadCheckWithA3 | None:
+    """从引导主表末尾摘录 Check with A3、Diff 及 Notes（与四行按金额列对齐）。"""
+    label_col = role_cols.get("account_label", 1)
+    check_r: int | None = None
+    diff_r: int | None = None
+    check_by_role: dict[str, str | None] = {}
+    diff_by_role: dict[str, str | None] = {}
+
+    for r in range(start_r, min(start_r + 12, len(scope))):
+        label = _get_cell(scope, r, label_col)
+        if not label:
+            continue
+        if _is_check_with_a3_label(label):
+            check_r = r
+            check_by_role = _row_amount_values_by_role(scope, r, role_cols)
+            continue
+        if _is_diff_row_label(label):
+            diff_r = r
+            diff_by_role = _row_amount_values_by_role(scope, r, role_cols)
+            break
+
+    if check_r is None and diff_r is None:
+        return None
+
+    notes_row, notes_text = (None, None)
+    if diff_r is not None:
+        notes_row, notes_text = _collect_notes_after_diff(scope, diff_r + 1, label_col)
+    elif check_r is not None:
+        notes_row, notes_text = _collect_notes_after_diff(scope, check_r + 1, label_col)
+
+    lines: list[CheckWithA3AccountLine] = []
+    for mov in movement_rows:
+        role, mov_val = _primary_amount_role(mov.values)
+        lines.append(
+            CheckWithA3AccountLine(
+                account_label=mov.account_label,
+                amount_role=role,
+                movement_value=mov_val,
+                a3_value=check_by_role.get(role) if role else None,
+                diff_value=diff_by_role.get(role) if role else None,
+            )
+        )
+
+    return LeadCheckWithA3(
+        check_source_row=row_offset + check_r + 1 if check_r is not None else None,
+        diff_source_row=row_offset + diff_r + 1 if diff_r is not None else None,
+        notes_source_row=row_offset + notes_row + 1 if notes_row is not None else None,
+        notes_text=notes_text,
+        lines=lines,
+    )
+
+
 def _extract_movement_table(
     rows: list[tuple[Any, ...]],
     block: LeadBlock | None,
-) -> tuple[list[LeadMovementColumnBinding], list[LeadMovementRow]]:
+) -> tuple[
+    list[LeadMovementColumnBinding],
+    list[LeadMovementRow],
+    LeadCheckWithA3 | None,
+]:
     scope = slice_rows_for_block(rows, block)
     row_offset = (block.start_row - 1) if block else 0
     header_r: int | None = None
@@ -608,14 +794,21 @@ def _extract_movement_table(
         cells = [_cell_str(v) for v in row[:20]]
         if not any(cells):
             continue
-        has_book = any(t and _label_matches(_norm(t), ("期末账面数", "账面数")) for t in cells)
+        has_book = any(
+            t
+            and _label_matches(
+                _norm(t),
+                ("期末账面数", "账面数", "期末审定数", "审定数", "期末未审数"),
+            )
+            for t in cells
+        )
         has_name = any(t and _label_matches(_norm(t), ("科目名称", "总账科目编码")) for t in cells)
         if has_book and has_name:
             header_r = r
             break
 
     if header_r is None:
-        return [], []
+        return [], [], None
 
     header_cells = [_cell_str(v) for v in scope[header_r][:22]]
     bindings: list[LeadMovementColumnBinding] = []
@@ -631,11 +824,21 @@ def _extract_movement_table(
             )
 
     data_rows: list[LeadMovementRow] = []
+    check_with_a3: LeadCheckWithA3 | None = None
     empty_streak = 0
     for r in range(header_r + 1, len(scope)):
         label_col = role_cols.get("account_label", 2)
         label = _get_cell(scope, r, label_col)
-        if label and _norm(label) in ("checkwitha3", "diff", "diff."):
+        if label and (
+            _is_check_with_a3_label(label) or _is_diff_row_label(label)
+        ):
+            check_with_a3 = _extract_check_with_a3(
+                scope,
+                role_cols=role_cols,
+                movement_rows=data_rows,
+                row_offset=row_offset,
+                start_r=r,
+            )
             break
         if not label:
             empty_streak += 1
@@ -663,7 +866,7 @@ def _extract_movement_table(
                 source_row=row_offset + r + 1,
             )
         )
-    return bindings, data_rows
+    return bindings, data_rows, check_with_a3
 
 
 def _extract_fluctuation_notes(
@@ -784,7 +987,9 @@ def parse_lead_sheet_rows(
     materiality = _basic_info_to_materiality(basic_info_fields, rows)
     cra_rows = _extract_cra_table(rows, cra_block)
     expectations, volatility = _extract_expectations(rows, exp_block)
-    movement_bindings, movement_rows = _extract_movement_table(rows, mov_block)
+    movement_bindings, movement_rows, check_with_a3 = _extract_movement_table(
+        rows, mov_block
+    )
     fluctuation_notes = _extract_fluctuation_notes(rows, fluc_block)
     adjustment_rows = _extract_adjustment_summary(rows, adj_block)
 
@@ -804,6 +1009,8 @@ def parse_lead_sheet_rows(
         notes.append("未识别预期分析（ARP）账户变更表。")
     if not movement_rows:
         notes.append("未识别两期固定资产引导主表。")
+    elif check_with_a3 is None:
+        notes.append("引导主表未识别 Check with A3 / Diff 行，无法自动核对 A3 差异。")
     if not adjustment_rows and adj_block:
         notes.append("已定位调整汇总表锚点，但尚无数据行。")
 
@@ -830,6 +1037,7 @@ def parse_lead_sheet_rows(
         volatility=volatility,
         movement_bindings=movement_bindings,
         movement_rows=movement_rows,
+        check_with_a3=check_with_a3,
         fluctuation_notes=fluctuation_notes,
         adjustment_rows=adjustment_rows,
         notes=notes,

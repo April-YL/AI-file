@@ -14,6 +14,7 @@ description: 执行固定资产质检 Agent 开发工作流。用于固定资产
 5. 如涉及标准底稿、SOP 或程序选择，阅读 `docs/audit-workflow.md`。
 6. 如涉及规则优先级或人工复核，阅读 `docs/qc-checklist.md`。
 7. 如涉及 Excel 工作表和字段映射，阅读 `docs/workpaper-fields.md`。
+8. 如涉及 LLM：先读 `docs/llm-agent-roadmap.md` § 产品优先级——**P0=rules 判对**，**P1=llm-rules/checklist**，`--llm` 报告叙述为 P3。
 
 ## 添加质检规则
 

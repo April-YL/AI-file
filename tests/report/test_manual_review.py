@@ -52,3 +52,5 @@ def test_report_contains_manual_review_sections(full_workbook: Path, tmp_path: P
     text = html_path.read_text(encoding="utf-8")
     assert "AE-001" in text
     assert "100000" in text
+    assert 'id="lead-sheet-section"' in text
+    assert 'id="proc-filter"' in text

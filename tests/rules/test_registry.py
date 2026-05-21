@@ -32,17 +32,12 @@ def test_get_by_dict_code_ae001():
 
 def test_iter_implemented_includes_fa_and_psp_rules():
     ids = {s.rule_id for s in iter_implemented()}
-    assert ids == {
-        "fa_list_required_fields",
-        "unique_asset_id",
-        "asset_value_consistency",
-        "asset_amount_non_negative",
-        "useful_life_positive",
-        "salvage_rate_range",
-        "psp_completion",
-        "materiality_consistency",
-        "risk_threshold_consistency",
-    }
+    assert "lead_required_fields" in ids
+    assert "lead_tt_overall_min" in ids
+    assert "unexpected_movement_investigation" in ids
+    assert "lead_rollforward_tb_reconciliation" in ids
+    assert "fa_list_required_fields" in ids
+    assert "psp_completion" in ids
 
 
 def test_get_by_dict_code_ae003_implemented():

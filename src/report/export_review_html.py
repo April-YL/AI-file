@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
+from report.procedure_labels import procedure_filter_options, procedure_label
 from report.summary import QcReport
 
 
@@ -79,18 +80,179 @@ def _summary_sheet_section_html(sec: dict | None) -> str:
     """
 
 
+def _lead_sheet_section_html(sec: dict | None) -> str:
+    if not sec:
+        return """
+    <section class="card" id="lead-sheet-section">
+      <h2>Lead（K.00）</h2>
+      <p class="meta">未识别到 K.00 Lead 表或无此类数据。</p>
+    </section>
+        """
+
+    lqc = sec.get("lead_qc") or {}
+    sev = _esc(lqc.get("overall_severity"))
+    ic = lqc.get("issue_count", 0)
+    blocks = ", ".join(_esc(b) for b in (sec.get("blocks_detected") or []))
+    layout = _esc(sec.get("layout_variant") or "标准 SWP")
+
+    rule_rows = ""
+    rules = lqc.get("rules") or {}
+    sev_order = {"FAIL": 0, "WARN": 1, "NEED_REVIEW": 2, "PASS": 3}
+    sorted_rules = sorted(
+        rules.items(),
+        key=lambda kv: (sev_order.get(kv[1].get("overall_severity"), 9), kv[0]),
+    )
+    for rule_id, rsec in sorted_rules:
+        rule_rows += (
+            f"<tr><td>{_esc(rsec.get('dict_rule_code'))}</td>"
+            f"<td><code>{_esc(rule_id)}</code></td>"
+            f"<td><strong>{_esc(rsec.get('overall_severity'))}</strong></td>"
+            f"<td>{rsec.get('issue_count', 0)}</td></tr>\n"
+        )
+
+    detail_html = ""
+    for rule_id, rsec in sorted_rules:
+        osev = rsec.get("overall_severity")
+        if osev not in ("FAIL", "WARN"):
+            continue
+        issues = rsec.get("issues") or []
+        issue_rows = "".join(
+            f"<tr><td>{_esc(i.get('severity'))}</td><td>{_esc(i.get('field'))}</td>"
+            f"<td><code>{i.get('source_row')}</code></td>"
+            f"<td>{_esc(i.get('message'))}</td>"
+            f"<td>{_esc(i.get('suggestion'))}</td></tr>"
+            for i in issues
+        )
+        detail_html += f"""
+      <h4>{_esc(rsec.get('dict_rule_code'))} · <code>{_esc(rule_id)}</code> — {osev}</h4>
+      <table>
+        <thead><tr><th>级别</th><th>字段</th><th>行</th><th>说明</th><th>建议</th></tr></thead>
+        <tbody>{issue_rows or '<tr><td colspan="5">无明细</td></tr>'}</tbody>
+      </table>
+        """
+
+    notes = sec.get("ingest_notes") or []
+    notes_html = "".join(f"<li>{_esc(n)}</li>" for n in notes) if notes else ""
+
+    return f"""
+    <section class="card" id="lead-sheet-section">
+      <h2>Lead（K.00）</h2>
+      <p class="meta">工作表：<strong>{_esc(sec.get('source_sheet'))}</strong>
+        · 版式：<code>{layout}</code>
+        · 识别块：{blocks or '—'}
+        · CRA 行：{sec.get('cra_row_count', 0)}
+        · 引导表行：{sec.get('movement_row_count', 0)}
+        · 预期分析行：{len(sec.get('expectations') or [])}
+      </p>
+      <p>Lead 质检结论：<strong>{sev}</strong>（finding 数：{ic}）</p>
+      <p class="meta">FAIL=明确不通过；WARN=建议确认；NEED_REVIEW=需与 Canvas/A3 人工比对；PASS=该项通过。</p>
+      {'<h3>ingest 说明</h3><ul>' + notes_html + '</ul>' if notes_html else ''}
+      <h3>规则矩阵</h3>
+      <table>
+        <thead><tr><th>字典码</th><th>rule_id</th><th>结论</th><th>finding 数</th></tr></thead>
+        <tbody>{rule_rows or '<tr><td colspan="4">—</td></tr>'}</tbody>
+      </table>
+      {'<h3>需优先处理（FAIL / WARN）</h3>' + detail_html if detail_html else ''}
+    </section>
+    """
+
+
+def _issues_section_html(report: QcReport) -> str:
+    issues = report.issues
+    if not issues:
+        return """
+  <section class="card" id="issues-section">
+    <h2>问题清单（按程序）</h2>
+    <p class="meta">无 findings。</p>
+  </section>
+        """
+
+    codes = [i.procedure_code for i in issues]
+    options = procedure_filter_options(codes)
+    option_tags = "".join(
+        f'<option value="{_esc(code)}">{_esc(label)}</option>' for code, label in options
+    )
+    rows = ""
+    for issue in issues:
+        d = issue.to_dict()
+        proc = d.get("procedure_code") or ""
+        rows += (
+            f'<tr data-procedure="{_esc(proc)}">'
+            f"<td>{_esc(procedure_label(proc))}</td>"
+            f"<td><code>{_esc(proc)}</code></td>"
+            f"<td>{_esc(d.get('dict_rule_code'))}</td>"
+            f"<td><code>{_esc(d.get('rule_id'))}</code></td>"
+            f"<td>{_esc(d.get('severity'))}</td>"
+            f"<td>{_esc(d.get('source_sheet'))}</td>"
+            f"<td><code>{d.get('source_row')}</code></td>"
+            f"<td>{_esc(d.get('field'))}</td>"
+            f"<td>{_esc(d.get('message'))}</td></tr>\n"
+        )
+
+    return f"""
+  <section class="card" id="issues-section">
+    <h2>问题清单（按程序）</h2>
+    <p class="meta">
+      <label for="proc-filter">筛选程序：</label>
+      <select id="proc-filter" onchange="filterIssuesByProcedure()">{option_tags}</select>
+      <span id="issues-count"></span>
+    </p>
+    <table id="issues-table">
+      <thead><tr>
+        <th>程序</th><th>代码</th><th>字典码</th><th>rule_id</th>
+        <th>级别</th><th>工作表</th><th>行</th><th>字段</th><th>说明</th>
+      </tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </section>
+    """
+
+
+def _llm_enrichment_html(report: QcReport) -> str:
+    le = report.llm_enrichment
+    if le is None:
+        return """
+    <section class="card" id="llm-enrichment">
+      <h2>大模型复核增强</h2>
+      <p class="meta">未启用 --llm / UI 未勾选大模型增强。</p>
+    </section>
+        """
+    if le.error:
+        return f"""
+    <section class="card" id="llm-enrichment">
+      <h2>大模型复核增强</h2>
+      <p class="meta">模型：<code>{_esc(le.model)}</code></p>
+      <p style="color:#a33">调用失败：{_esc(le.error)}</p>
+    </section>
+        """
+    notes_rows = "".join(
+        f"<tr><td>{_esc(n.get('rule_id'))}</td><td>{_esc(n.get('dict_rule_code'))}</td>"
+        f"<td>{_esc(n.get('llm_note'))}</td><td>{_esc(n.get('suggested_action'))}</td></tr>"
+        for n in (le.need_review_notes or [])
+    )
+    lead_notes = "".join(f"<li>{_esc(x)}</li>" for x in (le.lead_focus_notes or []))
+    sections = ", ".join(_esc(s) for s in (le.workbook_sections or []))
+    return f"""
+    <section class="card" id="llm-enrichment">
+      <h2>大模型复核增强</h2>
+      <p class="meta">模型：<code>{_esc(le.model)}</code>
+        · 已纳入摘录：{sections or '—'}</p>
+      <h3>执行摘要</h3>
+      <p>{_esc(le.executive_summary)}</p>
+      {'<h3>Lead 关注提示</h3><ul>' + lead_notes + '</ul>' if lead_notes else ''}
+      <h3>NEED_REVIEW 复核建议</h3>
+      <table>
+        <thead><tr><th>rule_id</th><th>字典码</th><th>关注点</th><th>建议动作</th></tr></thead>
+        <tbody>{notes_rows or '<tr><td colspan="4">无</td></tr>'}</tbody>
+      </table>
+    </section>
+    """
+
+
 def export_review_html(report: QcReport, path: str | Path) -> None:
     """生成便于浏览器打开的人工核对 HTML（与 JSON 报告配套）。"""
     path = Path(path)
     sections = report.manual_review_sections or []
-    issues_rows = ""
-    for issue in report.issues:
-        d = issue.to_dict()
-        issues_rows += (
-            f"<tr><td>{_esc(d.get('dict_rule_code'))}</td>"
-            f"<td>{_esc(d.get('severity'))}</td>"
-            f"<td>{_esc(d.get('message'))}</td></tr>\n"
-        )
 
     section_html = ""
     for sec in sections:
@@ -137,6 +299,9 @@ def export_review_html(report: QcReport, path: str | Path) -> None:
         """
 
     summary_html = _summary_sheet_section_html(report.summary_sheet_section)
+    lead_html = _lead_sheet_section_html(report.lead_sheet_section)
+    issues_html = _issues_section_html(report)
+    llm_html = _llm_enrichment_html(report)
 
     html_doc = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -155,7 +320,24 @@ def export_review_html(report: QcReport, path: str | Path) -> None:
     .summary {{ display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0; }}
     .badge {{ background: #eef; padding: 4px 10px; border-radius: 4px; }}
     code {{ font-size: 12px; }}
+    tr[data-hidden="1"] {{ display: none; }}
   </style>
+  <script>
+    function filterIssuesByProcedure() {{
+      var sel = document.getElementById('proc-filter');
+      var v = sel ? sel.value : 'ALL';
+      var rows = document.querySelectorAll('#issues-table tbody tr');
+      var shown = 0;
+      rows.forEach(function(tr) {{
+        var show = v === 'ALL' || tr.getAttribute('data-procedure') === v;
+        tr.setAttribute('data-hidden', show ? '0' : '1');
+        if (show) shown++;
+      }});
+      var cnt = document.getElementById('issues-count');
+      if (cnt) cnt.textContent = ' 显示 ' + shown + ' / ' + rows.length + ' 条';
+    }}
+    document.addEventListener('DOMContentLoaded', filterIssuesByProcedure);
+  </script>
 </head>
 <body>
   <h1>固定资产质检报告 — 人工核对摘录</h1>
@@ -167,16 +349,14 @@ def export_review_html(report: QcReport, path: str | Path) -> None:
 
   {summary_html}
 
+  {lead_html}
+
+  {issues_html}
+
+  {llm_html}
+
   <h2>Checklist 摘录（与 Canvas 人工比对）</h2>
   {section_html or '<p>无 manual_review_sections 数据。</p>'}
-
-  <section class="card">
-    <h2>全部 Findings 摘要</h2>
-    <table>
-      <thead><tr><th>规则</th><th>级别</th><th>说明</th></tr></thead>
-      <tbody>{issues_rows or '<tr><td colspan="3">无</td></tr>'}</tbody>
-    </table>
-  </section>
 </body>
 </html>
 """

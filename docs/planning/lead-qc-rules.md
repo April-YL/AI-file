@@ -163,7 +163,7 @@
 | `lead_movement_rows_complete`（待建） | 4.1、4.2 核心列 | 缺行/缺核心列 → `FAIL`/`WARN`；调整列条件必填 |
 | `lead_movement_consistency`（待建） | 4.5 | 不自洽 → `FAIL`/`WARN` |
 | `lead_movement_notes_required`（待建） | 4.3 | 调查=是但无 Notes → `FAIL`/`WARN` |
-| `lead_check_with_a3_row`（待建） | 4.4 Lead 内 | diff≠0 且无说明 → `WARN`/`FAIL` |
+| `lead_check_with_a3_row` | 4.4 Lead 内 | diff≠0 → `FAIL`；缺 Notes → `FAIL`；引导表 vs A3 行不一致 → `WARN` |
 | `lead_rollforward_tb_reconciliation`（待建） | 4.6 | 有 K.01 时比对 TB 列 → `FAIL`/`WARN` |
 | GL-001 / GL-003 | 与外部 TB、上年审定 | 无 TB → 摘录 + `NEED_REVIEW` |
 | （交叉）AE-003 | `sheet_ref` 索引号 ↔ 工作簿 sheet | 无匹配 → 沿用 PSP matcher |
@@ -225,7 +225,7 @@ checklist 的 `lead_exception_investigation` 与 AE-004 **合并为一个 rule_i
 | 2 | `lead_tt_gam_range` | — | 待实现 |
 | 3 | `lead_expectation_analysis` | — | 待实现 |
 | 3 | `lead_volatility_threshold_link` | — | 待实现 |
-| 4 | `lead_movement_*`、`lead_rollforward_tb_reconciliation` | GL-001/003 相关 | 待实现 |
+| 4 | `lead_movement_*`、`lead_rollforward_tb_reconciliation`、`lead_check_with_a3_row` | GL-001/003 相关 | 已实现（GL-001 外部 TB 仍 manual） |
 | 5 | AE-004 `unexpected_movement_investigation` | AE-004 | 待实现（部分逻辑） |
 | 5 | `lead_fluctuation_notes_amount_consistency` | — | 待实现（SOP 易错） |
 | 5 | `lead_arp_three_triggers` | — | 待实现（SOP【05】） |

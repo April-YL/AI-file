@@ -8,19 +8,18 @@ from llm.config import load_llm_config
 from llm.review import enrich_report_with_llm
 from report.manual_review import build_manual_review_sections
 from report.summary import QcReport, build_report
+from report.lead_sheet_report import build_lead_sheet_section
 from report.summary_sheet_report import build_summary_sheet_section
-from rules.materiality_consistency import check_materiality_consistency
+from rules.lead_runner import LEAD_RULE_IDS, run_lead_rules
 from rules.models import ColumnContext
 from rules.psp_completion import check_psp_completion
 from rules.registry import attach_rule_metadata
-from rules.risk_threshold_consistency import check_risk_threshold_consistency
 from rules.runner import FA_LIST_RULE_IDS, run_fa_list_rules
 
 WORKBOOK_RULE_IDS = (
     *FA_LIST_RULE_IDS,
     "psp_completion",
-    "materiality_consistency",
-    "risk_threshold_consistency",
+    *LEAD_RULE_IDS,
 )
 
 
@@ -70,10 +69,14 @@ def run_workbook_qc(
     else:
         summary_sheet_section = None
 
+    lead_sheet_section = None
     if ctx.lead:
-        issues.extend(attach_rule_metadata(check_materiality_consistency(ctx.lead)))
-        issues.extend(attach_rule_metadata(check_risk_threshold_consistency(ctx.lead)))
-        rule_ids.extend(["materiality_consistency", "risk_threshold_consistency"])
+        lead_issues = attach_rule_metadata(
+            run_lead_rules(ctx.lead, rollforward=ctx.rollforward)
+        )
+        issues.extend(lead_issues)
+        lead_sheet_section = build_lead_sheet_section(ctx.lead, lead_issues)
+        rule_ids.extend(list(LEAD_RULE_IDS))
         if not source_sheet:
             source_sheet = ctx.lead.source_sheet
 
@@ -88,6 +91,7 @@ def run_workbook_qc(
         records=records,
         issues=issues,
         summary_sheet_section=summary_sheet_section,
+        lead_sheet_section=lead_sheet_section,
     )
     report.manual_review_sections = build_manual_review_sections(ctx.lead)
 
@@ -97,6 +101,7 @@ def run_workbook_qc(
             report,
             config,
             summary=ctx.summary,
+            workbook=ctx,
         )
     return report
 
@@ -107,6 +112,9 @@ def run_workbook_qc_from_path(
     fa_sheet: str | None = None,
     summary_sheet: str | None = None,
     lead_sheet: str | None = None,
+    rollforward_sheet: str | None = None,
+    addition_sheet: str | None = None,
+    disposal_sheet: str | None = None,
     llm: bool | None = None,
 ) -> QcReport:
     ctx = load_workbook_context(
@@ -114,6 +122,9 @@ def run_workbook_qc_from_path(
         fa_sheet=fa_sheet,
         summary_sheet=summary_sheet,
         lead_sheet=lead_sheet,
+        rollforward_sheet=rollforward_sheet,
+        addition_sheet=addition_sheet,
+        disposal_sheet=disposal_sheet,
     )
     return run_workbook_qc(ctx, llm=llm)
 
@@ -124,6 +135,9 @@ def run_input_qc(
     fa_sheet: str | None = None,
     summary_sheet: str | None = None,
     lead_sheet: str | None = None,
+    rollforward_sheet: str | None = None,
+    addition_sheet: str | None = None,
+    disposal_sheet: str | None = None,
     llm: bool | None = None,
 ) -> QcReport:
     """CSV 仅 FA list；Excel 走整本 workbook 流水线。"""
@@ -142,5 +156,8 @@ def run_input_qc(
         fa_sheet=fa_sheet,
         summary_sheet=summary_sheet,
         lead_sheet=lead_sheet,
+        rollforward_sheet=rollforward_sheet,
+        addition_sheet=addition_sheet,
+        disposal_sheet=disposal_sheet,
         llm=llm,
     )

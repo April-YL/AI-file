@@ -63,12 +63,24 @@ def print_summary(report, output_path: Path) -> None:
             f"layout={sec.get('layout')!r} | AE-003: {psp.get('overall_severity')} "
             f"({psp.get('issue_count', 0)} findings)"
         )
+    if getattr(report, "lead_sheet_section", None):
+        sec = report.lead_sheet_section
+        lqc = (sec or {}).get("lead_qc") or {}
+        print(
+            f"Lead: sheet={sec.get('source_sheet')!r} layout={sec.get('layout_variant')!r} "
+            f"| Lead QC: {lqc.get('overall_severity')} "
+            f"({lqc.get('issue_count', 0)} findings)"
+        )
     if getattr(report, "llm_enrichment", None):
         le = report.llm_enrichment
         if le.error:
             print(f"LLM: error — {le.error}")
         elif le.executive_summary:
             print(f"LLM summary: {le.executive_summary[:200]}{'...' if len(le.executive_summary) > 200 else ''}")
+            if le.workbook_sections:
+                print(f"LLM workbook excerpt: {', '.join(le.workbook_sections)}")
+            if le.lead_focus_notes:
+                print(f"LLM lead notes: {len(le.lead_focus_notes)} item(s)")
     if getattr(report, "manual_review_sections", None):
         n = len(report.manual_review_sections)
         print(f"Manual review sections: {n} (AE-001 PM/TE/SAD, AE-002 CRA/TT)")

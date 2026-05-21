@@ -46,6 +46,7 @@
 - report：**`summary_sheet_section`**（JSON / 人工核对 HTML / `fa-qc-run` 终端 / Streamlit「汇总页 (PSP)」页签）：汇总页 ingest 元数据、程序表、列绑定、AE-003 整体结论与 findings
 - **本地 UI**：`fa-qc-ui`（`src/report/ui_app.py`）、`scripts/start-ui.bat`、根目录 `启动质检界面.bat`；多文件上传、问题清单/人工核对/HTML 预览与下载
 - **Lead + 人工核对**：`lead_sheet.py`、`manual_review.py`、`export_review_html.py`；AE-001/002 规则与 `workbook_with_lead.xlsx` fixture
+- **Lead P0 规则 + 报告块**：模块 1–5 共 13 条 `run_lead_rules`；`lead_sheet_report.py`；注册表 `LEAD-001`～`LEAD-010` + AE-004 已实现
 
 ## 进行中（M2a = Agent P1）
 
@@ -53,16 +54,17 @@
   - 扩展 `FIELD_SYNONYMS`（案例库表头：卡片编码、入账日期、未税成本、处置情况等）
   - `field_mapping_policy.py`：按 sheet 禁止误映射；使用寿命/date 误匹配防护
   - 回归：`tests/fixtures/field_mapping_case_headers.json` + `test_field_mapping.py`
+  - **Lead 回归表**：`artifacts/case_lead_regression.md`（B–G 共 6 份；A 42MB 永久跳过）
   - **待做**：对案例库 6 份底稿重跑 `fa-qc-diagnose` 更新 `case-workpaper-diagnostic.md`
-- **Lead 质检规则（明日）**：见 `docs/planning/lead-qc-rules.md`；首批 `lead_required_fields` + `lead_sheet_section` + AE-002 简版跳过
+- **Lead 质检规则（模块 1–5 P0）**：含 `lead_check_with_a3_row`（ingest 摘录 Check with A3/Diff/Notes + Diff≠0/缺说明 FAIL）；其余 `lead_*`、AE-004、`lead_rollforward_tb_reconciliation`；`lead_runner` + `lead_sheet_section`
 
 ## 下一步（M2a 验收导向）
 
-1. **rules（Lead/K.01，P0，优先于 LLM）**：`lead_required_fields` → `lead_sheet_section` → AE-004 等（见 `docs/planning/lead-qc-rules.md`）；`rollforward_*`
+1. **rules（Lead/K.01，P0 余量）**：`lead_fluctuation_notes_refs`、`lead_arp_three_triggers`；K.01 `rollforward_*` 列完整性；Streamlit Lead 页签（可选）
 2. **M3c（P1）**：`--llm-rules`、`--llm-checklist`（见 roadmap）；**非**优先扩展 `--llm` 报告叙述
 3. **ingest**：案例库字段映射回归
 4. report：Excel 报告 + openpyxl 批注回写
-5. 案例库端到端回归（`fa-qc-run` / UI）
+5. 案例库端到端回归（`fa-qc-run` / UI）；Lead 批量回归见 `artifacts/case_lead_regression.md`（`python scripts/run_case_lead_regression.py`）
 
 **暂缓为主战场**：单独扩展 FA list 规则条数。
 

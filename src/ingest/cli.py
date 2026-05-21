@@ -7,17 +7,13 @@ import json
 import sys
 from pathlib import Path
 
+from ingest.case_library import (
+    DEFAULT_MAX_WORKBOOK_MB,
+    find_case_library_dir,
+    should_skip_case_workbook,
+)
 from ingest.workbook_ingest import load_workbook_ingest
 from ingest.workbook_reader import diagnose_workbook
-
-
-def _find_case_library(root: Path) -> Path | None:
-    for p in root.iterdir():
-        if p.is_dir() and p.name.endswith("agent"):
-            for c in p.iterdir():
-                if c.is_dir() and "案例" in c.name:
-                    return c
-    return None
 
 
 def main() -> None:
@@ -30,8 +26,8 @@ def main() -> None:
     parser.add_argument(
         "--max-mb",
         type=float,
-        default=20.0,
-        help="跳过大于该体积（MB）的文件，默认 20",
+        default=DEFAULT_MAX_WORKBOOK_MB,
+        help=f"跳过大于该体积（MB）的文件，默认 {DEFAULT_MAX_WORKBOOK_MB}",
     )
     parser.add_argument(
         "--json",
@@ -55,18 +51,18 @@ def main() -> None:
                 files.extend(sorted(path.glob("*.xlsx")))
     else:
         root = Path.cwd()
-        case_dir = _find_case_library(root)
+        case_dir = find_case_library_dir(root)
         if case_dir:
             files = sorted(case_dir.glob("*.xlsx"))
         else:
             print("未找到案例库目录，请指定文件路径。", file=sys.stderr)
             sys.exit(1)
 
-    max_bytes = int(args.max_mb * 1024 * 1024)
     results = []
     for f in files:
-        if f.stat().st_size > max_bytes:
-            results.append({"path": str(f), "skipped": True, "reason": f"size>{args.max_mb}MB"})
+        skip_reason = should_skip_case_workbook(f, max_mb=args.max_mb)
+        if skip_reason:
+            results.append({"path": str(f), "skipped": True, "reason": skip_reason})
             continue
         diag = diagnose_workbook(f)
         item = diag.to_dict()

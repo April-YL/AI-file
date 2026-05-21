@@ -18,6 +18,7 @@ llm = [
 ]
 ui = [
     "streamlit>=1.28",
+    "python-dotenv>=1.0",
 ]
 all = [
     "pytest>=7.0",

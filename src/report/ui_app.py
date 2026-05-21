@@ -8,9 +8,17 @@ from pathlib import Path
 
 import streamlit as st
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 from report.export_json import export_report_json
 from report.export_review_html import export_review_html
 from report.pipeline import run_input_qc
+from report.procedure_labels import procedure_filter_options, procedure_label
 
 st.set_page_config(
     page_title="固定资产质检",
@@ -29,6 +37,79 @@ def _severity_color(sev: str) -> str:
         "FAIL": "red",
         "NEED_REVIEW": "blue",
     }.get(sev, "gray")
+
+
+_SEV_ORDER = {"FAIL": 0, "WARN": 1, "NEED_REVIEW": 2, "PASS": 3}
+
+
+def _render_lead_section(sec: dict) -> None:
+    """展示 ``lead_sheet_section``（与回归表同一套 lead_qc 结构）。"""
+    lqc = sec.get("lead_qc") or {}
+    overall = lqc.get("overall_severity", "—")
+
+    st.markdown(
+        f"**工作表** `{sec.get('source_sheet')}` · **版式** "
+        f"`{sec.get('layout_variant') or '标准 SWP'}` · "
+        f"**识别块** {', '.join(sec.get('blocks_detected') or []) or '—'}"
+    )
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Lead 整体", overall)
+    m2.metric("Lead findings", lqc.get("issue_count", 0))
+    m3.metric("CRA 行", sec.get("cra_row_count", 0))
+    m4.metric("引导表行", sec.get("movement_row_count", 0))
+    m5.metric("预期分析行", len(sec.get("expectations") or []))
+
+    st.caption(
+        "结论含义：**FAIL**=规则明确不通过；**WARN**=建议确认；"
+        "**NEED_REVIEW**=需与 Canvas/A3 等人工比对（非判错）；**PASS**=该项自动检查通过。"
+    )
+
+    rules = lqc.get("rules") or {}
+    if rules:
+        rows = []
+        for rule_id, rsec in rules.items():
+            rows.append(
+                {
+                    "字典码": rsec.get("dict_rule_code") or "—",
+                    "规则": rule_id,
+                    "结论": rsec.get("overall_severity"),
+                    "finding 数": rsec.get("issue_count", 0),
+                }
+            )
+        rows.sort(key=lambda r: (_SEV_ORDER.get(r["结论"], 9), r["规则"]))
+        st.subheader("Lead 规则矩阵（按严重度排序）")
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+        fail_warn = [r for r in rows if r["结论"] in ("FAIL", "WARN")]
+        if fail_warn:
+            st.subheader("需优先处理的规则")
+            for r in fail_warn:
+                rsec = rules[r["规则"]]
+                issues = rsec.get("issues") or []
+                title = f"{r['字典码']} · {r['规则']} — **{r['结论']}** ({len(issues)} 条)"
+                with st.expander(title, expanded=r["结论"] == "FAIL"):
+                    if issues:
+                        st.dataframe(
+                            [
+                                {
+                                    "级别": i.get("severity"),
+                                    "字段": i.get("field"),
+                                    "行": i.get("source_row"),
+                                    "说明": i.get("message"),
+                                    "建议": i.get("suggestion"),
+                                }
+                                for i in issues
+                            ],
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    else:
+                        st.caption("无明细 issue（overall 由规则汇总逻辑得出）。")
+
+    if sec.get("ingest_notes"):
+        with st.expander("ingest 说明"):
+            for n in sec["ingest_notes"]:
+                st.text(n)
 
 
 @st.cache_data(show_spinner=False)
@@ -65,9 +146,14 @@ def _run_qc_cached(
 
 with st.sidebar:
     st.header("设置")
-    use_llm = st.checkbox("启用大模型增强（需 API Key）", value=False)
+    use_llm = st.checkbox("启用大模型增强（整底稿摘录进 prompt）", value=False)
     if use_llm:
-        st.info("请在本机设置环境变量 FA_QC_LLM_API_KEY")
+        st.info(
+            "请配置环境变量或项目根目录 `.env`：`FA_QC_LLM_API_KEY`、"
+            "可选 `FA_QC_LLM_BASE_URL` / `FA_QC_LLM_MODEL`。"
+            "Excel 整本底稿会将汇总、Lead、后推、清单等结构化摘录一并送入模型；"
+            "**不改变**规则引擎的 FAIL/WARN 结论。"
+        )
     with st.expander("高级：指定工作表名称（可选）"):
         fa_sheet = st.text_input("FA list 表名", "")
         summary_sheet = st.text_input("汇总表名", "")
@@ -177,21 +263,50 @@ for name, bundle in results.items():
             use_container_width=True,
         )
 
-        tab1, tab2, tab3, tab4 = st.tabs(["问题清单", "汇总页 (PSP)", "人工核对摘录", "HTML 预览"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+            [
+                "问题清单",
+                "汇总页 (PSP)",
+                "Lead (K.00)",
+                "人工核对摘录",
+                "大模型增强",
+                "HTML 预览",
+            ]
+        )
 
         with tab1:
             issues = data.get("issues", [])
+            st.caption(
+                "可按程序筛选；Lead 规则矩阵见 **Lead (K.00)** 页签。"
+            )
             if issues:
+                codes = [i.get("procedure_code") or "" for i in issues]
+                opts = procedure_filter_options(codes)
+                labels = {code: label for code, label in opts}
+                proc_filter = st.selectbox(
+                    "程序筛选",
+                    options=[code for code, _ in opts],
+                    format_func=lambda c: labels.get(c, c),
+                    key=f"proc_filter_{name}",
+                )
+                shown = (
+                    issues
+                    if proc_filter == "ALL"
+                    else [i for i in issues if (i.get("procedure_code") or "") == proc_filter]
+                )
+                st.caption(f"显示 {len(shown)} / {len(issues)} 条")
                 st.dataframe(
                     [
                         {
+                            "程序": procedure_label(i.get("procedure_code")),
                             "规则": i.get("dict_rule_code") or i.get("rule_id"),
                             "级别": i.get("severity"),
+                            "工作表": i.get("source_sheet"),
                             "说明": i.get("message"),
                             "字段": i.get("field"),
                             "行": i.get("source_row"),
                         }
-                        for i in issues
+                        for i in shown
                     ],
                     use_container_width=True,
                     hide_index=True,
@@ -236,6 +351,15 @@ for name, bundle in results.items():
                     st.dataframe(psp_issues, use_container_width=True, hide_index=True)
 
         with tab3:
+            sec = data.get("lead_sheet_section")
+            if not sec:
+                st.warning(
+                    "本文件未写入 Lead 块（未识别 K.00 Lead 表，或当前为 CSV-only 流程）。"
+                )
+            else:
+                _render_lead_section(sec)
+
+        with tab4:
             sections = data.get("manual_review_sections", [])
             if not sections:
                 st.warning("本文件无人工核对摘录（CSV 或缺少 Lead 表）。")
@@ -248,7 +372,32 @@ for name, bundle in results.items():
                 for note in sec.get("notes") or []:
                     st.warning(note)
 
-        with tab4:
+        with tab5:
+            le = data.get("llm_enrichment")
+            if not le:
+                st.warning(
+                    "未生成大模型增强内容。请勾选侧栏「启用大模型增强」并配置 "
+                    "`FA_QC_LLM_API_KEY` 后重新质检。"
+                )
+            elif le.get("error"):
+                st.error(f"大模型调用失败：{le['error']}")
+            else:
+                st.caption(
+                    f"模型：{le.get('model', '—')} · "
+                    f"摘录块：{', '.join(le.get('workbook_sections') or []) or '—'}"
+                )
+                st.subheader("执行摘要")
+                st.write(le.get("executive_summary") or "—")
+                if le.get("lead_focus_notes"):
+                    st.subheader("Lead 关注提示")
+                    for note in le["lead_focus_notes"]:
+                        st.markdown(f"- {note}")
+                notes = le.get("need_review_notes") or []
+                if notes:
+                    st.subheader("NEED_REVIEW 复核建议")
+                    st.dataframe(notes, use_container_width=True, hide_index=True)
+
+        with tab6:
             st.components.v1.html(
                 bundle["html_bytes"].decode("utf-8"),
                 height=600,
