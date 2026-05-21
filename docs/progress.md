@@ -23,7 +23,7 @@
 - 已沉淀 `docs/audit-workflow.md`、`docs/qc-checklist.md`、`docs/workpaper-fields.md`。
 - 已实现 `src/ingest/`、`src/rules/`（含 registry）、`src/report/`（JSON）及对应测试。
 - **M2a 已落地**：`fa-qc-run` / UI、汇总页 ingest + AE-003、`summary_sheet_section`。
-- **K.00 Lead ingest（2026-05-20）**：锚点 6 块、`LeadSheetDataset` 扩展、案例库版式回归；规则规划见 `docs/planning/lead-qc-rules.md`。
+- **K.00 Lead ingest（2026-05-20）**：锚点 6 块、`LeadSheetDataset` 扩展、案例库版式回归；规则规划见 `docs/planning/lead-qc-rules.md`（含 FY26 SOP K1.00 对照与遗漏清单，2026-05-21）。
 
 ## 下一阶段目标（M2a）
 

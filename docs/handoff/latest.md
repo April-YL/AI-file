@@ -42,7 +42,7 @@
 - ingest：**K.00 Lead 锚点分块**（`lead_sheet_blocks.py` + 扩展 `LeadSheetDataset`：6 块基础信息/CRA/预期+波动门槛/引导主表/波动说明/调整汇总；默认读 200 行）
 - ingest：**Lead 版式变体** `no_cra_te_volatility`（案例 A：无 CRA 区，波动幅度金额 = TE）；`-`/`N/A` 空串不再误匹配锚点（修复 cra/mov/exp 全 0）
 - ingest：**案例库 K1 SWP 回归**（B/C/D/E/F/G：cra≈5、mov≈4、exp≈7；A：cra=0、layout=no_cra_te_volatility）
-- 文档：**Lead 质检规则规划** `docs/planning/lead-qc-rules.md`（模块—规则映射、实施顺序、待确认项；**明日实现**）
+- 文档：**Lead 质检规则规划** `docs/planning/lead-qc-rules.md`（`FA_lead规则说明` + GAM + **FY26 SOP K1.00【01】～【05】对照与遗漏清单**）
 - report：**`summary_sheet_section`**（JSON / 人工核对 HTML / `fa-qc-run` 终端 / Streamlit「汇总页 (PSP)」页签）：汇总页 ingest 元数据、程序表、列绑定、AE-003 整体结论与 findings
 - **本地 UI**：`fa-qc-ui`（`src/report/ui_app.py`）、`scripts/start-ui.bat`、根目录 `启动质检界面.bat`；多文件上传、问题清单/人工核对/HTML 预览与下载
 - **Lead + 人工核对**：`lead_sheet.py`、`manual_review.py`、`export_review_html.py`；AE-001/002 规则与 `workbook_with_lead.xlsx` fixture
@@ -114,7 +114,7 @@
 - `tests/rules/`、`tests/ingest/`、`tests/fixtures/`
 - `docs/ONBOARDING.md`
 - `docs/llm-agent-roadmap.md` — 三层 LLM 分工与 M3c 任务（C1–C9）
-- `docs/planning/lead-qc-rules.md` — K.00 分模块质检点与 M2 实现顺序（2026-05-20）
+- `docs/planning/lead-qc-rules.md` — K.00 分模块质检点、SOP 对照遗漏、M2 实现顺序
 
 ## Demo 命令（本次收工验证）
 
