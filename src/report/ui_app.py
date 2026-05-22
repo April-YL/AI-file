@@ -282,7 +282,9 @@ for name, bundle in results.items():
         st.info(
             f"**标注底稿**含两张 Comments 表：① `{COMMENTS_SHEET_NAME}` "
             f"（其他程序逐条 + FA list 共性行）② `{FA_LIST_COMMENTS_SHEET_NAME}` "
-            f"（FA list 逐条）。PM/TE/SAD、CRA 见「人工复核摘录」页签。"
+            f"（FA list 逐条）。Question 列含质检问题与 Agent 参考；**Answer 列留空**供编制人回复。"
+            f"含 A3 外链的底稿不整本 save，以免 Check with A3 变 #REF（批注见 Comments）。"
+            f"PM/TE/SAD、CRA 见「人工复核摘录」页签。"
         )
 
         base = Path(name).stem

@@ -358,11 +358,27 @@ def _label_matches(cell_norm: str, patterns: tuple[str, ...]) -> bool:
     return False
 
 
+def _is_exact_field_label(text: str) -> bool:
+    """判断单元格文本是否像字段标签（整格匹配，不用子串，避免「企业会计准则」误判）。"""
+    n = _norm(text)
+    if not n:
+        return False
+    for patterns in _BASIC_INFO_LABELS.values():
+        for p in patterns:
+            pn = _norm(p)
+            if len(pn) <= 4 and pn.isascii():
+                if n == pn:
+                    return True
+                continue
+            if n == pn:
+                return True
+    return False
+
+
 def _is_probable_value(text: str) -> bool:
     n = _norm(text)
-    for patterns in _BASIC_INFO_LABELS.values():
-        if _label_matches(n, patterns):
-            return False
+    if _is_exact_field_label(text):
+        return False
     if n in ("认定", "cra", "tt", "canvas", "底稿值", "参考"):
         return False
     return True

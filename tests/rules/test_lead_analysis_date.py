@@ -43,11 +43,19 @@ def test_analysis_after_period_end_passes(lead_dates_xlsx: Path):
     assert check_lead_analysis_date_after_period_end(lead) == []
 
 
-def test_analysis_on_period_end_fails(lead_dates_xlsx: Path):
+def test_analysis_on_period_end_passes(lead_dates_xlsx: Path):
     lead = load_lead_from_workbook(lead_dates_xlsx)
     for f in lead.basic_info_fields:
         if f.field_key == "analysis_date":
             f.value = "2025-12-31"
+    assert check_lead_analysis_date_after_period_end(lead) == []
+
+
+def test_analysis_before_period_end_fails(lead_dates_xlsx: Path):
+    lead = load_lead_from_workbook(lead_dates_xlsx)
+    for f in lead.basic_info_fields:
+        if f.field_key == "analysis_date":
+            f.value = "2025-12-30"
     issues = check_lead_analysis_date_after_period_end(lead)
     assert len(issues) == 1
     assert issues[0].severity == Severity.FAIL

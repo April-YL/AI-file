@@ -33,7 +33,7 @@
 | --- | --- | --- |
 | 1.1 | 客户名称 | 准确且已更新 |
 | 1.2 | 期末 | 与资产负债表日一致；底稿内日期一致 |
-| 1.3 | 分析日期 | **必须晚于** 资产负债表日 |
+| 1.3 | 分析日期 | **不得早于** 资产负债表日（允许与期末同日） |
 | 1.4 | TE、SAD | 与 A3、Canvas 最终版一致 |
 | 1.5 | 适用会计准则（GAAP） | 与 Canvas 一致 |
 | 1.6 | 记账本位币 | 与 A3 或 Canvas 一致 |
@@ -45,7 +45,7 @@
 | 规则 ID | 检查内容 | M2 |
 | --- | --- | --- |
 | `lead_required_fields` | 1.1–1.6 字段存在且非空 | 缺项 → `FAIL` |
-| `lead_analysis_date_after_period_end`（待建） | 1.3 分析日期 > 期末 | 不满足 → `FAIL`；无法解析日期 → `WARN` |
+| `lead_analysis_date_after_period_end` | 1.3 分析日期 ≥ 期末 | 早于期末 → `FAIL`；无法解析日期 → `WARN` |
 | AE-001 `materiality_consistency` | 1.4 TE/SAD（及 PM 摘录） | 有值 → `NEED_REVIEW`（Canvas）；不与 `lead_required_fields` 重复 WARN 缺 TE/SAD |
 | （未来）`lead_period_end_consistency` | 1.2 底稿内期末一致 | 需跨 sheet 上下文 |
 
@@ -152,7 +152,7 @@
 | 4.1 | 四行完整 | 原值、累计折旧、减值准备、净值 |
 | 4.2 | 列完整性 | 科目编码、科目名称、索引号、期末/期初、变动金额及比例、波动/定性调查列等 **均应有值**；**账表调整、审计调整** 仅在有调整时填列 |
 | 4.3 | Notes 与调查列 | 波动或定性调查任一为「是」→ 须有 Notes 编号，且与 **模块 5** 一致（编号形式不限） |
-| 4.4 | Check with A3 | A3 与引导表一致，**diff=0**；非 0 须有说明。**M2 先行**：仅核 Lead 内 Check with A3 行 vs 引导表四行 |
+| 4.4 | Check with A3 | **仅净值行**；\|Diff\|&lt;1 视为尾差 leave；\|Diff\|≥1 须有 Notes。**M2**：Lead 内 Check with A3 / Diff 行 vs 净值审定数列 |
 | 4.5 | 变动额自洽 | 审定期末 − 上期审定 ≈ 变动金额（容差 0.01） |
 | 4.6 | 与 K.01 后推 | 账面原值/累计折旧/减值准备取自后推 **TB-原值、TB-累计折旧、TB-减值准备**（公式链路）；须与后推一致 |
 
@@ -163,7 +163,7 @@
 | `lead_movement_rows_complete`（待建） | 4.1、4.2 核心列 | 缺行/缺核心列 → `FAIL`/`WARN`；调整列条件必填 |
 | `lead_movement_consistency`（待建） | 4.5 | 不自洽 → `FAIL`/`WARN` |
 | `lead_movement_notes_required`（待建） | 4.3 | 调查=是但无 Notes → `FAIL`/`WARN` |
-| `lead_check_with_a3_row` | 4.4 Lead 内 | diff≠0 → `FAIL`；缺 Notes → `FAIL`；引导表 vs A3 行不一致 → `WARN` |
+| `lead_check_with_a3_row` | 4.4 净值 | \|diff\|≥1 → `FAIL`；缺 Notes → `FAIL`；引导表 vs A3 不一致 → `WARN` |
 | `lead_rollforward_tb_reconciliation`（待建） | 4.6 | 有 K.01 时比对 TB 列 → `FAIL`/`WARN` |
 | GL-001 / GL-003 | 与外部 TB、上年审定 | 无 TB → 摘录 + `NEED_REVIEW` |
 | （交叉）AE-003 | `sheet_ref` 索引号 ↔ 工作簿 sheet | 无匹配 → 沿用 PSP matcher |

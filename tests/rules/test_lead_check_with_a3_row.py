@@ -66,6 +66,61 @@ def test_diff_zero_passes(lead_with_a3_check: Path):
     assert not any(i.severity == Severity.FAIL for i in issues)
 
 
+def test_small_diff_on_net_value_leaves(tmp_path: Path):
+    path = tmp_path / "lead_a3_tail.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.00 Lead Sheet"
+    ws["C48"] = "科目名称"
+    ws["I48"] = "期末审定数"
+    ws["C49"] = "原值"
+    ws["I49"] = 1000
+    ws["C50"] = "累计折旧"
+    ws["I50"] = 200
+    ws["C51"] = "减值准备"
+    ws["I51"] = 0
+    ws["C52"] = "净值"
+    ws["I52"] = 800
+    ws["C53"] = "Check with A3"
+    ws["I53"] = 800
+    ws["C54"] = "Diff"
+    ws["I54"] = 0.5
+    wb.save(path)
+    wb.close()
+
+    lead = load_lead_from_workbook(path)
+    issues = check_lead_check_with_a3_row(lead)
+    assert not any(i.severity == Severity.FAIL for i in issues)
+
+
+def test_nonzero_diff_on_cost_lines_ignored(tmp_path: Path):
+    """仅核对净值：原值行 Diff 非零不触发 FAIL。"""
+    path = tmp_path / "lead_a3_cost_diff.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.00 Lead Sheet"
+    ws["C48"] = "科目名称"
+    ws["E48"] = "期末账面数"
+    ws["I48"] = "期末审定数"
+    ws["C49"] = "原值"
+    ws["E49"] = 1000
+    ws["I49"] = 1000
+    ws["C52"] = "净值"
+    ws["I52"] = 800
+    ws["C53"] = "Check with A3"
+    ws["E53"] = 1000
+    ws["I53"] = 800
+    ws["C54"] = "Diff"
+    ws["E54"] = 100
+    ws["I54"] = 0
+    wb.save(path)
+    wb.close()
+
+    lead = load_lead_from_workbook(path)
+    issues = check_lead_check_with_a3_row(lead)
+    assert not any(i.field and i.field.startswith("diff:") for i in issues)
+
+
 def test_nonzero_diff_without_notes_fails(tmp_path: Path):
     path = tmp_path / "lead_a3_bad.xlsx"
     wb = openpyxl.Workbook()

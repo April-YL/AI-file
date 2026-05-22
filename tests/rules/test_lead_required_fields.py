@@ -58,6 +58,20 @@ def test_no_lead_sheet_fails():
     assert issues[0].severity == Severity.FAIL
 
 
+def test_gaap_value_企业会计准则_not_blank(tmp_path: Path):
+    path = tmp_path / "lead_gaap.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.00 Lead Sheet"
+    ws["B7"] = "适用会计准则（GAAP）"
+    ws["C7"] = "企业会计准则"
+    wb.save(path)
+    wb.close()
+    lead = load_lead_from_workbook(path)
+    issues = check_lead_required_fields(lead)
+    assert not any(i.field == "gaap" for i in issues)
+
+
 def test_required_keys_match_planning():
     assert "pm" not in LEAD_REQUIRED_FIELD_KEYS
     assert "te" in LEAD_REQUIRED_FIELD_KEYS

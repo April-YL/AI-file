@@ -150,6 +150,7 @@ def test_swp_layout_blocks_and_modules(swp_lead_xlsx: Path):
     assert by_key["client_name"].value == "XYZ公司"
     assert by_key["period_end"].value == "2025-12-31"
     assert by_key["te"].value == "500000"
+    assert by_key["gaap"].value == "企业会计准则"
     assert by_key["currency"].value == "CNY"
 
     vm = next(r for r in ds.cra_rows if "计价" in r.assertion)

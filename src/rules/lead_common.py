@@ -35,6 +35,10 @@ _MOVEMENT_LABEL_TO_FIELD: dict[str, str] = {
     "净值": "net_value",
 }
 
+# Check with A3：实务仅核对净值行；|Diff| 低于此阈值视为尾差 leave
+A3_NET_VALUE_LABEL = "净值"
+A3_DIFF_LEAVE_THRESHOLD = Decimal("1")
+
 _REQUIRED_MOVEMENT_LABELS = ("原值", "累计折旧", "减值准备", "净值")
 
 _TRIVIAL_FLUCTUATION_PHRASES = (

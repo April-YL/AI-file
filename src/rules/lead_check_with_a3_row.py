@@ -1,15 +1,30 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from ingest.lead_sheet import LeadSheetDataset
-from rules.lead_common import amounts_close, parse_threshold_amount
+from rules.lead_common import (
+    A3_DIFF_LEAVE_THRESHOLD,
+    A3_NET_VALUE_LABEL,
+    amounts_close,
+    parse_threshold_amount,
+)
 from rules.models import QcIssue, Severity
 from rules.parsing import is_blank
 
 RULE_ID = "lead_check_with_a3_row"
 
 
+def _is_net_value_line(account_label: str) -> bool:
+    return A3_NET_VALUE_LABEL in (account_label or "")
+
+
+def _diff_is_material(diff_amt: Decimal) -> bool:
+    return abs(diff_amt) >= A3_DIFF_LEAVE_THRESHOLD
+
+
 def check_lead_check_with_a3_row(lead: LeadSheetDataset | None) -> list[QcIssue]:
-    """Check with A3：Diff 应为 0；非 0 须有 Notes 说明；引导表与 A3 行金额宜一致。"""
+    """Check with A3：仅核对净值行；|Diff|<1 视为尾差；重大非零 Diff 须有 Notes。"""
     if lead is None or not lead.source_sheet:
         return []
 
@@ -31,16 +46,31 @@ def check_lead_check_with_a3_row(lead: LeadSheetDataset | None) -> list[QcIssue]
             )
         ]
 
-    issues: list[QcIssue] = []
-    nonzero_without_notes = False
+    net_lines = [ln for ln in cw.lines if _is_net_value_line(ln.account_label)]
+    if not net_lines:
+        return [
+            QcIssue(
+                asset_id=None,
+                rule_id=RULE_ID,
+                field="check_with_a3",
+                severity=Severity.WARN,
+                message="引导主表未识别净值行，无法自动核对 Check with A3",
+                suggestion="确认引导表含「净值」行及 Check with A3 / Diff",
+                procedure_code="K.00",
+                source_sheet=lead.source_sheet,
+            )
+        ]
 
-    for line in cw.lines:
+    issues: list[QcIssue] = []
+    material_nonzero = False
+
+    for line in net_lines:
         diff_amt = parse_threshold_amount(line.diff_value)
         if diff_amt is None:
             continue
-        if diff_amt == 0:
+        if diff_amt == 0 or not _diff_is_material(diff_amt):
             continue
-        nonzero_without_notes = True
+        material_nonzero = True
         issues.append(
             QcIssue(
                 asset_id=None,
@@ -48,9 +78,10 @@ def check_lead_check_with_a3_row(lead: LeadSheetDataset | None) -> list[QcIssue]
                 field=f"diff:{line.account_label}",
                 severity=Severity.FAIL,
                 message=(
-                    f"「{line.account_label}」A3 核对 Diff 为 {diff_amt}（应为 0）"
+                    f"「{line.account_label}」A3 核对 Diff 为 {diff_amt}"
+                    f"（|Diff|≥{A3_DIFF_LEAVE_THRESHOLD}，须为 0 或说明）"
                 ),
-                suggestion="核对 A3 与引导表金额，或在 Notes 中说明差异原因",
+                suggestion="核对 A3 与引导表净值，或在 Notes 中说明差异原因",
                 procedure_code="K.00",
                 source_sheet=lead.source_sheet,
                 source_row=cw.diff_source_row,
@@ -78,14 +109,17 @@ def check_lead_check_with_a3_row(lead: LeadSheetDataset | None) -> list[QcIssue]
                     )
                 )
 
-    if nonzero_without_notes and is_blank(cw.notes_text):
+    if material_nonzero and is_blank(cw.notes_text):
         issues.append(
             QcIssue(
                 asset_id=None,
                 rule_id=RULE_ID,
                 field="notes",
                 severity=Severity.FAIL,
-                message="A3 核对存在非零 Diff，但未摘录到 Notes 说明",
+                message=(
+                    f"净值 A3 核对存在 |Diff|≥{A3_DIFF_LEAVE_THRESHOLD} 的差异，"
+                    "但未摘录到 Notes 说明"
+                ),
                 suggestion="在 Diff 行下方 Notes 区说明差异原因",
                 procedure_code="K.00",
                 source_sheet=lead.source_sheet,

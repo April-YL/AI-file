@@ -8,14 +8,20 @@ from pathlib import Path
 
 import openpyxl
 from openpyxl.comments import Comment
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter
 
+from report.ooxml_workbook import (
+    build_worksheet_xml,
+    inject_worksheets_at_front,
+    workbook_has_external_links,
+)
 from report.summary import QcReport, worst_severity
 from rules.models import QcIssue, Severity
 
 COMMENTS_SHEET_NAME = "Comments【归档前删除】"
 FA_LIST_COMMENTS_SHEET_NAME = "Comments【FA list】"
+_AGENT_REF_HEADER = "Agent 参考（质检建议）"
 _COMMENT_HEADERS = (
     "EY Ref.",
     "Tab Ref.",
@@ -23,6 +29,7 @@ _COMMENT_HEADERS = (
     "Question/Comment",
     "Answer/Comment",
     "Closed?",
+    _AGENT_REF_HEADER,
 )
 
 _DEFAULT_COMMENT_COL = 2
@@ -30,7 +37,6 @@ _AUTHOR = "FA-QC"
 _FILL_FAIL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 _FILL_WARN = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
 _FILL_NR = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
-_HEADER_FONT = Font(bold=True)
 
 _SEV_RANK = {Severity.FAIL: 0, Severity.WARN: 1, Severity.NEED_REVIEW: 2}
 
@@ -58,8 +64,18 @@ def _issue_comment_text(issue: QcIssue) -> str:
 
 
 def _question_text(issue: QcIssue) -> str:
+    """Question/Comment：仅质检问题；建议见最后一列。"""
     code = issue.dict_rule_code or issue.rule_id
     return f"[{issue.severity.value}] {code}: {issue.message}"
+
+
+def _agent_suggestion(issue: QcIssue) -> str | None:
+    return issue.suggestion or None
+
+
+def _answer_for_preparer() -> None:
+    """Answer/Comment 由底稿 prepare 根据 review comments 回复，Agent 不预填。"""
+    return None
 
 
 def _finding_issues(report: QcReport) -> list[QcIssue]:
@@ -129,8 +145,9 @@ def build_main_comments_rows(
                 issue.source_sheet or "—",
                 _cell_ref_a1(issue.source_row),
                 _question_text(issue),
-                issue.suggestion or None,
+                _answer_for_preparer(),
                 "No",
+                _agent_suggestion(issue),
             )
         )
 
@@ -148,8 +165,9 @@ def build_main_comments_rows(
                 tab or "FA list",
                 f"见附表 {FA_LIST_COMMENTS_SHEET_NAME}",
                 _fa_list_summary_question(rep, count),
-                rep.suggestion or None,
+                _answer_for_preparer(),
                 "No",
+                _agent_suggestion(rep),
             )
         )
 
@@ -169,8 +187,9 @@ def build_fa_list_detail_rows(fa_list_issues: list[QcIssue]) -> list[tuple]:
                 issue.source_sheet or "—",
                 _cell_ref_a1(issue.source_row),
                 _question_text(issue),
-                issue.suggestion or None,
+                _answer_for_preparer(),
                 "No",
+                _agent_suggestion(issue),
             )
         )
     return rows
@@ -180,36 +199,6 @@ def build_comments_rows(issues: list[QcIssue]) -> list[tuple]:
     """兼容旧接口：等同主表行（含 FA 合并逻辑）。"""
     fa, other = split_fa_list_issues(issues)
     return build_main_comments_rows(other, fa)
-
-
-def _write_sheet_rows(
-    ws,
-    rows: list[tuple],
-    *,
-    source_file: str,
-    footer_extra: str = "",
-) -> None:
-    ws.delete_rows(1, ws.max_row or 1)
-    for col, header in enumerate(_COMMENT_HEADERS, start=1):
-        c = ws.cell(row=1, column=col, value=header)
-        c.font = _HEADER_FONT
-    for r_idx, row in enumerate(rows, start=2):
-        for c_idx, val in enumerate(row, start=1):
-            ws.cell(row=r_idx, column=c_idx, value=val)
-    if not rows:
-        ws.cell(row=2, column=1, value="（本区无 findings）")
-    summary_row = len(rows) + 3
-    ws.cell(row=summary_row, column=1, value=f"源文件: {Path(source_file).name}{footer_extra}")
-
-
-def _place_sheet_at_index(wb: openpyxl.Workbook, name: str, index: int):
-    if name in wb.sheetnames:
-        ws = wb[name]
-        wb.remove(ws)
-    else:
-        ws = wb.create_sheet(name)
-    wb._sheets.insert(index, ws)
-    return ws
 
 
 def _fill_for_severity(sev: Severity) -> PatternFill | None:
@@ -256,7 +245,9 @@ def export_annotated_workbook(
 
     - Sheet1 ``Comments【归档前删除】``：其他程序 findings 逐条 + FA list 共性问题合并行
     - Sheet2 ``Comments【FA list】``：FA list findings 逐条明细
-    - 业务 sheet：单元格批注（有 source_row 时）
+    - 业务 sheet：单元格批注（有 source_row 时；**含外部链接时不 save**，避免 A3 #REF）
+
+    Comments 表通过 ZIP/OXML 注入，不调用 ``openpyxl.save`` 整本保存。
     """
     input_path = Path(input_path)
     if input_path.suffix.lower() not in (".xlsx", ".xlsm"):
@@ -273,32 +264,55 @@ def export_annotated_workbook(
         f" | 主表: 其他 {len(other_issues)} 条 + FA 共性 {len(_aggregate_fa_list_issues(fa_issues))} 行"
         f" | FA 明细 {len(fa_issues)} 条"
     )
+    has_external = workbook_has_external_links(input_path)
+    if has_external:
+        footer += " | 已跳过业务表单元格批注（保留 A3 等外部链接）"
 
-    wb = openpyxl.load_workbook(out)
-    main_ws = _place_sheet_at_index(wb, COMMENTS_SHEET_NAME, 0)
-    _write_sheet_rows(
-        main_ws,
-        build_main_comments_rows(other_issues, fa_issues),
-        source_file=str(input_path),
-        footer_extra=footer,
+    main_rows = build_main_comments_rows(other_issues, fa_issues)
+    fa_rows = build_fa_list_detail_rows(fa_issues)
+    inject_worksheets_at_front(
+        out,
+        [
+            (
+                COMMENTS_SHEET_NAME,
+                build_worksheet_xml(
+                    _COMMENT_HEADERS,
+                    main_rows,
+                    footer=f"源文件: {input_path.name}{footer}",
+                ),
+            ),
+            (
+                FA_LIST_COMMENTS_SHEET_NAME,
+                build_worksheet_xml(
+                    _COMMENT_HEADERS,
+                    fa_rows,
+                    footer=f"源文件: {input_path.name} | FA list 专项明细",
+                ),
+            ),
+        ],
+        remove_sheet_names=(COMMENTS_SHEET_NAME, FA_LIST_COMMENTS_SHEET_NAME),
     )
-    fa_ws = _place_sheet_at_index(wb, FA_LIST_COMMENTS_SHEET_NAME, 1)
-    _write_sheet_rows(
-        fa_ws,
-        build_fa_list_detail_rows(fa_issues),
-        source_file=str(input_path),
-        footer_extra=" | FA list 专项明细",
-    )
-    _apply_cell_annotations(wb, issues)
-    wb.save(out)
-    wb.close()
+
+    if not has_external:
+        wb = openpyxl.load_workbook(out)
+        _apply_cell_annotations(wb, issues)
+        wb.save(out)
+        wb.close()
+
     return out
 
 
-def comments_summary_stats(report: QcReport) -> dict[str, int | str]:
+def comments_summary_stats(
+    report: QcReport,
+    *,
+    source_path: str | Path | None = None,
+) -> dict[str, int | str | bool]:
     issues = _finding_issues(report)
     fa_issues, other_issues = split_fa_list_issues(issues)
     overall = worst_severity([i.severity for i in issues]) if issues else Severity.PASS
+    has_external = (
+        workbook_has_external_links(source_path) if source_path is not None else False
+    )
     return {
         "overall_severity": overall.value,
         "finding_count": len(issues),
@@ -310,4 +324,6 @@ def comments_summary_stats(report: QcReport) -> dict[str, int | str]:
         "other_finding_count": len(other_issues),
         "fa_list_finding_count": len(fa_issues),
         "fa_list_summary_row_count": len(_aggregate_fa_list_issues(fa_issues)),
+        "has_external_links": has_external,
+        "cell_annotations_applied": not has_external,
     }

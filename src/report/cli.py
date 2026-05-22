@@ -95,10 +95,13 @@ def print_summary(report, output_path: Path) -> None:
 def _print_annotated_hint(annotated_path: Path, report) -> None:
     from report.export_annotated_workbook import comments_summary_stats
 
-    stats = comments_summary_stats(report)
+    stats = comments_summary_stats(report, source_path=annotated_path)
+    extra = ""
+    if stats.get("has_external_links"):
+        extra = " | cell annotations skipped (external links preserved)"
     print(
         f"Annotated workbook: {annotated_path} "
-        f"(sheet «Comments» summary: {stats['finding_count']} findings)"
+        f"(sheet «Comments» summary: {stats['finding_count']} findings){extra}"
     )
 
 

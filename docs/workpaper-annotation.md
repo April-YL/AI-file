@@ -17,7 +17,7 @@ fa-qc-run path\to\workbook.xlsx
 fa-qc-ui   # 界面下载「带标注底稿」
 ```
 
-实现：`src/report/export_annotated_workbook.py`。
+实现：`src/report/export_annotated_workbook.py` + `src/report/ooxml_workbook.py`（ZIP 注入 Comments，**不**整本 `openpyxl.save`，避免破坏 A3 外链）。
 
 ## 两张 Comments 表
 
@@ -26,11 +26,23 @@ fa-qc-ui   # 界面下载「带标注底稿」
 | 1 | `Comments【归档前删除】` | EY Ref. / Tab Ref. / Cell Ref. / Question/Comment / Answer/Comment / Closed? | **其他程序**（汇总、Lead、K.01 等）：**一条 finding 一行**；**FA list**：仅 **共性问题合并行**（按 `rule_id + field + severity` 合并，注明条数并指向附表） |
 | 2 | `Comments【FA list】` | 同上 | **FA list** 全部 findings **逐条明细** |
 
+**列语义**：
+
+| 列 | 填写方 |
+| --- | --- |
+| Question/Comment | 质检问题（仅 message） |
+| Answer/Comment | **prepare** 根据 review comments 回复（**留空**） |
+| Agent 参考（质检建议） | Agent 规则 `suggestion`，**勿写入 Answer** |
+
+外链底稿（如 A3 `=[n]A3!...`）注入 Comments 时 **不重写** `workbook.xml` 的 `externalReference`，避免 Check with A3 变 `#REF`。
+
 **不**将 PM/TE/SAD、CRA 摘录写入 Comments 表；人工核对见 JSON `manual_review_sections` 与 UI「人工复核摘录」。
 
 ## 单元格批注
 
-- 对有 `source_row` 的 finding，在对应 **Tab Ref.** 工作表的 B 列（可配置默认列）写入 Excel **批注** + 浅色高亮（FAIL 红 / WARN 黄 / NEED_REVIEW 蓝）。
+- 对有 `source_row` 的 finding，在对应 **Tab Ref.** 工作表的 B 列写入 Excel **批注** + 浅色高亮（FAIL / WARN / NEED_REVIEW）。
+- **含外部工作簿链接**（如 Lead 上 `=[5]A3!...`）的底稿：**跳过**业务表批注与整本 save，以免 Check with A3 变为 `#REF`；findings 仍在 Comments 表。
+- 无外部链接的简单底稿仍使用 openpyxl 写批注。
 - 无行号的 sheet 级问题仅出现在 Comments 表中。
 
 ## Streamlit UI（`fa-qc-ui`）

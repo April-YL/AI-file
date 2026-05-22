@@ -13,7 +13,7 @@ from report.export_annotated_workbook import (
     split_fa_list_issues,
 )
 from report.pipeline import run_workbook_qc_from_path
-from rules.models import Severity
+from rules.models import QcIssue, Severity
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -66,6 +66,25 @@ def test_export_two_comment_sheets(tmp_path: Path):
     assert wb.sheetnames[1] == FA_LIST_COMMENTS_SHEET_NAME
     assert wb[COMMENTS_SHEET_NAME].cell(1, 1).value == "EY Ref."
     wb.close()
+
+
+def test_answer_blank_agent_ref_in_last_column():
+    issue = QcIssue(
+        asset_id=None,
+        rule_id="lead_required_fields",
+        field="gaap",
+        severity=Severity.FAIL,
+        message="缺少适用会计准则",
+        suggestion="在 Lead 表补充适用会计准则",
+        procedure_code="K.00",
+        source_sheet="K.00 Lead Sheet",
+        source_row=7,
+    )
+    rows = build_main_comments_rows([issue], [])
+    assert len(rows) == 1
+    assert rows[0][4] is None
+    assert "Agent 参考" not in (rows[0][3] or "")
+    assert rows[0][6] == "在 Lead 表补充适用会计准则"
 
 
 def test_build_comments_rows_compat():
