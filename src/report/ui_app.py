@@ -2,23 +2,29 @@
 
 from __future__ import annotations
 
-import json
+import sys
 import tempfile
 from pathlib import Path
 
+_SRC_ROOT = Path(__file__).resolve().parents[1]
+if str(_SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SRC_ROOT))
+
 import streamlit as st
 
-try:
-    from dotenv import load_dotenv
+from llm.env_loader import load_project_dotenv
 
-    load_dotenv()
-except ImportError:
-    pass
+load_project_dotenv()
 
+from report.export_annotated_workbook import (
+    COMMENTS_SHEET_NAME,
+    FA_LIST_COMMENTS_SHEET_NAME,
+    export_annotated_workbook,
+)
 from report.export_json import export_report_json
 from report.export_review_html import export_review_html
 from report.pipeline import run_input_qc
-from report.procedure_labels import procedure_filter_options, procedure_label
+from report.procedure_labels import FINDING_UI_GROUPS, procedure_label
 
 st.set_page_config(
     page_title="固定资产质检",
@@ -27,7 +33,7 @@ st.set_page_config(
 )
 
 st.title("固定资产质检 Agent")
-st.caption("本地运行，底稿不上传云端。支持一次选择多份 Excel / CSV。")
+st.caption("面向质检人员：Agent 处理机械化问题，专业判断留人工复核。")
 
 
 def _severity_color(sev: str) -> str:
@@ -39,77 +45,122 @@ def _severity_color(sev: str) -> str:
     }.get(sev, "gray")
 
 
-_SEV_ORDER = {"FAIL": 0, "WARN": 1, "NEED_REVIEW": 2, "PASS": 3}
+def _findings_row(issue: dict) -> dict:
+    from openpyxl.utils import get_column_letter
+
+    cell = ""
+    sr = issue.get("source_row")
+    if sr:
+        cell = f"${get_column_letter(2)}${sr}"
+    return {
+        "级别": issue.get("severity"),
+        "工作表": issue.get("source_sheet"),
+        "单元格": cell or "—",
+        "规则": issue.get("dict_rule_code") or issue.get("rule_id"),
+        "说明": issue.get("message"),
+        "建议": issue.get("suggestion"),
+    }
 
 
-def _render_lead_section(sec: dict) -> None:
-    """展示 ``lead_sheet_section``（与回归表同一套 lead_qc 结构）。"""
-    lqc = sec.get("lead_qc") or {}
-    overall = lqc.get("overall_severity", "—")
+def _group_issues(issues: list[dict]) -> list[tuple[str, str, list[dict]]]:
+    buckets: dict[str, list[dict]] = {code: [] for code, _ in FINDING_UI_GROUPS}
+    other: list[dict] = []
+    known = {code for code, _ in FINDING_UI_GROUPS}
+    for issue in issues:
+        if issue.get("severity") == "PASS":
+            continue
+        pc = issue.get("procedure_code") or ""
+        if pc in known:
+            buckets[pc].append(issue)
+        else:
+            other.append(issue)
+    out: list[tuple[str, str, list[dict]]] = [
+        (code, label, buckets[code]) for code, label in FINDING_UI_GROUPS if buckets[code]
+    ]
+    if other:
+        out.append(("_other", "其他", other))
+    return out
 
-    st.markdown(
-        f"**工作表** `{sec.get('source_sheet')}` · **版式** "
-        f"`{sec.get('layout_variant') or '标准 SWP'}` · "
-        f"**识别块** {', '.join(sec.get('blocks_detected') or []) or '—'}"
+
+def _render_manual_review(data: dict) -> None:
+    st.warning(
+        "以下摘录 **须人工与 Canvas/A3/项目组底稿核对**；Agent **不自动判定**一致与否，"
+        "结论为 NEED_REVIEW 不代表底稿已错。"
     )
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Lead 整体", overall)
-    m2.metric("Lead findings", lqc.get("issue_count", 0))
-    m3.metric("CRA 行", sec.get("cra_row_count", 0))
-    m4.metric("引导表行", sec.get("movement_row_count", 0))
-    m5.metric("预期分析行", len(sec.get("expectations") or []))
-
-    st.caption(
-        "结论含义：**FAIL**=规则明确不通过；**WARN**=建议确认；"
-        "**NEED_REVIEW**=需与 Canvas/A3 等人工比对（非判错）；**PASS**=该项自动检查通过。"
-    )
-
-    rules = lqc.get("rules") or {}
-    if rules:
-        rows = []
-        for rule_id, rsec in rules.items():
-            rows.append(
+    lead = data.get("lead_sheet_section") or {}
+    basic = lead.get("basic_info_fields") or []
+    if basic:
+        st.subheader("Lead 基准信息（摘录）")
+        st.dataframe(
+            [
                 {
-                    "字典码": rsec.get("dict_rule_code") or "—",
-                    "规则": rule_id,
-                    "结论": rsec.get("overall_severity"),
-                    "finding 数": rsec.get("issue_count", 0),
+                    "项目": f.get("label"),
+                    "底稿值": f.get("value"),
+                    "单元格": f.get("source_cell"),
                 }
+                for f in basic
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    for sec in data.get("manual_review_sections") or []:
+        code = sec.get("dict_rule_code", "")
+        st.subheader(sec.get("checklist_prompt") or sec.get("title", code))
+        st.caption(sec.get("instruction", ""))
+        items = sec.get("items") or []
+        if not items:
+            for note in sec.get("notes") or []:
+                st.warning(note)
+            continue
+        if items and "field_key" in items[0]:
+            st.dataframe(
+                [
+                    {
+                        "项目": it.get("label"),
+                        "底稿值": it.get("workpaper_value"),
+                        "Canvas/外部": it.get("canvas_or_external_value"),
+                        "底稿单元格": it.get("workpaper_cell"),
+                    }
+                    for it in items
+                ],
+                use_container_width=True,
+                hide_index=True,
             )
-        rows.sort(key=lambda r: (_SEV_ORDER.get(r["结论"], 9), r["规则"]))
-        st.subheader("Lead 规则矩阵（按严重度排序）")
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        elif items and "assertion" in items[0]:
+            st.dataframe(
+                [
+                    {
+                        "认定": it.get("assertion"),
+                        "CRA": it.get("cra"),
+                        "TT": it.get("tt"),
+                        "来源": it.get("assertion_cell"),
+                    }
+                    for it in items
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
 
-        fail_warn = [r for r in rows if r["结论"] in ("FAIL", "WARN")]
-        if fail_warn:
-            st.subheader("需优先处理的规则")
-            for r in fail_warn:
-                rsec = rules[r["规则"]]
-                issues = rsec.get("issues") or []
-                title = f"{r['字典码']} · {r['规则']} — **{r['结论']}** ({len(issues)} 条)"
-                with st.expander(title, expanded=r["结论"] == "FAIL"):
-                    if issues:
-                        st.dataframe(
-                            [
-                                {
-                                    "级别": i.get("severity"),
-                                    "字段": i.get("field"),
-                                    "行": i.get("source_row"),
-                                    "说明": i.get("message"),
-                                    "建议": i.get("suggestion"),
-                                }
-                                for i in issues
-                            ],
-                            use_container_width=True,
-                            hide_index=True,
-                        )
-                    else:
-                        st.caption("无明细 issue（overall 由规则汇总逻辑得出）。")
 
-    if sec.get("ingest_notes"):
-        with st.expander("ingest 说明"):
-            for n in sec["ingest_notes"]:
-                st.text(n)
+def _render_findings_grouped(data: dict) -> None:
+    groups = _group_issues(data.get("issues", []))
+    if not groups:
+        st.success("未发现 FAIL / WARN / NEED_REVIEW 级 findings。")
+        return
+    for code, label, items in groups:
+        default_expanded = code in ("SUMMARY", "K.00", "_other")
+        with st.expander(f"{label}（{len(items)} 条）", expanded=default_expanded):
+            st.dataframe(
+                [_findings_row(i) for i in items],
+                use_container_width=True,
+                hide_index=True,
+            )
+            if code == "FA_LIST":
+                st.caption(
+                    f"底稿主表仅列 **FA list 共性问题** 合并行；逐条明细见 "
+                    f"**{FA_LIST_COMMENTS_SHEET_NAME}**。"
+                )
 
 
 @st.cache_data(show_spinner=False)
@@ -120,8 +171,7 @@ def _run_qc_cached(
     fa_sheet: str | None,
     summary_sheet: str | None,
     lead_sheet: str | None,
-) -> tuple[dict, bytes, bytes]:
-    suffix = Path(filename).suffix.lower()
+) -> tuple[dict, bytes, bytes, bytes | None]:
     with tempfile.TemporaryDirectory() as tmp:
         inp = Path(tmp) / filename
         inp.write_bytes(file_bytes)
@@ -136,34 +186,23 @@ def _run_qc_cached(
         html_path = Path(tmp) / "report.html"
         export_report_json(report, json_path)
         export_review_html(report, html_path)
-        data = report.to_dict()
-        return (
-            data,
-            json_path.read_bytes(),
-            html_path.read_bytes(),
-        )
+        annotated_bytes: bytes | None = None
+        if inp.suffix.lower() in (".xlsx", ".xlsm"):
+            ann_path = Path(tmp) / f"{inp.stem}_qc_annotated.xlsx"
+            export_annotated_workbook(report, inp, ann_path)
+            annotated_bytes = ann_path.read_bytes()
+        return report.to_dict(), json_path.read_bytes(), html_path.read_bytes(), annotated_bytes
 
 
 with st.sidebar:
     st.header("设置")
-    use_llm = st.checkbox("启用大模型增强（整底稿摘录进 prompt）", value=False)
+    use_llm = st.checkbox("启用大模型增强（可选，低优先级）", value=False)
     if use_llm:
-        st.info(
-            "请配置环境变量或项目根目录 `.env`：`FA_QC_LLM_API_KEY`、"
-            "可选 `FA_QC_LLM_BASE_URL` / `FA_QC_LLM_MODEL`。"
-            "Excel 整本底稿会将汇总、Lead、后推、清单等结构化摘录一并送入模型；"
-            "**不改变**规则引擎的 FAIL/WARN 结论。"
-        )
+        st.info("需配置 `.env` 中 `FA_QC_LLM_API_KEY`；不改变规则 severity。")
     with st.expander("高级：指定工作表名称（可选）"):
         fa_sheet = st.text_input("FA list 表名", "")
         summary_sheet = st.text_input("汇总表名", "")
         lead_sheet = st.text_input("Lead 表名", "")
-    st.divider()
-    st.markdown(
-        "**建议试跑**\n\n"
-        "仓库内样例：\n"
-        "`tests/fixtures/workbook_with_lead.xlsx`"
-    )
 
 uploaded = st.file_uploader(
     "选择待质检底稿（可多选）",
@@ -172,21 +211,15 @@ uploaded = st.file_uploader(
 )
 
 if not uploaded:
-    st.info("👆 点击上方区域选择文件，或拖拽文件到此处。")
+    st.info("👆 上传 Excel 底稿后开始质检。")
     st.markdown(
-        """
-**支持格式**
+        f"""
+**主交付**：`*_qc_annotated.xlsx`
 
-| 格式 | 说明 |
+| Sheet | 内容 |
 | --- | --- |
-| `.xlsx` / `.xlsm` | 整本底稿（推荐）：FA list + 汇总 + Lead |
-| `.csv` | 仅固定资产清单 |
-
-**输出**
-
-- 质检结论与 findings 列表  
-- PM/TE/SAD、CRA/TT 人工核对摘录（Excel 含 Lead 时）  
-- 可下载 JSON 与 HTML 报告  
+| `{COMMENTS_SHEET_NAME}` | 其他程序 **逐条** + FA list **共性问题合并行** |
+| `{FA_LIST_COMMENTS_SHEET_NAME}` | FA list findings **逐条明细** |
         """
     )
     st.stop()
@@ -198,7 +231,7 @@ if st.button("开始质检", type="primary", use_container_width=True):
     for idx, uf in enumerate(uploaded):
         progress.progress((idx) / len(uploaded), text=f"正在质检：{uf.name}")
         try:
-            data, json_bytes, html_bytes = _run_qc_cached(
+            data, json_bytes, html_bytes, ann_bytes = _run_qc_cached(
                 uf.getvalue(),
                 uf.name,
                 use_llm,
@@ -210,6 +243,7 @@ if st.button("开始质检", type="primary", use_container_width=True):
                 "data": data,
                 "json_bytes": json_bytes,
                 "html_bytes": html_bytes,
+                "annotated_bytes": ann_bytes,
             }
         except Exception as e:
             st.session_state.setdefault("errors", {})[uf.name] = str(e)
@@ -235,171 +269,64 @@ for name, bundle in results.items():
     with st.expander(f"📄 {name} — 总体：**{overall}**", expanded=len(results) == 1):
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("资产行数", summary.get("total_records", 0))
-        c2.metric("PASS", summary.get("pass_count", 0))
+        c2.metric("FAIL", summary.get("fail_count", 0))
         c3.metric("WARN", summary.get("warn_count", 0))
-        c4.metric("FAIL", summary.get("fail_count", 0))
-        c5.metric("待复核", summary.get("need_review_count", 0))
-
-        st.markdown(
-            f"总体结论：<span style='color:{_severity_color(overall)};font-weight:bold'>"
-            f"{overall}</span>",
-            unsafe_allow_html=True,
+        c4.metric("待复核", summary.get("need_review_count", 0))
+        c5.metric(
+            "Findings",
+            summary.get("fail_count", 0)
+            + summary.get("warn_count", 0)
+            + summary.get("need_review_count", 0),
         )
+
+        st.info(
+            f"**标注底稿**含两张 Comments 表：① `{COMMENTS_SHEET_NAME}` "
+            f"（其他程序逐条 + FA list 共性行）② `{FA_LIST_COMMENTS_SHEET_NAME}` "
+            f"（FA list 逐条）。PM/TE/SAD、CRA 见「人工复核摘录」页签。"
+        )
+
+        base = Path(name).stem
+        ann = bundle.get("annotated_bytes")
+        if ann:
+            st.download_button(
+                "下载带标注底稿（主交付）",
+                ann,
+                file_name=f"{base}_qc_annotated.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                use_container_width=True,
+            )
+        else:
+            st.warning("CSV 不生成标注底稿。")
 
         dl1, dl2 = st.columns(2)
-        base = Path(name).stem
-        dl1.download_button(
-            "下载 JSON 报告",
-            bundle["json_bytes"],
-            file_name=f"{base}_qc_report.json",
-            mime="application/json",
-            use_container_width=True,
-        )
-        dl2.download_button(
-            "下载 HTML 核对页",
-            bundle["html_bytes"],
-            file_name=f"{base}_qc_review.html",
-            mime="text/html",
-            use_container_width=True,
+        with dl1:
+            st.download_button("下载 JSON", bundle["json_bytes"], file_name=f"{base}_qc_report.json")
+        with dl2:
+            st.download_button("下载 Findings HTML", bundle["html_bytes"], file_name=f"{base}_qc_review.html")
+
+        tab0, tab1, tab2, tab3 = st.tabs(
+            ["Findings（分程序）", "人工复核摘录", "质检摘要", "HTML 预览"]
         )
 
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-            [
-                "问题清单",
-                "汇总页 (PSP)",
-                "Lead (K.00)",
-                "人工核对摘录",
-                "大模型增强",
-                "HTML 预览",
-            ]
-        )
+        with tab0:
+            _render_findings_grouped(data)
 
         with tab1:
-            issues = data.get("issues", [])
-            st.caption(
-                "可按程序筛选；Lead 规则矩阵见 **Lead (K.00)** 页签。"
-            )
-            if issues:
-                codes = [i.get("procedure_code") or "" for i in issues]
-                opts = procedure_filter_options(codes)
-                labels = {code: label for code, label in opts}
-                proc_filter = st.selectbox(
-                    "程序筛选",
-                    options=[code for code, _ in opts],
-                    format_func=lambda c: labels.get(c, c),
-                    key=f"proc_filter_{name}",
-                )
-                shown = (
-                    issues
-                    if proc_filter == "ALL"
-                    else [i for i in issues if (i.get("procedure_code") or "") == proc_filter]
-                )
-                st.caption(f"显示 {len(shown)} / {len(issues)} 条")
-                st.dataframe(
-                    [
-                        {
-                            "程序": procedure_label(i.get("procedure_code")),
-                            "规则": i.get("dict_rule_code") or i.get("rule_id"),
-                            "级别": i.get("severity"),
-                            "工作表": i.get("source_sheet"),
-                            "说明": i.get("message"),
-                            "字段": i.get("field"),
-                            "行": i.get("source_row"),
-                        }
-                        for i in shown
-                    ],
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            else:
-                st.success("未发现 issues。")
+            _render_manual_review(data)
 
         with tab2:
-            sec = data.get("summary_sheet_section")
-            if not sec:
-                st.warning("本文件未写入汇总页块（未识别汇总表或当前为 CSV-only 流程）。")
-            else:
-                psp = sec.get("psp_completion") or {}
-                st.markdown(
-                    f"**工作表** `{sec.get('source_sheet')}` · **版式** `{sec.get('layout')}` · **程序行** {sec.get('program_count')}"
-                )
-                st.metric(
-                    "AE-003 结论",
-                    psp.get("overall_severity", "—"),
-                    help="psp_completion 规则；无 finding 时为 PASS",
-                )
-                st.caption(f"AE-003 finding 数：{psp.get('issue_count', 0)}")
-                if sec.get("ingest_notes"):
-                    with st.expander("ingest 说明"):
-                        for n in sec["ingest_notes"]:
-                            st.text(n)
-                binds = sec.get("column_bindings") or []
-                if binds:
-                    st.subheader("列绑定")
-                    st.dataframe(binds, use_container_width=True, hide_index=True)
-                progs = sec.get("programs") or []
-                if progs:
-                    st.subheader("程序表（解析结果）")
-                    st.dataframe(progs, use_container_width=True, hide_index=True)
-                if sec.get("programs_truncated"):
-                    st.caption(
-                        f"仅展示前 {sec.get('programs_in_report')} 行（共 {sec.get('program_count')} 行）。"
-                    )
-                psp_issues = psp.get("issues") or []
-                if psp_issues:
-                    st.subheader("AE-003 findings")
-                    st.dataframe(psp_issues, use_container_width=True, hide_index=True)
+            lead = data.get("lead_sheet_section") or {}
+            lqc = lead.get("lead_qc") or {}
+            st.markdown(f"**Lead 规则整体**：{lqc.get('overall_severity', '—')}")
+            sec = data.get("summary_sheet_section") or {}
+            psp = sec.get("psp_completion") or {}
+            if sec:
+                st.markdown(f"**汇总页 AE-003**：{psp.get('overall_severity', '—')}")
 
         with tab3:
-            sec = data.get("lead_sheet_section")
-            if not sec:
-                st.warning(
-                    "本文件未写入 Lead 块（未识别 K.00 Lead 表，或当前为 CSV-only 流程）。"
-                )
-            else:
-                _render_lead_section(sec)
-
-        with tab4:
-            sections = data.get("manual_review_sections", [])
-            if not sections:
-                st.warning("本文件无人工核对摘录（CSV 或缺少 Lead 表）。")
-            for sec in sections:
-                st.subheader(sec.get("checklist_prompt", sec.get("title", "")))
-                st.caption(sec.get("instruction", ""))
-                items = sec.get("items") or []
-                if items:
-                    st.dataframe(items, use_container_width=True, hide_index=True)
-                for note in sec.get("notes") or []:
-                    st.warning(note)
-
-        with tab5:
-            le = data.get("llm_enrichment")
-            if not le:
-                st.warning(
-                    "未生成大模型增强内容。请勾选侧栏「启用大模型增强」并配置 "
-                    "`FA_QC_LLM_API_KEY` 后重新质检。"
-                )
-            elif le.get("error"):
-                st.error(f"大模型调用失败：{le['error']}")
-            else:
-                st.caption(
-                    f"模型：{le.get('model', '—')} · "
-                    f"摘录块：{', '.join(le.get('workbook_sections') or []) or '—'}"
-                )
-                st.subheader("执行摘要")
-                st.write(le.get("executive_summary") or "—")
-                if le.get("lead_focus_notes"):
-                    st.subheader("Lead 关注提示")
-                    for note in le["lead_focus_notes"]:
-                        st.markdown(f"- {note}")
-                notes = le.get("need_review_notes") or []
-                if notes:
-                    st.subheader("NEED_REVIEW 复核建议")
-                    st.dataframe(notes, use_container_width=True, hide_index=True)
-
-        with tab6:
             st.components.v1.html(
                 bundle["html_bytes"].decode("utf-8"),
-                height=600,
+                height=480,
                 scrolling=True,
             )

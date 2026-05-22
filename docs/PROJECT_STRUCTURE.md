@@ -8,6 +8,12 @@
 | --- | --- |
 | `AGENTS.md` | 项目级 Agent 总说明。记录目标、模块边界、质检结论枚举、数据安全和开发约定。新会话必须优先阅读。 |
 | `.gitignore` | Git 忽略规则。用于排除本地状态、密钥、日志、依赖目录和系统临时文件。 |
+| `docs/data-security.md` | **密钥与 `.env` 不进 Git** 的全局约定与提交前自检。 |
+| `docs/workpaper-annotation.md` | **底稿标注**双 Comments 表、UI 页签、生成命令。 |
+| `.env.example` | LLM 配置模板（可提交）；真实密钥只写本地 `.env`。 |
+| `src/report/export_annotated_workbook.py` | 标注底稿副本导出。 |
+| `scripts/run_case_lead_regression.py` | 案例库 Lead 批量回归。 |
+| `scripts/check_staged_no_secrets.py` | 提交前密钥自检。 |
 
 ## 文档目录
 

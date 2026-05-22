@@ -64,7 +64,9 @@ src/report/      汇总结果，输出报告或人工复核清单
 - 汇总每条资产的质检结果。
 - 生成错误明细、资产级结论和统计摘要。
 - 区分自动化失败、预警和人工复核项。
-- 后续支持导出 Excel、JSON 或对接人工复核系统。
+- **底稿标注**：`export_annotated_workbook.py` → `*_qc_annotated.xlsx`（`Comments【归档前删除】` 主汇总 + `Comments【FA list】` 明细；见 [workpaper-annotation.md](workpaper-annotation.md)）。
+- **UI**：`ui_app.py` / `fa-qc-ui`；**精简 HTML**：`export_review_html.py`。
+- JSON 报告、`manual_review_sections`（AE-001/002 人工核对摘录）。
 
 ### `src/llm/`（M3，部分实现）
 

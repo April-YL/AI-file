@@ -17,7 +17,7 @@
 | 交付物 | 说明 | 状态 |
 | --- | --- | --- |
 | 质检报告 | 结构化 findings 清单 + 汇总（程序维度、资产/行维度） | 进行中（JSON 结构已通，正式报告与 Excel 待完善） |
-| 底稿标注 | 将 findings 回写至底稿对应位置（批注、高亮或专用标注 sheet） | **未开始** |
+| 底稿标注 | `*_qc_annotated.xlsx`：双 Comments 表 + 单元格批注（见 [docs/workpaper-annotation.md](docs/workpaper-annotation.md)） | **M2a 首版已通** |
 
 ## 演进方向：大模型 Agent（M3+）
 
@@ -77,6 +77,7 @@
 - 不提交真实资产编号、真实部门名称、真实人员信息、真实合同或发票信息。
 - 样例资产编号使用 `FA-TEST-001` 这类脱敏编号。
 - 涉及真实数据分析时，只提交规则、脚本和脱敏后的 fixture。
+- **LLM API 密钥**：只放在项目根目录 **`.env`**（已在 `.gitignore`）；**禁止** `git add .env` 或在代码/文档中写真实 API 密钥。提交前运行 `python scripts/check_staged_no_secrets.py`。详见 **[docs/data-security.md](docs/data-security.md)**。
 
 ## 开发约定
 

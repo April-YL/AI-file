@@ -25,13 +25,10 @@ def test_html_includes_lead_section_and_procedure_filter(tmp_path: Path):
     export_review_html(report, html_path)
     text = html_path.read_text(encoding="utf-8")
 
-    assert 'id="lead-sheet-section"' in text
-    assert "Lead（K.00）" in text
-    assert "规则矩阵" in text
-    assert 'id="issues-section"' in text
-    assert 'id="proc-filter"' in text
-    assert "filterIssuesByProcedure" in text
-    assert "K.00 Lead" in text or "K.00" in text
+    assert 'id="findings"' in text
+    assert "Findings 清单" in text
+    assert "Comments" in text
+    assert "FAIL" in text or "NEED_REVIEW" in text
 
 
 def test_html_lead_section_from_minimal_workbook(tmp_path: Path):
@@ -62,5 +59,5 @@ def test_html_lead_section_from_minimal_workbook(tmp_path: Path):
     html_path = tmp_path / "lead.html"
     export_review_html(report, html_path)
     text = html_path.read_text(encoding="utf-8")
-    assert "lead_required_fields" in text
-    assert "lead-sheet-section" in text
+    assert "lead_required_fields" in text or "FAIL" in text
+    assert "findings" in text

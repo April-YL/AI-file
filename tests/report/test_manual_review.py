@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import openpyxl
@@ -51,6 +52,5 @@ def test_report_contains_manual_review_sections(full_workbook: Path, tmp_path: P
     export_review_html(report, html_path)
     text = html_path.read_text(encoding="utf-8")
     assert "AE-001" in text
-    assert "100000" in text
-    assert 'id="lead-sheet-section"' in text
-    assert 'id="proc-filter"' in text
+    assert 'id="findings"' in text
+    assert "100000" in json.dumps(data, ensure_ascii=False)

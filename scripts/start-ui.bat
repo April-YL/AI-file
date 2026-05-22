@@ -23,12 +23,18 @@ if not exist ".venv\Scripts\python.exe" (
     )
     echo 安装完成。
     echo.
+) else (
+    call .venv\Scripts\pip install -e ".[ui]" -q 2>nul
 )
 
 echo [2/2] 启动界面，浏览器将打开 http://localhost:8501
 echo 关闭本窗口请按 Ctrl+C
+echo 提示：也可在项目根目录执行 fa-qc-ui（需先 pip install -e ".[ui]"）
 echo.
 
-.venv\Scripts\python.exe -m streamlit run src\report\ui_app.py --server.headless true --browser.gatherUsageStats false
+.venv\Scripts\fa-qc-ui.exe 2>nul
+if errorlevel 1 (
+    .venv\Scripts\python.exe -m streamlit run src\report\ui_app.py --server.headless true --browser.gatherUsageStats false
+)
 
 pause

@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+# UI Findings 分块顺序（质检员工作流）
+FINDING_UI_GROUPS: tuple[tuple[str, str], ...] = (
+    ("SUMMARY", "汇总页 (PSP / AE-003)"),
+    ("K.00", "K.00 Lead"),
+    ("FA_LIST", "FA 清单"),
+    ("K.01", "K.01 后推"),
+    ("K.02", "K.02 新增/处置"),
+)
+
 PROCEDURE_LABELS: dict[str, str] = {
     "K.00": "K.00 Lead",
     "SUMMARY": "汇总页 (PSP / AE-003)",

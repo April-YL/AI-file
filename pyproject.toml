@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "openpyxl>=3.1.0",
     "httpx>=0.27",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -29,14 +30,20 @@ all = [
 [project.scripts]
 fa-qc-diagnose = "ingest.cli:main"
 fa-qc-run = "report.cli:main"
-fa-qc-ui = "report.ui_launcher:main"
+fa-qc-ui = "fa_qc_ui:main"
 
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.package-dir]
+"" = "src"
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools]
+py-modules = ["fa_qc_ui"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -12,7 +12,7 @@
   1. **质检报告**（findings 清单、严重级别、程序/资产维度汇总、复核建议）。
   2. **底稿标注**（在原底稿副本上批注/高亮问题位置，与 findings 一一对应）。
 
-当前代码完成 **M1 切片** + **M2a Demo 流水线**（`fa-qc-run` + Excel FA list/汇总/Lead + JSON/HTML 报告）；**Streamlit 本地 UI 已可用**；**底稿标注尚未实现**。
+当前代码完成 **M1 切片** + **M2a 流水线**（`fa-qc-run` / `fa-qc-ui` + Lead/汇总规则 + **底稿标注首版** + 精简 HTML + 案例库 Lead 回归）。
 
 ## 当前状态
 
@@ -21,7 +21,7 @@
 - `src/ingest/`：sheet 分类、字段映射、底稿诊断 CLI、FA list CSV/Excel 解析（`load_fa_list_from_workbook`）。
 - `src/rules/` + `src/report/`：首批 3 条 FA list 规则 + JSON 报告；**`fa-qc-run` CLI 已可用**。
 - 规则字典映射：`docs/rule-dictionary-mapping.md`、`src/rules/registry.py`、`tests/fixtures/rule_dictionary_*.csv`
-- **距终态差距**：全 checklist 覆盖、正式质检报告 Excel 版、**底稿标注回写**、汇总/K.01 规则、整本多 sheet 端到端。
+- **距终态差距**：全 checklist 覆盖、正式质检报告 Excel 版、标注精度（单元格坐标/共性合并规则）、K.01 规则余量。
 
 ## 已完成
 
@@ -47,6 +47,10 @@
 - **本地 UI**：`fa-qc-ui`（`src/report/ui_app.py`）、`scripts/start-ui.bat`、根目录 `启动质检界面.bat`；多文件上传、问题清单/人工核对/HTML 预览与下载
 - **Lead + 人工核对**：`lead_sheet.py`、`manual_review.py`、`export_review_html.py`；AE-001/002 规则与 `workbook_with_lead.xlsx` fixture
 - **Lead P0 规则 + 报告块**：模块 1–5 共 13 条 `run_lead_rules`；`lead_sheet_report.py`；注册表 `LEAD-001`～`LEAD-010` + AE-004 已实现
+- **底稿标注 v0**：`export_annotated_workbook.py` — `Comments【归档前删除】`（其他程序逐条 + FA list 共性行）+ `Comments【FA list】`（明细）+ 单元格批注；文档 [workpaper-annotation.md](workpaper-annotation.md)
+- **UI（质检员向）**：Findings 分程序、人工复核摘录（AE-001/002 + 基准信息）、双 Comments 说明、标注底稿下载
+- **安全/LLM**：`docs/data-security.md`、`.env.example`、`python-dotenv`、`fa_qc_ui` 入口、`scripts/test_llm_connection.py`
+- **案例库 Lead 回归**：`scripts/run_case_lead_regression.py`、`artifacts/case_lead_regression.md`
 
 ## 进行中（M2a = Agent P1）
 
@@ -63,8 +67,8 @@
 1. **rules（Lead/K.01，P0 余量）**：`lead_fluctuation_notes_refs`、`lead_arp_three_triggers`；K.01 `rollforward_*` 列完整性；Streamlit Lead 页签（可选）
 2. **M3c（P1）**：`--llm-rules`、`--llm-checklist`（见 roadmap）；**非**优先扩展 `--llm` 报告叙述
 3. **ingest**：案例库字段映射回归
-4. report：Excel 报告 + openpyxl 批注回写
-5. 案例库端到端回归（`fa-qc-run` / UI）；Lead 批量回归见 `artifacts/case_lead_regression.md`（`python scripts/run_case_lead_regression.py`）
+4. report：独立 Excel 质检报告（非标注副本）、标注 Cell Ref. 与共性合并规则优化
+5. 案例库端到端回归（`fa-qc-run` / UI）；Lead 见 `python scripts/run_case_lead_regression.py`
 
 **暂缓为主战场**：单独扩展 FA list 规则条数。
 
@@ -105,9 +109,9 @@
 
 ## 已知问题
 
-- **底稿标注**：未实现，为终态硬缺口。
-- 质检报告尚无面向业务人员的 Excel 版；当前以 JSON 结构为主。
-- Excel 底稿已支持 FA list + 汇总页（AE-003）；K.01 后推、底稿标注仍未接入。
+- **底稿标注**：首版已通（双 Comments + 批注）；无行号 finding、FA 合并粒度仍待业务确认。
+- 质检报告尚无面向业务人员的独立 Excel 版；当前以 JSON + 标注副本为主。
+- Excel 底稿已支持 FA list + 汇总页（AE-003）+ Lead 规则 + 标注导出。
 - `fa-qc-run` 在 overall=FAIL 时退出码 3（便于 CI）；PASS/WARN 为 0。
 - PDF 程序指引未抽取正文，可能需 OCR。
 - A 公司底稿约 42MB 已跳过，需读取性能优化。
@@ -120,6 +124,8 @@
 - `docs/workpaper-fields.md`、`docs/architecture.md`
 - `src/ingest/records.py`、`src/report/cli.py`、`src/report/ui_app.py` — 流水线与 UI 入口
 - `scripts/start-ui.bat`、`启动质检界面.bat` — 本地界面启动
+- `docs/workpaper-annotation.md`、`docs/data-security.md` — 标注交付与安全
+- `src/report/export_annotated_workbook.py`、`scripts/run_case_lead_regression.py`
 - `src/ingest/`、`src/rules/`、`src/report/`
 - `tests/rules/`、`tests/ingest/`、`tests/fixtures/`
 - `docs/ONBOARDING.md`

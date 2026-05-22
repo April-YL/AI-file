@@ -12,6 +12,11 @@ from ingest.records import (
     load_fa_list_from_workbook,
 )
 from llm.config import LlmConfigError, load_llm_config
+from llm.env_loader import load_project_dotenv
+from report.export_annotated_workbook import (
+    annotated_workbook_path,
+    export_annotated_workbook,
+)
 from report.export_json import export_report_json
 from report.export_review_html import export_review_html
 from report.pipeline import run_input_qc
@@ -87,7 +92,18 @@ def print_summary(report, output_path: Path) -> None:
     print(f"Report JSON: {output_path}")
 
 
+def _print_annotated_hint(annotated_path: Path, report) -> None:
+    from report.export_annotated_workbook import comments_summary_stats
+
+    stats = comments_summary_stats(report)
+    print(
+        f"Annotated workbook: {annotated_path} "
+        f"(sheet «Comments» summary: {stats['finding_count']} findings)"
+    )
+
+
 def main() -> None:
+    load_project_dotenv()
     parser = argparse.ArgumentParser(
         description="固定资产质检：读取 FA list（CSV/Excel）并输出 JSON 质检报告",
     )
@@ -121,7 +137,18 @@ def main() -> None:
     parser.add_argument(
         "--no-html",
         action="store_true",
-        help="不生成人工核对 HTML 报告",
+        help="不生成 findings 摘要 HTML",
+    )
+    parser.add_argument(
+        "--no-annotated",
+        action="store_true",
+        help="不生成带标注底稿副本（默认 Excel 会生成 *_qc_annotated.xlsx）",
+    )
+    parser.add_argument(
+        "--annotated-output",
+        type=Path,
+        default=None,
+        help="标注底稿输出路径（默认：<输入文件名>_qc_annotated.xlsx）",
     )
     llm_group = parser.add_mutually_exclusive_group()
     llm_group.add_argument(
@@ -182,10 +209,16 @@ def main() -> None:
         sys.exit(4)
     output_path = (args.output or default_output_path(input_path)).resolve()
     export_report_json(report, output_path)
+
+    if is_excel and not args.no_annotated:
+        ann_path = (args.annotated_output or annotated_workbook_path(input_path)).resolve()
+        export_annotated_workbook(report, input_path, ann_path)
+        _print_annotated_hint(ann_path, report)
+
     if not args.no_html:
         html_path = review_html_path_for(output_path).resolve()
         export_review_html(report, html_path)
-        print(f"Review HTML: {html_path}")
+        print(f"Findings HTML: {html_path}")
     print_summary(report, output_path)
 
     if report.summary.overall_severity.value == "FAIL":

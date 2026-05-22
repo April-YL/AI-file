@@ -10,5 +10,6 @@ alwaysApply: true
 - 架构和模块边界以 `docs/architecture.md` 为准。
 - 质检结论只能使用：`PASS`、`WARN`、`FAIL`、`NEED_REVIEW`。
 - 不提交真实资产编号、真实部门、真实人员、合同、发票或密钥信息。
+- **`.env` / `FA_QC_LLM_API_KEY` 永不进 Git**（见 `docs/data-security.md`）；提交前运行 `python scripts/check_staged_no_secrets.py`；仅 `.env.example` 可入库。
 - 长期有效的决策不要只留在聊天里，应写入 `docs/`、`.cursor/rules/` 或 `.cursor/skills/`。
 - **LLM 优先级**：质检点准确 = `rules` + `ingest`（P0）；LLM 主战场 = `--llm-rules` / `--llm-checklist`（见 `docs/llm-agent-roadmap.md`）；`--llm` 报告叙述为低优先级。

@@ -11,7 +11,7 @@
 | 交付物 | 说明 | 当前状态 |
 | --- | --- | --- |
 | 质检报告 | findings 清单、严重级别、程序/资产汇总、复核建议 | 进行中（JSON 结构已通） |
-| 底稿标注 | 在底稿副本上批注/高亮，与 findings 一一对应 | **未开始** |
+| 底稿标注 | `*_qc_annotated.xlsx`（双 Comments 表 + 批注） | **M2a 首版**（见 [workpaper-annotation.md](workpaper-annotation.md)） |
 
 ## 1. 获取代码
 
@@ -78,7 +78,7 @@ git status -sb
 
 | 能力 | 路径 / 说明 |
 | --- | --- |
-| **底稿标注（必交付）** | `src/report/` 待增加批注/高亮回写，输出 `*_qc_annotated.xlsx` |
+| **底稿标注（必交付）** | `export_annotated_workbook.py` → `*_qc_annotated.xlsx`（已实现首版） |
 | **正式质检报告（必交付）** | 面向业务的报告导出（Excel 等）；当前主要为 JSON 结构 |
 | **M2a 流水线** | `fa-qc-run`、整本 Excel 解析、汇总/K.01 规则、底稿标注 |
 | 全 checklist 规则 | 大部分仍为 planned / manual_only |
@@ -146,14 +146,16 @@ fa-qc-run tests/fixtures/fa_list_mixed.csv
 - **LLM 终态**：挂在 **ingest 映射、`--llm-rules` 语义质检点、`--llm-checklist` 逐条评估**——不是报告摘要。
 - **`--llm`（层 4）**：规则跑完后的文字摘要，**已实现、优先级最低**；勾选它**不能**代替 Lead 等规则实现。
 
-复制 `.env.example` 为 `.env`，填写 `FA_QC_LLM_API_KEY`（勿提交 `.env`）。
+复制 `.env.example` 为 `.env`，填写 `FA_QC_LLM_API_KEY`（**勿提交 `.env`**，见 [data-security.md](data-security.md)）。
+
+提交代码前请执行：`python scripts/check_staged_no_secrets.py`
 
 ```powershell
 # 团队验收基线（推荐）：纯规则
 fa-qc-run tests/fixtures/workbook_with_lead.xlsx
 
 # 层 4 报告叙述（可选，低优先级；已实现）
-# $env:FA_QC_LLM_API_KEY = "sk-..."
+# $env:FA_QC_LLM_API_KEY = "<your-api-key>"
 # fa-qc-run tests/fixtures/workbook_with_lead.xlsx --llm
 
 # M3c 规划（高优先级，尚未实现）
