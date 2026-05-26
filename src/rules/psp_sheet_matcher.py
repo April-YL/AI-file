@@ -119,6 +119,62 @@ def find_matching_sheet(
     return best_title, best_score, best_reason
 
 
+def rank_sheet_candidates(
+    ref: str | None,
+    workbook_sheet_titles: Sequence[str],
+    *,
+    top_k: int = 3,
+    min_score: float = 0.35,
+) -> list[tuple[str, float, str]]:
+    """
+    为程序页引用返回候选底稿页列表，供语义复核使用。
+
+    返回项：(原始表名, 置信度 0~1, 原因码)。
+    """
+    titles = [t for t in workbook_sheet_titles if t and not is_likely_internal_sheet(t)]
+    if not ref or not str(ref).strip() or not titles:
+        return []
+
+    best_by_title: dict[str, tuple[float, str]] = {}
+    for rq in ref_query_strings(ref):
+        nr = _norm_title(rq)
+        if len(nr) < 2:
+            continue
+        k_ref = _k_tokens(nr)
+        for orig in titles:
+            nt = _norm_title(orig)
+            if not nt:
+                continue
+            reason = "fuzzy_ratio"
+            if nr == nt:
+                sc = 1.0
+                reason = "exact_normalized"
+            elif nr in nt or nt in nr:
+                shorter, longer = (nr, nt) if len(nr) <= len(nt) else (nt, nr)
+                cov = len(shorter) / max(len(longer), 1)
+                sc = 0.86 + min(0.12, 0.12 * cov)
+                reason = "substring"
+            else:
+                ratio = _best_ratio(nr, nt)
+                k_bonus = 0.0
+                if k_ref:
+                    k_sheet = _k_tokens(nt)
+                    if k_ref & k_sheet:
+                        k_bonus = 0.15
+                sc = min(0.97, ratio + k_bonus * (1.0 - ratio * 0.5))
+            prev = best_by_title.get(orig)
+            if prev is None or sc > prev[0]:
+                best_by_title[orig] = (sc, reason)
+
+    ranked = [
+        (title, score, reason)
+        for title, (score, reason) in best_by_title.items()
+        if score >= min_score
+    ]
+    ranked.sort(key=lambda x: x[1], reverse=True)
+    return ranked[:top_k]
+
+
 def count_non_empty_cells(
     workbook_path: str | Path,
     sheet_title: str,

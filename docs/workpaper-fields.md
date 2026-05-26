@@ -35,7 +35,7 @@
 | --- | --- | --- |
 | `汇总` | 程序目录、是否执行、不执行原因和注意事项 | 标准 K1 SWP 版式：B/C 程序编号与说明、F「程序页」、G「执行」、H「不执行的原因」、I「注意事项」；ingest 另兼容四列简版（`summary_sheet.py` `layout=classic`）。**AE-003**：G 列为已执行时，`run_workbook_qc` 将「程序页/工作表」与工作簿内 sheet 名称做规范化与模糊匹配（`psp_sheet_matcher`）；confidence 不足为 `NEED_REVIEW`，无匹配为 `FAIL`；可选对目标表前若干行非空单元格过少发 `WARN`（空表/未完成提示）。 |
 | `K.00 Lead Sheet` | 基础信息、两期变动、预期分析 | 标准版含 **认定/CRA/TT** 表 + ARP + 两期引导主表；**简版**（案例 A）可省略 CRA 区，**波动幅度金额直接 link TE** 而非 TT。ingest：`lead_sheet_blocks.py` + `lead_sheet.py`（`layout_variant=no_cra_te_volatility`） |
-| `K.01 Agree SL to GL` | 后推明细表与总账/明细账/清单核对 | `src/rules/` |
+| `K.01 Agree SL to GL` | 后推明细表（BKD）与总账/明细账/清单核对；版式见下表 | `src/ingest/rollforward_sheet.py`、`src/rules/`（`rollforward_*`） |
 | `FA list` | 固定资产明细清单 | `src/ingest/`、`src/rules/` |
 | `K.02.1 新增测试` | 新增详细测试 | `src/report/`、人工复核 |
 | `新增清单` | 当期新增资产清单 | `src/ingest/`、`src/rules/` |
@@ -44,6 +44,28 @@
 | `K.03.1 SAP` | 折旧实质性分析程序 | `src/report/`、人工复核 |
 | `K.03.2 折旧测试TOD` | 折旧详细测试 | `src/rules/` |
 | `K.03.3 折旧政策复核` | 折旧政策合理性复核 | 人工复核 |
+
+### K.01 Agree SL to GL（后推 / BKD）
+
+> **规划**：[planning/k01-qc-rules.md](planning/k01-qc-rules.md)、[planning/k01-workpaper-layouts.md](planning/k01-workpaper-layouts.md)。SOP 指引摘录：`artifacts/_k01_sop_guidance.txt`（本地资料库生成）。
+
+| 版式 profile | 特征 | 案例库 |
+| --- | --- | --- |
+| `sop_bkd_matrix` | 表1：资产类别列 × 交易行（购置、计提、处置…）× 账面数 / 账表调整/审计调整 / 审定数；表2–4 | SOP 模板 |
+| `category_dual_period` | 固定资产类别 + 审2/审3（或表2/表3）并列四口径 | 少见单独出现 |
+| `hybrid` | 上部：变动金额、TB-原值/差异；下部：类别两期对比 + 合计行 | **B–G 常见** |
+
+| SOP 表段 | 锚点 | 规则/ingest 用途 |
+| --- | --- | --- |
+| 表1 BKD | `表1`、`固定资产类别` | `rollforward_exists`、`rollforward_columns_complete` |
+| 变动/TB | `原值变动金额`、`TB-原值`、`差异` | movement、Lead↔K.01（`lead_rollforward_tb_reconciliation`） |
+| 表2/表3 | `表2 check with 表1`、FA list 汇总 | `rollforward_fa_list_reconciliation`（P1） |
+| 表4 | `折旧费用与利润表科目核对` | P1 |
+| Notes | 明细账与总账差异调查 | `rollforward_difference_over_sad`（P1） |
+
+**标准金额口径**（与 Lead 引导表一致）：`original_value`、`accumulated_depreciation`、`impairment_provision`、`net_value`。
+
+**填列口径（SOP）**：原值/累折/减值为正数；本期减少以负数；账表调整、审计调整链接 `K.00 Lead`。
 
 ### K.00 Lead Sheet 版式变体
 

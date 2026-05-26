@@ -99,6 +99,36 @@ def test_rollforward_total_row():
     assert all(b.period_role.value == "unknown" for b in rf.amount_column_bindings)
 
 
+def test_rollforward_dual_period_audit2_audit3():
+    rows: list[tuple] = [()] * 56
+    rows[51] = ("", "审2", "", "", "", "", "", "审3", "", "", "", "")
+    rows[53] = (
+        "",
+        "固定资产类别",
+        "原值",
+        "累计折旧",
+        "减值准备",
+        "净值",
+        "",
+        "原值",
+        "累计折旧",
+        "减值准备",
+        "净值",
+    )
+    rows[54] = ("", "办公设备", 100, 10, 0, 90, "", 110, 12, 0, 98)
+    rows[55] = ("", "合计", 100, 10, 0, 90, "", 110, 12, 0, 98)
+    rows[32] = ("", "变动", "原值变动金额", "本年VS上年", 0, 0, 0, 10)
+
+    rf = parse_rollforward_rows(rows, source_sheet="K.01")
+    from ingest.models import RollforwardPeriodRole
+
+    assert any(b.period_role == RollforwardPeriodRole.OPENING for b in rf.amount_column_bindings)
+    assert any(b.period_role == RollforwardPeriodRole.ENDING for b in rf.amount_column_bindings)
+    assert rf.has_movement_rows
+    assert rf.opening_totals.get("original_value") == Decimal("100")
+    assert rf.ending_totals.get("original_value") == Decimal("110")
+
+
 def test_rollforward_opening_ending_bindings_and_totals():
     rows = [
         ("类别", "期初原值", "期末原值", "期初累计折旧", "期末累计折旧", "期末净值"),

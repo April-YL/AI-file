@@ -62,10 +62,13 @@
   - **Lead 回归表**：`artifacts/case_lead_regression.md`（B–G 共 6 份；A 42MB 永久跳过）
   - **待做**：对案例库 6 份底稿重跑 `fa-qc-diagnose` 更新 `case-workpaper-diagnostic.md`
 - **Lead 质检规则（模块 1–5 P0）**：含 `lead_check_with_a3_row`（ingest 摘录 Check with A3/Diff/Notes + Diff≠0/缺说明 FAIL）；其余 `lead_*`、AE-004、`lead_rollforward_tb_reconciliation`；`lead_runner` + `lead_sheet_section`
+- **K.01 规划文档（2026-05-26）**：`docs/planning/k01-qc-rules.md`、`docs/planning/k01-workpaper-layouts.md`
+- **K.01 P0 规则（2026-05-26）**：ingest 增强（审2/审3 列块、变动行、多 sheet 优选）；`rollforward_exists`、`rollforward_columns_complete`（L1）；`rollforward_runner` + pipeline；registry **GL-006/007** implemented
 
 ## 下一步（M2a 验收导向）
 
-1. **rules（Lead/K.01，P0 余量）**：`lead_fluctuation_notes_refs`、`lead_arp_three_triggers`；K.01 `rollforward_*` 列完整性；Streamlit Lead 页签（可选）
+1. **K.01**：案例库 B–G `fa-qc-run` 回归；`rollforward_abnormal_amounts`（GL-005）；可选 `rollforward_sheet_report` / UI 页签
+2. **rules（Lead 余量）**：`lead_fluctuation_notes_refs`、`lead_arp_three_triggers`；`rollforward_abnormal_amounts`；Streamlit Lead/K.01 页签（可选）
 2. **M3c（P1）**：`--llm-rules`、`--llm-checklist`（见 roadmap）；**非**优先扩展 `--llm` 报告叙述
 3. **ingest**：案例库字段映射回归
 4. report：独立 Excel 质检报告（非标注副本）、标注 Cell Ref. 与共性合并规则优化
@@ -133,6 +136,7 @@
 - `docs/ONBOARDING.md`
 - `docs/llm-agent-roadmap.md` — 三层 LLM 分工与 M3c 任务（C1–C9）
 - `docs/planning/lead-qc-rules.md` — K.00 分模块质检点、SOP 对照遗漏、M2 实现顺序
+- `docs/planning/k01-qc-rules.md`、`docs/planning/k01-workpaper-layouts.md` — K.01 SOP 对照、版式 profile、P0 实现顺序
 
 ## Demo 命令（本次收工验证）
 

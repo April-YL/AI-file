@@ -16,9 +16,11 @@ from ingest.models import (
     AssetRecord,
     FieldMapping,
     RollforwardColumnBinding,
+    RollforwardLayoutProfile,
     RollforwardPeriodRole,
     SheetKind,
 )
+from ingest.sheet_loader import SheetLoadCandidate
 from ingest.records import parse_fa_list_rows
 from ingest.sheet_loader import find_sheets_by_kind
 from ingest.workbook_reader import read_worksheet_rows
@@ -44,6 +46,8 @@ class RollforwardSheetDataset:
     opening_totals: dict[str, Decimal | None] = field(default_factory=dict)
     ending_totals: dict[str, Decimal | None] = field(default_factory=dict)
     total_row: int | None = None
+    layout_profile: RollforwardLayoutProfile = RollforwardLayoutProfile.UNRECOGNIZED
+    has_movement_rows: bool = False
     notes: list[str] = field(default_factory=list)
 
 
@@ -120,6 +124,8 @@ def _infer_rollforward_period_role(header_text: str) -> RollforwardPeriodRole:
         return RollforwardPeriodRole.OPENING
     if "期末" in raw or "年末" in raw:
         return RollforwardPeriodRole.ENDING
+    if "变动金额" in raw or "变动比例" in raw:
+        return RollforwardPeriodRole.MOVEMENT
     movement_tokens = (
         "本期增加",
         "本期减少",
@@ -142,6 +148,194 @@ def _infer_rollforward_period_role(header_text: str) -> RollforwardPeriodRole:
     if raw.startswith("本期") or raw.startswith("本年"):
         return RollforwardPeriodRole.MOVEMENT
     return RollforwardPeriodRole.UNKNOWN
+
+
+def _period_role_from_block_label(text: str) -> RollforwardPeriodRole:
+    """表头上一行时期块标签（审2/审3、表2/表3 等）。"""
+    raw = str(text).strip()
+    if not raw or len(raw) > 40:
+        return RollforwardPeriodRole.UNKNOWN
+    compact = re.sub(r"\s+", "", raw)
+    if compact in ("审3", "表3"):
+        return RollforwardPeriodRole.ENDING
+    if compact in ("审2", "表2"):
+        return RollforwardPeriodRole.OPENING
+    if "checkwith" in compact.replace(" ", "").lower():
+        return RollforwardPeriodRole.UNKNOWN
+    if "审3" in raw or raw.startswith("表3"):
+        return RollforwardPeriodRole.ENDING
+    if "审2" in raw or raw.startswith("表2"):
+        return RollforwardPeriodRole.OPENING
+    if "期初" in raw or "年初" in raw or "上年" in raw:
+        return RollforwardPeriodRole.OPENING
+    if "期末" in raw or "年末" in raw or raw.startswith("本年"):
+        return RollforwardPeriodRole.ENDING
+    return RollforwardPeriodRole.UNKNOWN
+
+
+def _apply_dual_period_column_roles(
+    rows: list[tuple[Any, ...]],
+    header_row: int | None,
+    bindings: list[RollforwardColumnBinding],
+) -> list[RollforwardColumnBinding]:
+    """将 header 上方审2/审3 等块标签继承到金额列 binding。"""
+    if not header_row or header_row < 3 or not bindings:
+        return bindings
+    anchors: list[tuple[int, RollforwardPeriodRole]] = []
+    base_idx = header_row - 1
+    for delta in range(2, 6):
+        ri = base_idx - delta
+        if ri < 0 or ri >= len(rows):
+            continue
+        row = rows[ri]
+        for col_i, val in enumerate(row):
+            role = _period_role_from_block_label(str(val) if val is not None else "")
+            if role != RollforwardPeriodRole.UNKNOWN:
+                anchors.append((col_i + 1, role))
+    if not anchors:
+        return bindings
+    anchors.sort(key=lambda x: x[0])
+    out: list[RollforwardColumnBinding] = []
+    for b in bindings:
+        role = b.period_role
+        if role == RollforwardPeriodRole.UNKNOWN:
+            inherited = RollforwardPeriodRole.UNKNOWN
+            for col, r in anchors:
+                if col <= b.column_index:
+                    inherited = r
+            role = inherited
+        out.append(
+            RollforwardColumnBinding(
+                measure=b.measure,
+                period_role=role,
+                column_index=b.column_index,
+                source_header=b.source_header,
+            )
+        )
+    return out
+
+
+def _supplement_movement_bindings(
+    rows: list[tuple[Any, ...]],
+    bindings: list[RollforwardColumnBinding],
+) -> list[RollforwardColumnBinding]:
+    """扫描「原值变动金额」等行，补充 movement 列绑定。"""
+    seen = {b.column_index for b in bindings}
+    out = list(bindings)
+    for row in rows:
+        for col_i, val in enumerate(row):
+            raw = _cell_str(val)
+            if not raw or "变动" not in raw:
+                continue
+            measure = _infer_rollforward_measure(raw)
+            if measure is None:
+                continue
+            col = col_i + 1
+            if col in seen:
+                for i, b in enumerate(out):
+                    if b.column_index == col and b.period_role == RollforwardPeriodRole.UNKNOWN:
+                        out[i] = RollforwardColumnBinding(
+                            measure=b.measure,
+                            period_role=RollforwardPeriodRole.MOVEMENT,
+                            column_index=b.column_index,
+                            source_header=b.source_header,
+                        )
+                continue
+            seen.add(col)
+            out.append(
+                RollforwardColumnBinding(
+                    measure=measure,
+                    period_role=RollforwardPeriodRole.MOVEMENT,
+                    column_index=col,
+                    source_header=raw,
+                )
+            )
+    return out
+
+
+def _detect_movement_rows(rows: list[tuple[Any, ...]]) -> bool:
+    movement_row_tokens = (
+        "原值变动金额",
+        "累计折旧变动金额",
+        "减值准备变动金额",
+        "净值变动金额",
+        "处置或报废",
+    )
+    transaction_row_tokens = ("购置", "计提折旧", "计提", "在建工程转入")
+    for row in rows:
+        for val in row[:6]:
+            text = _cell_str(val)
+            if not text:
+                continue
+            if any(tok in text for tok in movement_row_tokens):
+                return True
+            if text in transaction_row_tokens:
+                return True
+            if text == "变动":
+                return True
+    return False
+
+
+def _sheet_text_blob(rows: list[tuple[Any, ...]], *, max_rows: int = 80) -> str:
+    parts: list[str] = []
+    for row in rows[:max_rows]:
+        for val in row[:30]:
+            text = _cell_str(val)
+            if text:
+                parts.append(text)
+    return " ".join(parts)
+
+
+def _detect_layout_profile(
+    rows: list[tuple[Any, ...]],
+    bindings: list[RollforwardColumnBinding],
+    *,
+    has_movement_rows: bool,
+) -> RollforwardLayoutProfile:
+    blob = _sheet_text_blob(rows)
+    short_labels = {
+        _cell_str(v)
+        for row in rows[:70]
+        for v in row[:20]
+        if _cell_str(v) and len(_cell_str(v) or "") <= 8
+    }
+    if {"表2", "表3"}.issubset(short_labels) or {"审2", "审3"}.issubset(short_labels):
+        if has_movement_rows:
+            return RollforwardLayoutProfile.HYBRID
+        return RollforwardLayoutProfile.CATEGORY_DUAL_PERIOD
+    if (
+        "账面数" in blob
+        and "账表调整" in blob
+        and "固定资产类别" in blob
+        and re.search(r"(?:^|\s)表1(?:\s|$)", blob)
+    ):
+        return RollforwardLayoutProfile.SOP_BKD_MATRIX
+    has_period = any(
+        b.period_role in (RollforwardPeriodRole.OPENING, RollforwardPeriodRole.ENDING)
+        for b in bindings
+    )
+    if has_movement_rows and ("固定资产类别" in blob or "审2" in blob or "TB-" in blob):
+        return RollforwardLayoutProfile.HYBRID
+    if has_period or "固定资产类别" in blob or "审2" in blob:
+        return RollforwardLayoutProfile.CATEGORY_DUAL_PERIOD
+    if bindings or "后推" in blob or "Agree" in blob:
+        return RollforwardLayoutProfile.CATEGORY_DUAL_PERIOD
+    return RollforwardLayoutProfile.UNRECOGNIZED
+
+
+def _choose_rollforward_candidate(candidates: list[SheetLoadCandidate]) -> SheetLoadCandidate:
+    """多 K.01 候选时优先当年主表（降低 -24 / 尾随 - 权重）。"""
+
+    def sort_key(c: SheetLoadCandidate) -> tuple[float, float, str]:
+        name = c.sheet_name.strip()
+        penalty = 0.0
+        if re.search(r"-24\s*$", name, re.I):
+            penalty += 1.0
+        if name.endswith("-") and not name.lower().endswith("gl"):
+            penalty += 0.5
+        return (penalty, -c.confidence, name)
+
+    return sorted(candidates, key=sort_key)[0]
 
 
 def infer_rollforward_column_bindings(
@@ -229,11 +423,20 @@ def parse_rollforward_rows(
     mapped_fields, _ = map_headers(header_cells, sheet_kind=SheetKind.ROLLFORWARD) if header_cells else ([], [])
     col_by_field = {m.standard_field: m.column_index for m in mapped_fields}
     bindings = infer_rollforward_column_bindings(header_cells) if header_cells else []
+    bindings = _apply_dual_period_column_roles(rows, header_row, bindings)
+    bindings = _supplement_movement_bindings(rows, bindings)
+    has_movement_rows = _detect_movement_rows(rows)
+    layout_profile = _detect_layout_profile(rows, bindings, has_movement_rows=has_movement_rows)
 
     ending: dict[str, Decimal | None] = {}
     opening: dict[str, Decimal | None] = {}
     total_row: int | None = None
     notes: list[str] = []
+    if any(
+        b.period_role in (RollforwardPeriodRole.OPENING, RollforwardPeriodRole.ENDING)
+        for b in bindings
+    ):
+        notes.append("period_labels_applied")
     total_row_data: tuple[Any, ...] | None = None
 
     if header_row and (col_by_field or bindings):
@@ -306,6 +509,8 @@ def parse_rollforward_rows(
         opening_totals=opening,
         ending_totals=ending,
         total_row=total_row,
+        layout_profile=layout_profile,
+        has_movement_rows=has_movement_rows,
         notes=notes,
     )
 
@@ -337,7 +542,7 @@ def load_rollforward_from_workbook(
             header_row=None,
             mapped_fields=[],
         )
-    chosen = candidates[0]
+    chosen = _choose_rollforward_candidate(candidates)
     return parse_rollforward_rows(
         chosen.rows,
         source_file=str(path),

@@ -58,7 +58,9 @@
 | GL-002 | rollforward_fa_list_reconciliation | 期末账面数与FA list核对 | K.01 | P2 | REVIEW | planned |
 | GL-003 | lead_prior_year_reconciliation | 期初期末审定数与Lead核对 | K.00 | P4 | REVIEW | manual_only |
 | GL-004 | depreciation_pl_reconciliation | 折旧费用与利润表核对 | K.00 | MANUAL | MANUAL_ONLY | manual_only |
-| GL-005 | rollforward_abnormal_amounts | 资产异常情况识别 | FA_LIST | P2 | AUTO_WARN | planned |
+| GL-005 | rollforward_abnormal_amounts | 后推表异常金额（累折>原值、负净值、处置转出） | **K.01** | **P1** | AUTO_FAIL/WARN | planned（procedure 以 K.01 为准，见 [planning/k01-qc-rules.md](planning/k01-qc-rules.md)） |
+| GL-006 | rollforward_exists | 后推明细表存在 | K.01 | **P1** | AUTO_FAIL | planned（qc-checklist §三；字典主表待增行） |
+| GL-007 | rollforward_columns_complete | 后推金额列完整（M2a=L1） | K.01 | **P1** | AUTO_FAIL | planned（L2 矩阵见 [planning/k01-workpaper-layouts.md](planning/k01-workpaper-layouts.md)） |
 | FA-RC-001 | fa_list_required_fields | FA list 必需字段完整 | FA_LIST | **P1** | AUTO_FAIL | **implemented** |
 | FA-RC-002 | unique_asset_id | 资产编号唯一 | FA_LIST | **P1** | AUTO_FAIL | **implemented** |
 | FA-RC-003 | asset_value_consistency | 金额勾稽一致 | FA_LIST | **P1** | AUTO_FAIL | **implemented** |

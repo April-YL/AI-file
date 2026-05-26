@@ -36,6 +36,8 @@ def test_iter_implemented_includes_fa_and_psp_rules():
     assert "lead_tt_overall_min" in ids
     assert "unexpected_movement_investigation" in ids
     assert "lead_rollforward_tb_reconciliation" in ids
+    assert "rollforward_exists" in ids
+    assert "rollforward_columns_complete" in ids
     assert "fa_list_required_fields" in ids
     assert "psp_completion" in ids
 

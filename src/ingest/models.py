@@ -14,6 +14,15 @@ class RollforwardPeriodRole(str, Enum):
     UNKNOWN = "unknown"
 
 
+class RollforwardLayoutProfile(str, Enum):
+    """K.01 底稿版式（见 docs/planning/k01-workpaper-layouts.md）。"""
+
+    SOP_BKD_MATRIX = "sop_bkd_matrix"
+    CATEGORY_DUAL_PERIOD = "category_dual_period"
+    HYBRID = "hybrid"
+    UNRECOGNIZED = "unrecognized"
+
+
 class SheetKind(str, Enum):
     FA_LIST = "fa_list"
     ADDITION_LIST = "addition_list"

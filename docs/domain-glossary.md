@@ -49,10 +49,13 @@
 
 | 类型 / 字段 | 含义 |
 | --- | --- |
+| `RollforwardLayoutProfile` | 底稿版式：`sop_bkd_matrix`（SOP 表1 矩阵）、`category_dual_period`（审2/审3 简表）、`hybrid`（变动/TB 区 + 简表）、`unrecognized`。见 [planning/k01-workpaper-layouts.md](planning/k01-workpaper-layouts.md) |
 | `RollforwardPeriodRole` | `opening`（期初）、`movement`（本期增加/减少/折旧/调整等）、`ending`（期末）、`unknown`（未标注时期） |
 | `RollforwardColumnBinding` | `measure`（`original_value` / `accumulated_depreciation` / `impairment_provision` / `net_value`）+ `period_role` + 源列 |
 | `RollforwardSheetDataset.amount_column_bindings` | 后推表全部推断出的金额列绑定，供「列完整性」类规则使用 |
 | `opening_totals` / `ending_totals` | 优先自「合计」行按期初/期末列抽取；无明确期初/期末列时回退到单列映射或明细加总 |
+| **列完整 L1 / L2** | **L1**（M2a）：四口径 + 期初/变动/期末可识别（案例库）。**L2**（P1+）：SOP 表1 矩阵 × 账面/调整/审定子列。规则 ID 均为 `rollforward_columns_complete` |
+| **BKD** | 后推明细表（Bookroll）；SOP 表1 主体，含账表调整/审计调整 link Lead |
 
 ## 质检结果
 

@@ -93,3 +93,17 @@ def test_parse_summary_swp_standard_layout():
     roles = {b.role for b in ds.column_bindings}
     assert "procedure_code" in roles
     assert "sheet_ref" in roles
+
+
+def test_parse_summary_swp_keeps_rows_with_only_sheet_ref():
+    rows = [
+        ("", "K.02", "K.02.1 新增测试", "", "", "程序页", "执行", "不执行的原因", "注意事项"),
+        ("", "1", "获取新增清单", "", "", "新增清单", "", "", ""),
+        ("", "2", "执行新增测试", "", "", "K.02.1 新增测试", "", "", ""),
+        ("", "", "", "", "", "K.02.1a 新增选样输出", "", "", ""),
+    ]
+    ds = parse_summary_rows(rows, source_sheet="汇总 ")
+    assert ds.layout == "swp"
+    assert len(ds.programs) == 3
+    assert ds.programs[-1].sheet_ref == "K.02.1a 新增选样输出"
+    assert ds.programs[-1].procedure_name == "K.02.1a 新增选样输出"

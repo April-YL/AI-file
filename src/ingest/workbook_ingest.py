@@ -76,6 +76,8 @@ def _rollforward_summary(rf: RollforwardSheetDataset | None) -> dict[str, Any] |
         ],
         "opening_totals": {k: str(v) for k, v in rf.opening_totals.items() if v is not None},
         "ending_totals": {k: str(v) for k, v in rf.ending_totals.items() if v is not None},
+        "layout_profile": rf.layout_profile.value,
+        "has_movement_rows": rf.has_movement_rows,
         "notes": rf.notes,
     }
 

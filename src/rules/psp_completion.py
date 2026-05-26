@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Callable, Literal
 
 from ingest.summary_sheet import PspProgramRow, SummarySheetDataset
 from rules.models import QcIssue, Severity
@@ -37,6 +39,16 @@ _EXEC_NO = re.compile(
 _EXEC_PARTIAL = re.compile(r"部分|partial", re.IGNORECASE)
 
 
+@dataclass(frozen=True)
+class WaiverSemanticReview:
+    adequacy: Literal["sufficient", "insufficient", "unclear"]
+    rationale: str = ""
+    suggested_action: str = ""
+
+
+WaiverReasonReviewer = Callable[[PspProgramRow], WaiverSemanticReview | None]
+
+
 def _should_skip_row(row: PspProgramRow) -> bool:
     name = (row.procedure_name or "").strip()
     if not name or name in _SKIP_PROCEDURE_NAMES:
@@ -46,7 +58,7 @@ def _should_skip_row(row: PspProgramRow) -> bool:
     return False
 
 
-def _normalize_status(raw: str | None) -> str:
+def normalize_execution_status(raw: str | None) -> str:
     if raw is None:
         return "empty"
     text = str(raw).strip()
@@ -185,9 +197,10 @@ def _check_program_row(
     *,
     workbook_sheet_titles: Sequence[str] | None = None,
     workbook_path: str | None = None,
+    waiver_reason_reviewer: WaiverReasonReviewer | None = None,
 ) -> list[QcIssue]:
     issues: list[QcIssue] = []
-    status = _normalize_status(row.execution_status)
+    status = normalize_execution_status(row.execution_status)
     label = row.procedure_name
     if row.sheet_ref:
         label = f"{label} ({row.sheet_ref})"
@@ -240,6 +253,35 @@ def _check_program_row(
                     source_row=row.source_row,
                 )
             )
+        elif waiver_reason_reviewer is not None:
+            reviewed = waiver_reason_reviewer(row)
+            if reviewed is not None and reviewed.adequacy != "sufficient":
+                severity = (
+                    Severity.WARN
+                    if reviewed.adequacy == "insufficient"
+                    else Severity.NEED_REVIEW
+                )
+                suggestion = reviewed.suggested_action or (
+                    "补充与审计准则、项目风险和替代程序相匹配的不执行说明"
+                )
+                msg_suffix = f"；模型提示：{reviewed.rationale}" if reviewed.rationale else ""
+                issues.append(
+                    QcIssue(
+                        asset_id=None,
+                        rule_id=RULE_ID,
+                        field="waiver_reason",
+                        severity=severity,
+                        message=(
+                            f"程序「{label}」不执行理由语义上"
+                            + ("不足" if reviewed.adequacy == "insufficient" else "不明确")
+                            + msg_suffix
+                        ),
+                        suggestion=suggestion,
+                        procedure_code="SUMMARY",
+                        source_sheet=source_sheet,
+                        source_row=row.source_row,
+                    )
+                )
         elif len(waiver) < _MIN_WAIVER_LEN:
             issues.append(
                 QcIssue(
@@ -249,6 +291,23 @@ def _check_program_row(
                     severity=Severity.WARN,
                     message=f"程序「{label}」不执行理由过短，建议补充充分说明",
                     suggestion="补充与审计准则、项目风险相匹配的拒绝理由",
+                    procedure_code="SUMMARY",
+                    source_sheet=source_sheet,
+                    source_row=row.source_row,
+                )
+            )
+        else:
+            issues.append(
+                QcIssue(
+                    asset_id=None,
+                    rule_id=RULE_ID,
+                    field="waiver_reason",
+                    severity=Severity.NEED_REVIEW,
+                    message=(
+                        f"程序「{label}」标记为不执行，但未启用语义复核，"
+                        "需人工判断拒绝执行理由是否充分合理"
+                    ),
+                    suggestion="启用 LLM 语义复核（--llm）或由 reviewer 人工复核理由充分性",
                     procedure_code="SUMMARY",
                     source_sheet=source_sheet,
                     source_row=row.source_row,
@@ -289,6 +348,8 @@ def check_psp_completion(
     *,
     workbook_sheet_titles: Sequence[str] | None = None,
     workbook_path: str | None = None,
+    waiver_reason_reviewer: WaiverReasonReviewer | None = None,
+    enforce_template_completeness: bool = False,
 ) -> list[QcIssue]:
     issues: list[QcIssue] = []
     if not dataset.programs:
@@ -316,7 +377,95 @@ def check_psp_completion(
                 dataset.source_sheet or "汇总",
                 workbook_sheet_titles=workbook_sheet_titles,
                 workbook_path=workbook_path,
+                waiver_reason_reviewer=waiver_reason_reviewer,
             )
         )
 
+    if enforce_template_completeness and dataset.layout == "swp":
+        issues.extend(
+            _check_template_program_completeness(
+                programs,
+                dataset.source_sheet or "汇总",
+                workbook_sheet_titles=workbook_sheet_titles,
+            )
+        )
+
+    return issues
+
+
+_EXPECTED_TEMPLATE_PROGRAMS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("K.00", ("K.00 Lead Sheet",)),
+    ("K.01", ("K.01 Agree SL to GL",)),
+    ("K.02.1", ("K.02.1 新增测试",)),
+    ("K.02.1a", ("K.02.1a 新增选样输出",)),
+    ("K.02_addition_list", ("新增清单",)),
+    ("K.02.2", ("K.02.2 处置测试",)),
+    ("K.02.2a", ("K.02.2a 处置选样输出",)),
+    ("K.02_disposal_list", ("处置清单",)),
+    # 折旧详细测试：SAP 与 TOD 二选一执行即可。
+    ("K.03_dep_test_alt", ("K.03.1 SAP", "K.03.2 折旧测试TOD")),
+    ("K.03.3", ("K.03.3 折旧政策复核",)),
+    ("K.04", ("K.04 固定资产减值",)),
+)
+
+
+def _norm_text(s: str | None) -> str:
+    if not s:
+        return ""
+    return re.sub(r"\s+", "", str(s)).lower()
+
+
+def _row_matches_expected(row: PspProgramRow, expected_ref: str) -> bool:
+    expected = _norm_text(expected_ref)
+    proc = _norm_text(row.procedure_name)
+    sref = _norm_text(row.sheet_ref)
+    if expected in proc or expected in sref:
+        return True
+    fallback = _fallback_sheet_ref_from_procedure(row.procedure_name)
+    return bool(fallback and _norm_text(fallback) in expected)
+
+
+def _check_template_program_completeness(
+    programs: list[PspProgramRow],
+    source_sheet: str,
+    *,
+    workbook_sheet_titles: Sequence[str] | None,
+) -> list[QcIssue]:
+    issues: list[QcIssue] = []
+    present_rows = [p for p in programs if not _should_skip_row(p)]
+    for _, expected_refs in _EXPECTED_TEMPLATE_PROGRAMS:
+        has_row = any(
+            _row_matches_expected(row, expected_ref)
+            for row in present_rows
+            for expected_ref in expected_refs
+        )
+        if has_row:
+            continue
+        found_sheet = False
+        expected_label = " / ".join(expected_refs)
+        if workbook_sheet_titles:
+            for expected_ref in expected_refs:
+                matched, score, _ = find_matching_sheet(expected_ref, list(workbook_sheet_titles))
+                if matched and score >= _STRONG_SHEET_MATCH_SCORE:
+                    found_sheet = True
+                    break
+        sev = Severity.FAIL
+        issues.append(
+            QcIssue(
+                asset_id=None,
+                rule_id=RULE_ID,
+                field="program_completeness",
+                severity=sev,
+                message=(
+                    f"汇总页未识别到模板关键程序「{expected_label}」；"
+                    "请确认程序是否缺失、被隐藏或命名变体未被识别"
+                    + ("（工作簿已发现相关程序页）" if found_sheet else "（工作簿中也未发现相关程序页）")
+                ),
+                suggestion=(
+                    "补充汇总页对应程序行，或调整程序页引用/命名使其可被识别"
+                ),
+                procedure_code="SUMMARY",
+                source_sheet=source_sheet,
+            )
+        )
     return issues

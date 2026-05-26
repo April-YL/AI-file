@@ -372,14 +372,17 @@ def parse_summary_rows(
 
             b = _get(col_b)
             c = _get(col_c)
+            sheet_ref = _get(col_sheet)
             proc_name = f"{b or ''} {c or ''}".strip() or (b or c or "")
+            if not proc_name and sheet_ref:
+                # SWP 常见续行：B/C 为空，仅 F 列给出具体程序页（如 K.02.1a / K.02.2a）。
+                proc_name = sheet_ref
             if not proc_name:
                 continue
             low = proc_name.lower()
-            if low in ("程序页", "返回页") and not _get(col_sheet):
+            if low in ("程序页", "返回页") and not sheet_ref:
                 continue
 
-            sheet_ref = _get(col_sheet)
             exec_status = _get(col_exec)
             waiver = _get(col_waiver)
             note_val = _get(col_notes)

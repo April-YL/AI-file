@@ -14,12 +14,14 @@ from rules.lead_runner import LEAD_RULE_IDS, run_lead_rules
 from rules.models import ColumnContext
 from rules.psp_completion import check_psp_completion
 from rules.registry import attach_rule_metadata
+from rules.rollforward_runner import ROLLFORWARD_RULE_IDS, run_rollforward_rules
 from rules.runner import FA_LIST_RULE_IDS, run_fa_list_rules
 
 WORKBOOK_RULE_IDS = (
     *FA_LIST_RULE_IDS,
     "psp_completion",
     *LEAD_RULE_IDS,
+    *ROLLFORWARD_RULE_IDS,
 )
 
 
@@ -28,6 +30,7 @@ def run_workbook_qc(
     *,
     llm: bool | None = None,
 ) -> QcReport:
+    config = load_llm_config(cli_enabled=llm)
     issues = []
     records = []
     rule_ids: list[str] = []
@@ -54,13 +57,32 @@ def run_workbook_qc(
             except Exception:
                 sheet_titles = None
                 wb_for_psp = None
-        psp_issues = attach_rule_metadata(
-            check_psp_completion(
-                ctx.summary,
-                workbook_sheet_titles=sheet_titles,
-                workbook_path=wb_for_psp,
-            )
+        waiver_reason_reviewer = None
+        if config.enabled:
+            from llm.summary_psp_review import review_waiver_reason_with_llm
+
+            def waiver_reason_reviewer(row):
+                return review_waiver_reason_with_llm(row, config)
+
+        psp_raw_issues = check_psp_completion(
+            ctx.summary,
+            workbook_sheet_titles=sheet_titles,
+            workbook_path=wb_for_psp,
+            waiver_reason_reviewer=waiver_reason_reviewer,
+            enforce_template_completeness=True,
         )
+        if config.enabled and wb_for_psp and sheet_titles:
+            from llm.summary_psp_review import build_sheet_semantic_issues
+
+            psp_raw_issues.extend(
+                build_sheet_semantic_issues(
+                    ctx.summary,
+                    config,
+                    workbook_path=wb_for_psp,
+                    workbook_sheet_titles=sheet_titles,
+                )
+            )
+        psp_issues = attach_rule_metadata(psp_raw_issues)
         issues.extend(psp_issues)
         summary_sheet_section = build_summary_sheet_section(ctx.summary, psp_issues)
         rule_ids.append("psp_completion")
@@ -80,6 +102,13 @@ def run_workbook_qc(
         if not source_sheet:
             source_sheet = ctx.lead.source_sheet
 
+    if ctx.rollforward:
+        rollforward_issues = attach_rule_metadata(run_rollforward_rules(ctx.rollforward))
+        issues.extend(rollforward_issues)
+        rule_ids.extend(list(ROLLFORWARD_RULE_IDS))
+        if not source_sheet:
+            source_sheet = ctx.rollforward.source_sheet
+
     if not rule_ids:
         rule_ids = list(WORKBOOK_RULE_IDS)
 
@@ -95,7 +124,6 @@ def run_workbook_qc(
     )
     report.manual_review_sections = build_manual_review_sections(ctx.lead)
 
-    config = load_llm_config(cli_enabled=llm)
     if config.enabled:
         report = enrich_report_with_llm(
             report,

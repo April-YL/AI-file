@@ -37,6 +37,8 @@
 | `docs/decisions/ADR-0002-llm-agent-evolution.md` | 大模型 Agent 混合架构与分阶段演进决策。 |
 | `docs/llm-agent-roadmap.md` | M3/M4 路线图；**产品优先级**（规则 P0，llm-rules/checklist P1，报告叙述 P3）。 |
 | `docs/planning/lead-qc-rules.md` | K.00 Lead 分模块质检规划、SOP 对照与待建 rule_id。 |
+| `docs/planning/k01-qc-rules.md` | K.01 后推分模块质检规划、SOP【01】–【03】与 rule_id 总映射。 |
+| `docs/planning/k01-workpaper-layouts.md` | K.01 底稿版式 profile、列完整 L1/L2、ingest 契约。 |
 
 ## Cursor 配置
 

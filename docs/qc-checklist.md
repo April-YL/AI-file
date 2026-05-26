@@ -42,13 +42,17 @@ Agent 规则化建议：
 
 ## 三、K.01 Agree SL to GL
 
+> **规划与版式**：业务检查点、SOP【01】–【03】对照、L1/L2 列完整定义见 [planning/k01-qc-rules.md](planning/k01-qc-rules.md)、[planning/k01-workpaper-layouts.md](planning/k01-workpaper-layouts.md)。M2a 列完整按 **L1**（案例库 hybrid/两期简表）验收；SOP 表1 全矩阵为 **L2**（P1+）。
+
 | 检查点 | 检查描述 | 自动化等级 | 建议规则 ID |
 | --- | --- | --- | --- |
 | 后推明细表存在 | 应获取或编制固定资产后推明细表 | `AUTO_FAIL` | `rollforward_exists` |
-| 金额口径完整 | 原值、累计折旧、减值准备、净值应覆盖期初、本期变动、期末 | `AUTO_FAIL` | `rollforward_columns_complete` |
+| 金额口径完整 | 原值、累计折旧、减值准备、净值应覆盖期初、本期变动、期末（M2a：见 layouts **L1**） | `AUTO_FAIL` | `rollforward_columns_complete` |
 | 期末核对 | 期末余额应与总账、明细账、试算表或资产清单核对 | `REVIEW` | `rollforward_ending_reconciliation` |
 | 差异调查 | 超过 `SAD` 的差异应调查 | `AUTO_WARN` | `rollforward_difference_over_sad` |
 | 异常金额 | 累计折旧大于原值、净值为负等异常应提示 | `AUTO_FAIL` | `rollforward_abnormal_amounts` |
+
+**交叉规则（procedure 可能为 K.00）**：`lead_rollforward_tb_reconciliation`（Lead 期末 vs K.01 合计，见 planning/k01-qc-rules 模块 B）。
 
 ## 四、FA List
 
