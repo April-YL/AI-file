@@ -255,7 +255,24 @@ def _check_program_row(
             )
         elif waiver_reason_reviewer is not None:
             reviewed = waiver_reason_reviewer(row)
-            if reviewed is not None and reviewed.adequacy != "sufficient":
+            if reviewed is None:
+                issues.append(
+                    QcIssue(
+                        asset_id=None,
+                        rule_id=RULE_ID,
+                        field="waiver_reason",
+                        severity=Severity.NEED_REVIEW,
+                        message=(
+                            f"程序「{label}」已填写不执行理由，但语义复核未返回有效结果，"
+                            "请人工判断理由是否充分合理"
+                        ),
+                        suggestion="检查 LLM 配置与连通性，或由 reviewer 人工复核该理由",
+                        procedure_code="SUMMARY",
+                        source_sheet=source_sheet,
+                        source_row=row.source_row,
+                    )
+                )
+            elif reviewed.adequacy != "sufficient":
                 severity = (
                     Severity.WARN
                     if reviewed.adequacy == "insufficient"
@@ -368,7 +385,9 @@ def check_psp_completion(
         return issues
 
     programs = [p for p in dataset.programs if not _should_skip_row(p)]
-    targets = [p for p in programs if p.is_psp] or programs
+    # 行级执行与拒绝理由检查应覆盖汇总页全部有效程序行；
+    # is_psp 仅用于标识高关注项，不应用于缩小检查范围。
+    targets = programs
 
     for row in targets:
         issues.extend(

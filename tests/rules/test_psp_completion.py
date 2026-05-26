@@ -541,3 +541,68 @@ def test_template_completeness_not_limited_to_psp_rows():
         enforce_template_completeness=True,
     )
     assert not any(i.field == "program_completeness" for i in issues)
+
+
+def test_semantic_review_applies_to_non_psp_rows():
+    """即便存在 is_psp=True 行，也应覆盖普通程序行的不执行语义判断。"""
+    rows = [
+        PspProgramRow(
+            procedure_name="K.03.2 折旧测试TOD",
+            sheet_ref="K.03.2 折旧测试TOD",
+            execution_status="否",
+            waiver_reason="实际处置金额小于TT，不执行本次测试",
+            notes=None,
+            source_row=19,
+            is_psp=False,
+        ),
+        PspProgramRow(
+            procedure_name="K.04 固定资产减值",
+            sheet_ref="项目组自行填写底稿索引",
+            execution_status="",
+            waiver_reason=None,
+            notes=None,
+            source_row=22,
+            is_psp=True,
+        ),
+    ]
+
+    def reviewer(_row: PspProgramRow) -> WaiverSemanticReview:
+        return WaiverSemanticReview(
+            adequacy="insufficient",
+            rationale="仅提及阈值，未说明替代程序和风险应对",
+            suggested_action="补充风险评估与替代程序依据。",
+        )
+
+    issues = check_psp_completion(
+        _dataset(rows),
+        waiver_reason_reviewer=reviewer,
+    )
+    assert any(i.field == "waiver_reason" and i.severity == Severity.WARN for i in issues)
+
+
+def test_semantic_review_failure_is_need_review():
+    rows = [
+        PspProgramRow(
+            procedure_name="K.02.2 处置测试",
+            sheet_ref="K.02.2 处置测试",
+            execution_status="否",
+            waiver_reason="实际处置金额小于TT，不执行本次测试",
+            notes=None,
+            source_row=15,
+            is_psp=False,
+        ),
+    ]
+
+    def reviewer(_row: PspProgramRow) -> WaiverSemanticReview | None:
+        return None
+
+    issues = check_psp_completion(
+        _dataset(rows),
+        waiver_reason_reviewer=reviewer,
+    )
+    assert any(
+        i.field == "waiver_reason"
+        and i.severity == Severity.NEED_REVIEW
+        and "语义复核未返回有效结果" in i.message
+        for i in issues
+    )
