@@ -417,7 +417,14 @@ def _match_movement_role(header: str) -> str | None:
     n = _norm(header)
     if not n:
         return None
+    # 「上期末审定数」含子串「期末审定数」：PY 列仅用 hint⊆header，避免「期末审定数」反向命中 PY
+    for h in _MOVEMENT_ROLE_HEADERS["py_audited"]:
+        hn = _norm(h)
+        if hn in n:
+            return "py_audited"
     for role, hints in _MOVEMENT_ROLE_HEADERS.items():
+        if role == "py_audited":
+            continue
         for h in hints:
             hn = _norm(h)
             if hn in n or n in hn:
@@ -867,17 +874,22 @@ def _extract_movement_table(
                 break
             continue
         empty_streak = 0
+        sheet_ref_val = (
+            _get_cell(scope, r, role_cols.get("sheet_ref", -1))
+            if "sheet_ref" in role_cols
+            else None
+        )
         values: dict[str, str | None] = {}
         for role, c in role_cols.items():
             if role in ("account_label", "gl_code", "sheet_ref"):
                 continue
             values[role] = _get_cell(scope, r, c)
+        if sheet_ref_val is not None:
+            values["sheet_ref"] = sheet_ref_val
         data_rows.append(
             LeadMovementRow(
                 account_label=label,
-                sheet_ref=_get_cell(scope, r, role_cols.get("sheet_ref", -1))
-                if "sheet_ref" in role_cols
-                else None,
+                sheet_ref=sheet_ref_val,
                 values=values,
                 source_row=row_offset + r + 1,
             )

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from ingest.lead_sheet import LeadSheetDataset
+from ingest.lead_sheet import LeadMovementRow, LeadSheetDataset
 from ingest.lead_sheet_blocks import LeadBlockKind
-from rules.lead_common import _REQUIRED_MOVEMENT_LABELS
+from rules.lead_common import A3_NET_VALUE_LABEL, _REQUIRED_MOVEMENT_LABELS
 from rules.models import QcIssue, Severity
 from rules.parsing import is_blank
 
@@ -10,6 +10,18 @@ RULE_ID = "lead_movement_rows_complete"
 
 _CORE_ROLES = ("sheet_ref", "audited_ending", "py_audited")
 _OPTIONAL_ROLES = ("movement_amount", "movement_pct", "book_balance")
+
+
+def _movement_field_value(row: LeadMovementRow, role: str) -> str | None:
+    if role == "sheet_ref":
+        return row.sheet_ref
+    return row.values.get(role)
+
+
+def _row_requires_sheet_ref(row: LeadMovementRow) -> bool:
+    """净值由前三行勾稽，不要求单独填索引号。"""
+    label = row.account_label or ""
+    return A3_NET_VALUE_LABEL not in label
 
 
 def check_lead_movement_rows_complete(lead: LeadSheetDataset | None) -> list[QcIssue]:
@@ -72,7 +84,9 @@ def check_lead_movement_rows_complete(lead: LeadSheetDataset | None) -> list[QcI
         for role in _CORE_ROLES:
             if role not in bound_roles:
                 continue
-            if is_blank(row.values.get(role)):
+            if role == "sheet_ref" and not _row_requires_sheet_ref(row):
+                continue
+            if is_blank(_movement_field_value(row, role)):
                 issues.append(
                     QcIssue(
                         asset_id=None,

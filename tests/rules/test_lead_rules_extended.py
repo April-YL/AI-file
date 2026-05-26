@@ -117,6 +117,36 @@ def test_movement_rows_complete_requires_impairment_row(swp_lead_xlsx: Path):
     lead = load_lead_from_workbook(swp_lead_xlsx)
     issues = check_lead_movement_rows_complete(lead)
     assert not any(i.severity == Severity.FAIL for i in issues)
+    assert not any(i.field == "py_audited" for i in issues)
+    assert not any("sheet_ref" in (i.field or "") for i in issues)
+
+
+def test_tt_gam_range_accepts_ratio_at_upper_bound():
+    from ingest.lead_sheet import CraAssertionRow, LeadBasicInfoField, LeadSheetDataset
+    from rules.lead_common import tt_ratio_within_gam_band
+
+    assert tt_ratio_within_gam_band(
+        Decimal("0.750000000000000035"),
+        Decimal("0.50"),
+        Decimal("0.75"),
+    )
+    lead = LeadSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        basic_info_fields=[
+            LeadBasicInfoField(field_key="te", label="TE", value="213730"),
+        ],
+        cra_rows=[
+            CraAssertionRow(
+                assertion="计价/计量（V/M）",
+                cra="Low",
+                tt="160297.5",
+                source_row=16,
+            )
+        ],
+    )
+    issues = check_lead_tt_gam_range(lead)
+    assert not any("计价" in i.message for i in issues)
 
 
 def test_expectation_block_present(swp_lead_xlsx: Path):

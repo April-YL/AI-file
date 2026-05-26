@@ -35,6 +35,9 @@ st.set_page_config(
 st.title("固定资产质检 Agent")
 st.caption("面向质检人员：Agent 处理机械化问题，专业判断留人工复核。")
 
+# 规则/ingest 变更时递增，避免 @st.cache_data 返回旧质检结果
+_QC_CACHE_VERSION = "20260526-lead007-sheetref"
+
 
 def _severity_color(sev: str) -> str:
     return {
@@ -171,6 +174,7 @@ def _run_qc_cached(
     fa_sheet: str | None,
     summary_sheet: str | None,
     lead_sheet: str | None,
+    cache_version: str,
 ) -> tuple[dict, bytes, bytes, bytes | None]:
     with tempfile.TemporaryDirectory() as tmp:
         inp = Path(tmp) / filename
@@ -196,6 +200,9 @@ def _run_qc_cached(
 
 with st.sidebar:
     st.header("设置")
+    if st.button("清除质检缓存", help="规则更新后若结果未变，点此后再重新「开始质检」"):
+        st.cache_data.clear()
+        st.success("已清除缓存")
     use_llm = st.checkbox("启用大模型增强（可选，低优先级）", value=False)
     if use_llm:
         st.info("需配置 `.env` 中 `FA_QC_LLM_API_KEY`；不改变规则 severity。")
@@ -238,6 +245,7 @@ if st.button("开始质检", type="primary", use_container_width=True):
                 fa_sheet.strip() or None,
                 summary_sheet.strip() or None,
                 lead_sheet.strip() or None,
+                _QC_CACHE_VERSION,
             )
             st.session_state.setdefault("results", {})[uf.name] = {
                 "data": data,

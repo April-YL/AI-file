@@ -169,9 +169,13 @@ def test_swp_layout_blocks_and_modules(swp_lead_xlsx: Path):
     assert "原值" in labels
     assert "累计折旧" in labels
     assert "净值" in labels
+    roles = {b.role for b in ds.movement_bindings}
+    assert "py_audited" in roles
     orig = next(r for r in ds.movement_rows if r.account_label == "原值")
     assert orig.sheet_ref == "K.01"
+    assert orig.values.get("sheet_ref") == "K.01"
     assert orig.values.get("audited_ending") == "1000"
+    assert orig.values.get("py_audited") == "900"
 
     assert ds.fluctuation_notes and "无异常波动" in ds.fluctuation_notes
     assert len(ds.adjustment_rows) >= 1
@@ -192,6 +196,13 @@ def test_blocks_shift_when_extra_rows_prepended(swp_lead_xlsx: Path):
     assert ds.block(LeadBlockKind.BASIC_INFO).anchor_row > 5
     assert len(ds.movement_rows) >= 1
     assert any(f.field_key == "client_name" for f in ds.basic_info_fields)
+
+
+def test_match_movement_role_py_audited_header():
+    from ingest.lead_sheet import _match_movement_role
+
+    assert _match_movement_role("上期末审定数") == "py_audited"
+    assert _match_movement_role("期末审定数") == "audited_ending"
 
 
 def test_hyphen_cell_does_not_match_anchors():

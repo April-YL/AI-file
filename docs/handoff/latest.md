@@ -51,6 +51,7 @@
 - **UI（质检员向）**：Findings 分程序、人工复核摘录（AE-001/002 + 基准信息）、双 Comments 说明、标注底稿下载
 - **安全/LLM**：`docs/data-security.md`、`.env.example`、`python-dotenv`、`fa_qc_ui` 入口、`scripts/test_llm_connection.py`
 - **案例库 Lead 回归**：`scripts/run_case_lead_regression.py`、`artifacts/case_lead_regression.md`
+- **Lead LEAD-004/007 修复（2026-05-26）**：ingest「上期末审定数」列优先于「期末审定数」子串；`sheet_ref` 同步进 `values`；GAM TT/TE **闭区间 + 浮点容差**；LEAD-007 读 `row.sheet_ref`、**净值行不要求索引号**；UI `_QC_CACHE_VERSION` +「清除质检缓存」
 
 ## 进行中（M2a = Agent P1）
 
@@ -120,6 +121,7 @@
 ## 相关文件
 
 - `AGENTS.md` — 终态目标与必交付项
+- `docs/agent-collaboration.md` — **先答后改**协作约定
 - `docs/qc-checklist.md` — findings 检查来源
 - `docs/workpaper-fields.md`、`docs/architecture.md`
 - `src/ingest/records.py`、`src/report/cli.py`、`src/report/ui_app.py` — 流水线与 UI 入口

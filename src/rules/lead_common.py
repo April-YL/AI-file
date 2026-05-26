@@ -15,6 +15,14 @@ GAM_TT_RATIO_BANDS: dict[str, tuple[Decimal, Decimal]] = {
     "high": (Decimal("0.10"), Decimal("0.25")),
 }
 
+# TT/TE 比例边界容差（闭区间上界；抵消 Excel 浮点余数，如 75.00000000003%）
+GAM_TT_RATIO_TOLERANCE = Decimal("0.0001")
+
+
+def tt_ratio_within_gam_band(ratio: Decimal, lo: Decimal, hi: Decimal) -> bool:
+    tol = GAM_TT_RATIO_TOLERANCE
+    return ratio >= lo - tol and ratio <= hi + tol
+
 _CRA_TIER_ALIASES: dict[str, str] = {
     "minimal": "lowest",
     "lowest": "lowest",

@@ -9,6 +9,7 @@ from rules.lead_common import (
     field_values,
     parse_threshold_amount,
     skip_cra_module,
+    tt_ratio_within_gam_band,
 )
 from rules.models import QcIssue, Severity
 
@@ -52,7 +53,7 @@ def check_lead_tt_gam_range(lead: LeadSheetDataset | None) -> list[QcIssue]:
             continue
         ratio = tt / te
         lo, hi = band
-        if ratio < lo or ratio > hi:
+        if not tt_ratio_within_gam_band(ratio, lo, hi):
             pct = (ratio * 100).quantize(Decimal("0.1"))
             lo_pct = (lo * 100).quantize(Decimal("0.1"))
             hi_pct = (hi * 100).quantize(Decimal("0.1"))
