@@ -5,7 +5,8 @@ alwaysApply: true
 
 # 固定资产质检 Agent 全局约定
 
-- 新任务开始前，先阅读 `AGENTS.md`、`docs/handoff/latest.md` 和 `docs/PROJECT_STRUCTURE.md`。
+- **先答后改（默认）**：先回答问题、说明原因与拟改方案；**用户确认后再**修改代码/文档/配置；**`git commit`/`git push` 前须列清单并确认**。未经确认不直接改仓库、不默认提交/推送。详见 [docs/agent-collaboration.md](../../docs/agent-collaboration.md)。
+- 新任务开始前，先阅读 `AGENTS.md`、`docs/agent-collaboration.md`、`docs/handoff/latest.md` 和 `docs/PROJECT_STRUCTURE.md`。
 - 领域字段和业务口径以 `docs/domain-glossary.md` 为准。
 - 架构和模块边界以 `docs/architecture.md` 为准。
 - 质检结论只能使用：`PASS`、`WARN`、`FAIL`、`NEED_REVIEW`。

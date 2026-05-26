@@ -79,6 +79,17 @@
 - 涉及真实数据分析时，只提交规则、脚本和脱敏后的 fixture。
 - **LLM API 密钥**：只放在项目根目录 **`.env`**（已在 `.gitignore`）；**禁止** `git add .env` 或在代码/文档中写真实 API 密钥。提交前运行 `python scripts/check_staged_no_secrets.py`。详见 **[docs/data-security.md](docs/data-security.md)**。
 
+## Agent 协作约定（先答后改）
+
+与 Agent（含 Cursor）协作的**默认方式**：
+
+1. **先回答**问题或分析现象，不默认直接改代码。
+2. **确认理解一致**（改什么、不改什么、如何验收）后，再开始修改。
+3. **`git commit` / `git push` 前须单独列清单并等你确认**（即使用户说「保存并推送」亦然）；不含 `.env` 与真实 API 密钥。
+4. 用户在同一条消息中已明确「请修改」且范围清楚时，可视为已确认改代码；**不**自动视为已确认提交/推送。
+
+全文：[docs/agent-collaboration.md](docs/agent-collaboration.md)
+
 ## 开发约定
 
 - 开发新规则前，先查看 `docs/domain-glossary.md`、`docs/qc-checklist.md` 和 `docs/handoff/latest.md`。
@@ -92,7 +103,9 @@
 
 ```text
 继续固定资产质检 Agent 开发。
-请先阅读 AGENTS.md、docs/handoff/latest.md、docs/ONBOARDING.md 和 docs/PROJECT_STRUCTURE.md。
+请先阅读 AGENTS.md、docs/agent-collaboration.md、docs/handoff/latest.md、docs/ONBOARDING.md 和 docs/PROJECT_STRUCTURE.md。
+协作方式：先回答/给方案；改代码、git commit、git push 前都先列清单等我确认（见 agent-collaboration.md）。
 当前任务是：<写清楚具体任务、分支、涉及文件和验收标准>。
+验收标准：<可验证的结果>。
 终态验收须包含：质检报告 + 底稿标注（若本次未涉及标注，请说明）。
 ```

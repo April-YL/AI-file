@@ -26,9 +26,10 @@ git pull origin main
 | 顺序 | 文件 | 用途 |
 | --- | --- | --- |
 | 1 | [AGENTS.md](../AGENTS.md) | 终态目标、必交付项、模块边界、数据安全 |
-| 2 | [handoff/latest.md](handoff/latest.md) | **最新进度**、下一步、已知问题 |
-| 3 | [progress.md](progress.md) | 里程碑 M0 / M0.5 / M1… |
-| 4 | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) | 每个目录/文件的作用 |
+| 2 | [agent-collaboration.md](agent-collaboration.md) | **先答后改**：确认理解一致后再让 Agent 改代码 |
+| 3 | [handoff/latest.md](handoff/latest.md) | **最新进度**、下一步、已知问题 |
+| 4 | [progress.md](progress.md) | 里程碑 M0 / M0.5 / M1… |
+| 5 | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) | 每个目录/文件的作用 |
 
 PowerShell 一次查看前四份：
 
@@ -186,7 +187,8 @@ pytest tests/ingest tests/rules tests/llm -q
 
 ```text
 继续固定资产质检 Agent 开发。
-请先阅读 AGENTS.md、docs/handoff/latest.md、docs/ONBOARDING.md 和 docs/PROJECT_STRUCTURE.md。
+请先阅读 AGENTS.md、docs/agent-collaboration.md、docs/handoff/latest.md、docs/ONBOARDING.md 和 docs/PROJECT_STRUCTURE.md。
+协作方式：先回答/给方案；改代码、git commit、git push 前都先列清单等我确认（见 agent-collaboration.md）。
 当前任务是：<具体任务>
 验收标准：<可验证的结果>
 终态须包含：质检报告 + 底稿标注（若本次未做标注，请说明）。

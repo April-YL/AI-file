@@ -5,9 +5,13 @@ description: 执行固定资产质检 Agent 开发工作流。用于固定资产
 
 # 固定资产质检开发工作流
 
+## 协作约定（默认）
+
+遵循 [docs/agent-collaboration.md](../../docs/agent-collaboration.md)：**先回答问题、给出方案与影响范围；用户确认后再修改** `src/`、`tests/`、`docs/`。**`git commit` / `git push` 前须列拟提交清单并等用户确认**（即使用户说「保存并推送」）。用户写明「请勿直接修改」时仅分析不改动。
+
 ## 开始前
 
-1. 阅读 `AGENTS.md`。
+1. 阅读 `AGENTS.md` 与 `docs/agent-collaboration.md`。
 2. 阅读 `docs/data-security.md`（**`.env` 与 API 密钥不得提交 Git**）。
 3. 阅读 `docs/handoff/latest.md`。
 4. 如涉及文件职责，阅读 `docs/PROJECT_STRUCTURE.md`。
