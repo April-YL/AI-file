@@ -52,6 +52,12 @@
 - **安全/LLM**：`docs/data-security.md`、`.env.example`、`python-dotenv`、`fa_qc_ui` 入口、`scripts/test_llm_connection.py`
 - **案例库 Lead 回归**：`scripts/run_case_lead_regression.py`、`artifacts/case_lead_regression.md`
 - **Lead LEAD-004/007 修复（2026-05-26）**：ingest「上期末审定数」列优先于「期末审定数」子串；`sheet_ref` 同步进 `values`；GAM TT/TE **闭区间 + 浮点容差**；LEAD-007 读 `row.sheet_ref`、**净值行不要求索引号**；UI `_QC_CACHE_VERSION` +「清除质检缓存」
+- **汇总页 AE-003 与 Comments 可用性修复（2026-05-28）**：
+  - `psp_completion`：行级检查覆盖全部有效程序行；修复合并单元格场景（`K.02.1/1a`、`K.02.2/2a`）执行状态继承导致的误报。
+  - K.03 折旧测试口径：SAP/TOD 二选一；新增 `execution_status_consistency`，当汇总页勾选与底稿 TOD 证据冲突时输出 `NEED_REVIEW`（不再直接按 waiver 误报）。
+  - TOD 证据识别升级为“编号 + 语义 + 内容”组合，不依赖单一 sheet 命名（支持 by-item/逐项重算等变体）。
+  - `export_annotated_workbook`：`Question/Comment` 短标题化（规则码映射 + 通用压缩）、去除冗长“模型提示”；`Comments【归档前删除】` 排序改为“汇总 → Lead → 其他”。
+  - 验证：`tests/rules/test_psp_completion.py`（21 通过）、`tests/report/test_export_annotated_workbook.py`（8 通过）；实测 `...G科技-测试0526-01...` 输出中 `K.02.2a` 误报消失，K.03 改为一致性提示项。
 
 ## 进行中（M2a = Agent P1）
 
