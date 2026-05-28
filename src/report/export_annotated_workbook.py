@@ -21,6 +21,7 @@ from rules.models import QcIssue, Severity
 
 COMMENTS_SHEET_NAME = "Comments【归档前删除】"
 FA_LIST_COMMENTS_SHEET_NAME = "Comments【FA list】"
+LOCATOR_SHEET_NAME = "QC_Locator"
 _AGENT_REF_HEADER = "Agent 参考（质检建议）"
 _COMMENT_HEADERS = (
     "EY Ref.",
@@ -30,6 +31,16 @@ _COMMENT_HEADERS = (
     "Answer/Comment",
     "Closed?",
     _AGENT_REF_HEADER,
+)
+_LOCATOR_HEADERS = (
+    "EY Ref.",
+    "Severity",
+    "Rule",
+    "Tab Ref.",
+    "Cell Ref.",
+    "Question/Comment",
+    _AGENT_REF_HEADER,
+    "Navigate",
 )
 
 _DEFAULT_COMMENT_COL = 2
@@ -239,6 +250,41 @@ def build_fa_list_detail_rows(fa_list_issues: list[QcIssue]) -> list[tuple]:
     return rows
 
 
+def build_locator_rows(issues: list[QcIssue]) -> list[tuple]:
+    """导航定位表：列出全部 findings 的定位信息，便于快速检索。"""
+    sorted_issues = sorted(
+        issues,
+        key=lambda i: (
+            _sheet_group_rank(i),
+            (i.source_sheet or "").strip(),
+            _SEV_RANK.get(i.severity, 9),
+            i.source_row or 0,
+            i.rule_id,
+        ),
+    )
+    rows: list[tuple] = []
+    for idx, issue in enumerate(sorted_issues, start=1):
+        code = issue.dict_rule_code or issue.rule_id
+        tab = issue.source_sheet or "—"
+        cell_ref = _cell_ref_a1(issue.source_row)
+        navigate = ""
+        if tab != "—":
+            navigate = tab if not cell_ref else f"{tab}!{cell_ref.replace('$', '')}"
+        rows.append(
+            (
+                idx,
+                issue.severity.value,
+                code,
+                tab,
+                cell_ref,
+                _question_text(issue),
+                _agent_suggestion(issue),
+                navigate,
+            )
+        )
+    return rows
+
+
 def build_comments_rows(issues: list[QcIssue]) -> list[tuple]:
     """兼容旧接口：等同主表行（含 FA 合并逻辑）。"""
     fa, other = split_fa_list_issues(issues)
@@ -314,6 +360,7 @@ def export_annotated_workbook(
 
     main_rows = build_main_comments_rows(other_issues, fa_issues)
     fa_rows = build_fa_list_detail_rows(fa_issues)
+    locator_rows = build_locator_rows(issues)
     inject_worksheets_at_front(
         out,
         [
@@ -333,8 +380,19 @@ def export_annotated_workbook(
                     footer=f"源文件: {input_path.name} | FA list 专项明细",
                 ),
             ),
+            (
+                LOCATOR_SHEET_NAME,
+                build_worksheet_xml(
+                    _LOCATOR_HEADERS,
+                    locator_rows,
+                    footer=(
+                        f"源文件: {input_path.name} | 定位表用于快速检索 Tab/Cell，"
+                        "不修改业务表单元格（兼容外部链接底稿）"
+                    ),
+                ),
+            ),
         ],
-        remove_sheet_names=(COMMENTS_SHEET_NAME, FA_LIST_COMMENTS_SHEET_NAME),
+        remove_sheet_names=(COMMENTS_SHEET_NAME, FA_LIST_COMMENTS_SHEET_NAME, LOCATOR_SHEET_NAME),
     )
 
     if not has_external:
@@ -365,6 +423,7 @@ def comments_summary_stats(
         "need_review_count": sum(1 for i in issues if i.severity == Severity.NEED_REVIEW),
         "comments_sheet": COMMENTS_SHEET_NAME,
         "fa_list_comments_sheet": FA_LIST_COMMENTS_SHEET_NAME,
+        "locator_sheet": LOCATOR_SHEET_NAME,
         "other_finding_count": len(other_issues),
         "fa_list_finding_count": len(fa_issues),
         "fa_list_summary_row_count": len(_aggregate_fa_list_issues(fa_issues)),

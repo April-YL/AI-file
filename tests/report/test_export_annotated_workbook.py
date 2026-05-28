@@ -6,8 +6,10 @@ import pytest
 from report.export_annotated_workbook import (
     COMMENTS_SHEET_NAME,
     FA_LIST_COMMENTS_SHEET_NAME,
+    LOCATOR_SHEET_NAME,
     build_comments_rows,
     build_fa_list_detail_rows,
+    build_locator_rows,
     build_main_comments_rows,
     export_annotated_workbook,
     split_fa_list_issues,
@@ -64,7 +66,9 @@ def test_export_two_comment_sheets(tmp_path: Path):
     wb = openpyxl.load_workbook(out, read_only=True)
     assert wb.sheetnames[0] == COMMENTS_SHEET_NAME
     assert wb.sheetnames[1] == FA_LIST_COMMENTS_SHEET_NAME
+    assert wb.sheetnames[2] == LOCATOR_SHEET_NAME
     assert wb[COMMENTS_SHEET_NAME].cell(1, 1).value == "EY Ref."
+    assert wb[LOCATOR_SHEET_NAME].cell(1, 1).value == "EY Ref."
     wb.close()
 
 
@@ -176,3 +180,23 @@ def test_question_comment_uses_short_title_mapping():
     rows = build_main_comments_rows([issue], [])
     question = rows[0][3]
     assert question == "[NEED_REVIEW] AE-003 汇总勾选与底稿证据不一致（K.03.2/TOD）"
+
+
+def test_locator_rows_include_navigate_ref():
+    issue = QcIssue(
+        asset_id=None,
+        rule_id="lead_required_fields",
+        field="gaap",
+        severity=Severity.FAIL,
+        message="缺少适用会计准则",
+        suggestion="补充",
+        procedure_code="K.00",
+        source_sheet="K.00 Lead Sheet",
+        source_row=7,
+        dict_rule_code="LEAD-001",
+    )
+    rows = build_locator_rows([issue])
+    assert len(rows) == 1
+    assert rows[0][2] == "LEAD-001"
+    assert rows[0][4] == "$B$7"
+    assert rows[0][7] == "K.00 Lead Sheet!B7"

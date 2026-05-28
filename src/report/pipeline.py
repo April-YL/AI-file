@@ -9,6 +9,7 @@ from llm.review import enrich_report_with_llm
 from report.manual_review import build_manual_review_sections
 from report.summary import QcReport, build_report
 from report.lead_sheet_report import build_lead_sheet_section
+from report.rollforward_sheet_report import build_rollforward_sheet_section
 from report.summary_sheet_report import build_summary_sheet_section
 from rules.lead_runner import LEAD_RULE_IDS, run_lead_rules
 from rules.models import ColumnContext
@@ -93,18 +94,34 @@ def run_workbook_qc(
 
     lead_sheet_section = None
     if ctx.lead:
-        lead_issues = attach_rule_metadata(
-            run_lead_rules(ctx.lead, rollforward=ctx.rollforward)
-        )
+        lead_raw_issues = run_lead_rules(ctx.lead, rollforward=ctx.rollforward)
+        if config.enabled:
+            from llm.lead_review import (
+                RULE_EXPECTATION,
+                RULE_FLUCTUATION,
+                build_lead_semantic_issues,
+            )
+
+            llm_lead_issues = build_lead_semantic_issues(ctx.lead, config)
+            lead_raw_issues.extend(llm_lead_issues)
+            if llm_lead_issues:
+                for rid in (RULE_EXPECTATION, RULE_FLUCTUATION):
+                    if rid not in rule_ids:
+                        rule_ids.append(rid)
+        lead_issues = attach_rule_metadata(lead_raw_issues)
         issues.extend(lead_issues)
         lead_sheet_section = build_lead_sheet_section(ctx.lead, lead_issues)
         rule_ids.extend(list(LEAD_RULE_IDS))
         if not source_sheet:
             source_sheet = ctx.lead.source_sheet
 
+    rollforward_sheet_section = None
     if ctx.rollforward:
         rollforward_issues = attach_rule_metadata(run_rollforward_rules(ctx.rollforward))
         issues.extend(rollforward_issues)
+        rollforward_sheet_section = build_rollforward_sheet_section(
+            ctx.rollforward, rollforward_issues
+        )
         rule_ids.extend(list(ROLLFORWARD_RULE_IDS))
         if not source_sheet:
             source_sheet = ctx.rollforward.source_sheet
@@ -121,6 +138,7 @@ def run_workbook_qc(
         issues=issues,
         summary_sheet_section=summary_sheet_section,
         lead_sheet_section=lead_sheet_section,
+        rollforward_sheet_section=rollforward_sheet_section,
     )
     report.manual_review_sections = build_manual_review_sections(ctx.lead)
 
