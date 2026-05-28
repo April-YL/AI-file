@@ -606,3 +606,158 @@ def test_semantic_review_failure_is_need_review():
         and "语义复核未返回有效结果" in i.message
         for i in issues
     )
+
+
+def test_merged_execution_status_inherits_for_k021a_and_k022a():
+    rows = [
+        PspProgramRow(
+            procedure_name="K.02.1 新增测试",
+            sheet_ref="K.02.1 新增测试",
+            execution_status="是",
+            waiver_reason=None,
+            notes=None,
+            source_row=11,
+            is_psp=False,
+        ),
+        PspProgramRow(
+            procedure_name="K.02.1a 新增选样输出",
+            sheet_ref="K.02.1a 新增选样输出",
+            execution_status="",
+            waiver_reason=None,
+            notes=None,
+            source_row=12,
+            is_psp=False,
+        ),
+        PspProgramRow(
+            procedure_name="K.02.2 处置测试",
+            sheet_ref="K.02.2 处置测试",
+            execution_status="否",
+            waiver_reason="处置总体金额很低，执行替代程序",
+            notes=None,
+            source_row=15,
+            is_psp=False,
+        ),
+        PspProgramRow(
+            procedure_name="K.02.2a 处置选样输出",
+            sheet_ref="K.02.2a 处置选样输出",
+            execution_status="",
+            waiver_reason=None,
+            notes=None,
+            source_row=16,
+            is_psp=False,
+        ),
+    ]
+    issues = check_psp_completion(_dataset(rows))
+    assert not any(i.source_row == 12 and i.field == "execution_status" for i in issues)
+    assert not any(i.source_row == 16 and i.field == "execution_status" for i in issues)
+    assert not any(i.source_row == 16 and i.field == "waiver_reason" for i in issues)
+
+
+def test_dep_sap_tod_either_or_allows_tod_evidence_by_number_semantic_content(tmp_path):
+    wb_path = tmp_path / "dep_tod_by_item.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "K.03.2 固定资产折旧逐项重算工作底稿"
+    ws["A1"] = "资产编号"
+    ws["B1"] = "原值"
+    ws["C1"] = "使用寿命"
+    ws["D1"] = "残值率"
+    ws["E1"] = "账面折旧"
+    ws["F1"] = "重算折旧"
+    ws["G1"] = "差异"
+    ws["A2"] = "FA-TEST-001"
+    ws["B2"] = 120000
+    ws["C2"] = 60
+    ws["D2"] = 0.05
+    ws["E2"] = 1800
+    ws["F2"] = 1750
+    ws["G2"] = -50
+    wb.save(wb_path)
+
+    rows = [
+        PspProgramRow(
+            procedure_name="K.03.1 SAP",
+            sheet_ref="K.03.1 SAP",
+            execution_status="否",
+            waiver_reason="未执行",
+            notes=None,
+            source_row=18,
+            is_psp=False,
+        ),
+        PspProgramRow(
+            procedure_name="K.03.2 折旧测试TOD",
+            sheet_ref="K.03.2 折旧测试TOD",
+            execution_status="否",
+            waiver_reason="未执行",
+            notes=None,
+            source_row=19,
+            is_psp=False,
+        ),
+    ]
+
+    def reviewer(_row: PspProgramRow) -> WaiverSemanticReview:
+        return WaiverSemanticReview(
+            adequacy="insufficient",
+            rationale="理由不足",
+            suggested_action="补充说明",
+        )
+
+    issues = check_psp_completion(
+        _dataset(rows),
+        workbook_sheet_titles=["K.03.2 固定资产折旧逐项重算工作底稿"],
+        workbook_path=str(wb_path),
+        waiver_reason_reviewer=reviewer,
+    )
+    assert not any(i.field == "waiver_reason" and i.source_row in (18, 19) for i in issues)
+    assert any(
+        i.field == "execution_status_consistency"
+        and i.severity == Severity.NEED_REVIEW
+        and i.source_row == 19
+        for i in issues
+    )
+
+
+def test_dep_tod_name_only_without_content_does_not_count_as_executed(tmp_path):
+    wb_path = tmp_path / "dep_tod_name_only.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "K.03.2 固定资产折旧逐项重算工作底稿"
+    ws["A1"] = "模板"
+    wb.save(wb_path)
+
+    rows = [
+        PspProgramRow(
+            procedure_name="K.03.1 SAP",
+            sheet_ref="K.03.1 SAP",
+            execution_status="否",
+            waiver_reason="金额小",
+            notes=None,
+            source_row=18,
+            is_psp=False,
+        ),
+        PspProgramRow(
+            procedure_name="K.03.2 折旧测试TOD",
+            sheet_ref="K.03.2 折旧测试TOD",
+            execution_status="否",
+            waiver_reason="金额小",
+            notes=None,
+            source_row=19,
+            is_psp=False,
+        ),
+    ]
+
+    def reviewer(_row: PspProgramRow) -> WaiverSemanticReview:
+        return WaiverSemanticReview(
+            adequacy="insufficient",
+            rationale="理由不足",
+            suggested_action="补充说明",
+        )
+
+    issues = check_psp_completion(
+        _dataset(rows),
+        workbook_sheet_titles=["K.03.2 固定资产折旧逐项重算工作底稿"],
+        workbook_path=str(wb_path),
+        waiver_reason_reviewer=reviewer,
+    )
+    assert any(i.field == "waiver_reason" and i.source_row in (18, 19) for i in issues)
+    assert not any(i.field == "execution_status_consistency" for i in issues)

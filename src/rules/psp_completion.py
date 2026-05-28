@@ -5,6 +5,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Callable, Literal
 
+import openpyxl
+
 from ingest.summary_sheet import PspProgramRow, SummarySheetDataset
 from rules.models import QcIssue, Severity
 from rules.psp_sheet_matcher import count_non_empty_cells, find_matching_sheet
@@ -15,6 +17,10 @@ _MIN_WAIVER_LEN = 8
 _MIN_SHEET_MATCH_SCORE = 0.48
 _STRONG_SHEET_MATCH_SCORE = 0.72
 _MIN_SUBSTANCE_CELLS = 8
+_MAX_SIGNAL_SCAN_ROWS = 80
+_MAX_SIGNAL_SCAN_COLS = 20
+_MIN_TOD_CONTENT_TERMS = 2
+_MIN_TOD_NUMERIC_CELLS = 2
 
 _K_SEGMENT = re.compile(r"[kK]\.\d+(?:\.\d+)*[a-zA-Z]?")
 
@@ -195,12 +201,18 @@ def _check_program_row(
     row: PspProgramRow,
     source_sheet: str,
     *,
+    execution_status_override: str | None = None,
+    skip_waiver_reason_check: bool = False,
     workbook_sheet_titles: Sequence[str] | None = None,
     workbook_path: str | None = None,
     waiver_reason_reviewer: WaiverReasonReviewer | None = None,
 ) -> list[QcIssue]:
     issues: list[QcIssue] = []
-    status = normalize_execution_status(row.execution_status)
+    status = normalize_execution_status(
+        execution_status_override
+        if execution_status_override is not None
+        else row.execution_status
+    )
     label = row.procedure_name
     if row.sheet_ref:
         label = f"{label} ({row.sheet_ref})"
@@ -238,6 +250,8 @@ def _check_program_row(
         return issues
 
     if status == "no":
+        if skip_waiver_reason_check:
+            return issues
         waiver = (row.waiver_reason or "").strip()
         if not waiver:
             issues.append(
@@ -388,12 +402,35 @@ def check_psp_completion(
     # 行级执行与拒绝理由检查应覆盖汇总页全部有效程序行；
     # is_psp 仅用于标识高关注项，不应用于缩小检查范围。
     targets = programs
+    inherited_status = _infer_merged_execution_status(targets)
+    inherited_status_sources = _infer_merged_execution_status_sources(targets)
+    issues.extend(
+        _dep_alt_selection_consistency_issues(
+            targets,
+            source_sheet=dataset.source_sheet or "汇总",
+            inherited_status=inherited_status,
+            workbook_sheet_titles=workbook_sheet_titles,
+            workbook_path=workbook_path,
+        )
+    )
+    skip_waiver_row_ids = _rows_skip_waiver_by_dep_alt(
+        targets,
+        inherited_status=inherited_status,
+        workbook_sheet_titles=workbook_sheet_titles,
+        workbook_path=workbook_path,
+    )
 
-    for row in targets:
+    for idx, row in enumerate(targets):
+        merged_inherited_no = (
+            idx in inherited_status_sources
+            and normalize_execution_status(inherited_status.get(idx, row.execution_status)) == "no"
+        )
         issues.extend(
             _check_program_row(
                 row,
                 dataset.source_sheet or "汇总",
+                execution_status_override=inherited_status.get(idx),
+                skip_waiver_reason_check=(idx in skip_waiver_row_ids) or merged_inherited_no,
                 workbook_sheet_titles=workbook_sheet_titles,
                 workbook_path=workbook_path,
                 waiver_reason_reviewer=waiver_reason_reviewer,
@@ -487,4 +524,282 @@ def _check_template_program_completeness(
                 source_sheet=source_sheet,
             )
         )
+    return issues
+
+
+def _norm_token(s: str | None) -> str:
+    if not s:
+        return ""
+    return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(s).lower())
+
+
+def _k02_exec_group_key(row: PspProgramRow) -> str | None:
+    ref = _ref_for_sheet_match(row) or row.procedure_name or ""
+    m = _K_SEGMENT.search(ref)
+    if not m:
+        return None
+    code = _norm_token(m.group(0))
+    if code in {"k021", "k021a"}:
+        return "k021"
+    if code in {"k022", "k022a"}:
+        return "k022"
+    return None
+
+
+def _infer_merged_execution_status(programs: list[PspProgramRow]) -> dict[int, str]:
+    """汇总页执行列合并单元格时，将同组程序的执行状态前向继承。"""
+    groups: dict[str, list[tuple[int, PspProgramRow]]] = {}
+    for idx, row in enumerate(programs):
+        key = _k02_exec_group_key(row)
+        if key is None:
+            continue
+        groups.setdefault(key, []).append((idx, row))
+
+    inherited: dict[int, str] = {}
+    for pairs in groups.values():
+        pairs.sort(key=lambda x: x[1].source_row or 0)
+        fallback_status: str | None = None
+        for _, row in pairs:
+            text = (row.execution_status or "").strip()
+            if text:
+                fallback_status = text
+                break
+        if not fallback_status:
+            continue
+        for idx, row in pairs:
+            if not (row.execution_status or "").strip():
+                inherited[idx] = fallback_status
+    return inherited
+
+
+def _infer_merged_execution_status_sources(programs: list[PspProgramRow]) -> dict[int, int]:
+    """返回通过合并单元格逻辑继承状态的行 -> 主行索引。"""
+    groups: dict[str, list[tuple[int, PspProgramRow]]] = {}
+    for idx, row in enumerate(programs):
+        key = _k02_exec_group_key(row)
+        if key is None:
+            continue
+        groups.setdefault(key, []).append((idx, row))
+
+    inherited_from: dict[int, int] = {}
+    for pairs in groups.values():
+        pairs.sort(key=lambda x: x[1].source_row or 0)
+        source_idx: int | None = None
+        for idx, row in pairs:
+            if (row.execution_status or "").strip():
+                source_idx = idx
+                break
+        if source_idx is None:
+            continue
+        for idx, row in pairs:
+            if idx == source_idx:
+                continue
+            if not (row.execution_status or "").strip():
+                inherited_from[idx] = source_idx
+    return inherited_from
+
+
+def _dep_alt_kind(row: PspProgramRow) -> Literal["sap", "tod"] | None:
+    blob = _norm_token(f"{row.procedure_name} {row.sheet_ref or ''}")
+    if "k031" in blob or "sap" in blob:
+        return "sap"
+    if "k032" in blob or "tod" in blob:
+        return "tod"
+    return None
+
+
+def _has_tod_evidence_in_workbook(
+    workbook_sheet_titles: Sequence[str] | None,
+    workbook_path: str | None,
+) -> bool:
+    if not workbook_sheet_titles:
+        return False
+    candidates: list[str] = []
+    for title in workbook_sheet_titles:
+        if _has_tod_number_signal(title) and _has_tod_semantic_signal(title):
+            candidates.append(title)
+    if not candidates:
+        return False
+    if not workbook_path:
+        return False
+    try:
+        wb = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
+    except Exception:
+        wb = None
+    if wb is not None:
+        try:
+            for title in candidates:
+                if title not in wb.sheetnames:
+                    continue
+                if _has_tod_content_signal(wb[title]):
+                    return True
+        finally:
+            wb.close()
+        return False
+    for title in candidates:
+        # 回退：仅在无法打开工作簿时，使用“有实质内容”作为弱证据。
+        if count_non_empty_cells(workbook_path, title, max_rows=40) >= _MIN_SUBSTANCE_CELLS:
+            return True
+    return False
+
+
+def _has_tod_number_signal(text: str | None) -> bool:
+    t = _norm_token(text)
+    return "k032" in t or "k032" in t.replace("o", "0")
+
+
+def _has_tod_semantic_signal(text: str | None) -> bool:
+    t = _norm_token(text)
+    dep_terms = ("折旧", "depreciation", "累计折旧")
+    tod_terms = ("tod", "byitem", "逐项", "重算", "重新计算", "详细测试")
+    return any(x in t for x in dep_terms) and any(x in t for x in tod_terms)
+
+
+def _has_tod_content_signal(ws: openpyxl.worksheet.worksheet.Worksheet) -> bool:
+    non_empty = 0
+    numeric_cells = 0
+    term_hits: set[str] = set()
+    content_terms = (
+        "资产编号",
+        "原值",
+        "累计折旧",
+        "账面折旧",
+        "重算折旧",
+        "差异",
+        "使用寿命",
+        "残值率",
+        "折旧",
+        "depreciation",
+        "useful",
+        "salvage",
+        "byitem",
+        "重算",
+        "逐项",
+    )
+    for row in ws.iter_rows(
+        min_row=1,
+        max_row=_MAX_SIGNAL_SCAN_ROWS,
+        min_col=1,
+        max_col=_MAX_SIGNAL_SCAN_COLS,
+        values_only=True,
+    ):
+        for v in row:
+            if v is None:
+                continue
+            s = str(v).strip()
+            if not s:
+                continue
+            non_empty += 1
+            t = _norm_token(s)
+            if isinstance(v, (int, float)) or re.fullmatch(r"-?\d+(?:\.\d+)?", s):
+                numeric_cells += 1
+            for kw in content_terms:
+                if _norm_token(kw) in t:
+                    term_hits.add(kw)
+            if (
+                len(term_hits) >= _MIN_TOD_CONTENT_TERMS
+                and numeric_cells >= _MIN_TOD_NUMERIC_CELLS
+                and non_empty >= _MIN_SUBSTANCE_CELLS
+            ):
+                return True
+    return False
+
+
+def _rows_skip_waiver_by_dep_alt(
+    programs: list[PspProgramRow],
+    *,
+    inherited_status: dict[int, str],
+    workbook_sheet_titles: Sequence[str] | None,
+    workbook_path: str | None,
+) -> set[int]:
+    """K.03 折旧测试 SAP/TOD 二选一；TOD by item 视为 TOD 已执行证据。"""
+    sap_idx: int | None = None
+    tod_idx: int | None = None
+    sap_yes = False
+    tod_yes = False
+    for idx, row in enumerate(programs):
+        kind = _dep_alt_kind(row)
+        if not kind:
+            continue
+        status_text = inherited_status.get(idx, row.execution_status)
+        status = normalize_execution_status(status_text)
+        if kind == "sap":
+            sap_idx = idx if sap_idx is None else sap_idx
+            sap_yes = sap_yes or status == "yes"
+        else:
+            tod_idx = idx if tod_idx is None else tod_idx
+            tod_yes = tod_yes or status == "yes"
+
+    if not tod_yes:
+        tod_yes = _has_tod_evidence_in_workbook(workbook_sheet_titles, workbook_path)
+    if not (sap_yes or tod_yes):
+        return set()
+
+    skip: set[int] = set()
+    for idx in (sap_idx, tod_idx):
+        if idx is None:
+            continue
+        status_text = inherited_status.get(idx, programs[idx].execution_status)
+        if normalize_execution_status(status_text) == "no":
+            skip.add(idx)
+    return skip
+
+
+def _dep_alt_selection_consistency_issues(
+    programs: list[PspProgramRow],
+    *,
+    source_sheet: str,
+    inherited_status: dict[int, str],
+    workbook_sheet_titles: Sequence[str] | None,
+    workbook_path: str | None,
+) -> list[QcIssue]:
+    """当底稿证据显示折旧测试已执行，但汇总页勾选为否时，提示勾选口径不一致。"""
+    sap_idx: int | None = None
+    tod_idx: int | None = None
+    sap_yes = False
+    tod_yes = False
+    for idx, row in enumerate(programs):
+        kind = _dep_alt_kind(row)
+        if not kind:
+            continue
+        status_text = inherited_status.get(idx, row.execution_status)
+        status = normalize_execution_status(status_text)
+        if kind == "sap":
+            sap_idx = idx if sap_idx is None else sap_idx
+            sap_yes = sap_yes or status == "yes"
+        else:
+            tod_idx = idx if tod_idx is None else tod_idx
+            tod_yes = tod_yes or status == "yes"
+
+    tod_evidence = _has_tod_evidence_in_workbook(workbook_sheet_titles, workbook_path)
+    issues: list[QcIssue] = []
+    if tod_evidence and tod_idx is not None:
+        tod_row = programs[tod_idx]
+        tod_status = normalize_execution_status(inherited_status.get(tod_idx, tod_row.execution_status))
+        if tod_status == "no":
+            issues.append(
+                QcIssue(
+                    asset_id=None,
+                    rule_id=RULE_ID,
+                    field="execution_status_consistency",
+                    severity=Severity.NEED_REVIEW,
+                    message=(
+                        f"程序「{tod_row.procedure_name}」在汇总页标记为不执行，"
+                        "但工作簿存在「K.03.2 TOD/by item」且有实质测试内容，"
+                        "请核对是否为勾选口径错误"
+                    ),
+                    suggestion=(
+                        "确认 K.03.2 TOD（含 by item）是否已执行；若已执行请更新汇总页执行勾选，"
+                        "若确未执行请补充与现有底稿证据一致的说明"
+                    ),
+                    procedure_code="SUMMARY",
+                    source_sheet=source_sheet,
+                    source_row=tod_row.source_row,
+                )
+            )
+
+    if not issues and not (sap_yes or tod_yes or tod_evidence):
+        return issues
+    if sap_idx is None and tod_idx is None:
+        return issues
     return issues

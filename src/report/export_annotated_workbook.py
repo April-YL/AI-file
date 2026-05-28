@@ -39,6 +39,14 @@ _FILL_WARN = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="so
 _FILL_NR = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
 
 _SEV_RANK = {Severity.FAIL: 0, Severity.WARN: 1, Severity.NEED_REVIEW: 2}
+_MAX_QUESTION_LEN = 64
+_SHORT_TITLE_BY_CODE_FIELD: dict[tuple[str, str], str] = {
+    ("AE-003", "execution_status_consistency"): "汇总勾选与底稿证据不一致（K.03.2/TOD）",
+    ("AE-003", "waiver_reason"): "不执行理由不充分（需补风险/阈值/替代程序）",
+    ("AE-003", "execution_status"): "执行状态未填写或不明确",
+    ("LEAD-010", ""): "Lead 与 K.01 期末数不一致",
+    ("FA-RC-003", "net_value"): "净值勾稽不一致（原值-累折-减值≠净值）",
+}
 
 
 def annotated_workbook_path(input_path: str | Path) -> Path:
@@ -66,7 +74,8 @@ def _issue_comment_text(issue: QcIssue) -> str:
 def _question_text(issue: QcIssue) -> str:
     """Question/Comment：仅质检问题；建议见最后一列。"""
     code = issue.dict_rule_code or issue.rule_id
-    return f"[{issue.severity.value}] {code}: {issue.message}"
+    short = _short_title_for_issue(issue) or _compact_issue_message(issue.message)
+    return f"[{issue.severity.value}] {code} {short}"
 
 
 def _agent_suggestion(issue: QcIssue) -> str | None:
@@ -119,11 +128,7 @@ def _aggregate_fa_list_issues(
 def _fa_list_summary_question(rep: QcIssue, count: int) -> str:
     code = rep.dict_rule_code or rep.rule_id
     field_part = f"（字段 {rep.field}）" if rep.field else ""
-    return (
-        f"[{rep.severity.value}] {code}{field_part} — 共 {count} 条同类 finding；"
-        f"明细见 sheet「{FA_LIST_COMMENTS_SHEET_NAME}」。"
-        f" 代表说明: {rep.message}"
-    )
+    return f"[{rep.severity.value}] {code}{field_part} — 共 {count} 条同类问题，详见「{FA_LIST_COMMENTS_SHEET_NAME}」"
 
 
 def build_main_comments_rows(
@@ -136,7 +141,12 @@ def build_main_comments_rows(
 
     for issue in sorted(
         other_issues,
-        key=lambda i: (_SEV_RANK.get(i.severity, 9), i.source_sheet or "", i.source_row or 0),
+        key=lambda i: (
+            _sheet_group_rank(i),
+            (i.source_sheet or "").strip(),
+            _SEV_RANK.get(i.severity, 9),
+            i.source_row or 0,
+        ),
     ):
         ey += 1
         rows.append(
@@ -172,6 +182,40 @@ def build_main_comments_rows(
         )
 
     return rows
+
+
+def _compact_issue_message(message: str | None) -> str:
+    text = (message or "").strip()
+    if not text:
+        return "发现问题，请复核。"
+    text = " ".join(text.split())
+    for marker in ("；模型提示", ";模型提示", "模型提示：", "模型提示"):
+        if marker in text:
+            text = text.split(marker, 1)[0].strip()
+            break
+    # 压缩超长的程序名包裹文本，保留问题本质。
+    text = text.replace("程序「", "程序(").replace("」", ")")
+    if len(text) <= _MAX_QUESTION_LEN:
+        return text
+    return text[:_MAX_QUESTION_LEN].rstrip() + "..."
+
+
+def _short_title_for_issue(issue: QcIssue) -> str | None:
+    code = (issue.dict_rule_code or issue.rule_id or "").strip().upper()
+    field = (issue.field or "").strip().lower()
+    if not code:
+        return None
+    return _SHORT_TITLE_BY_CODE_FIELD.get((code, field)) or _SHORT_TITLE_BY_CODE_FIELD.get((code, ""))
+
+
+def _sheet_group_rank(issue: QcIssue) -> int:
+    sheet = (issue.source_sheet or "").strip().lower()
+    proc = (issue.procedure_code or "").strip().upper()
+    if proc == "SUMMARY" or "汇总" in sheet:
+        return 0
+    if proc == "K.00" or "lead" in sheet:
+        return 1
+    return 2
 
 
 def build_fa_list_detail_rows(fa_list_issues: list[QcIssue]) -> list[tuple]:

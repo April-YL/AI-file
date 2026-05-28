@@ -95,3 +95,84 @@ def test_build_comments_rows_compat():
     issues = [i for i in report.issues if i.severity != Severity.PASS]
     rows = build_comments_rows(issues)
     assert rows and rows[0][0] == 1
+
+
+def test_main_comment_rows_order_summary_then_lead_then_other():
+    issues = [
+        QcIssue(
+            asset_id=None,
+            rule_id="lead_required_fields",
+            field="gaap",
+            severity=Severity.FAIL,
+            message="Lead 缺少会计准则",
+            suggestion="补充",
+            procedure_code="K.00",
+            source_sheet="K.00 Lead Sheet",
+            source_row=10,
+        ),
+        QcIssue(
+            asset_id=None,
+            rule_id="psp_completion",
+            field="execution_status",
+            severity=Severity.WARN,
+            message="汇总页执行状态异常",
+            suggestion="补充",
+            procedure_code="SUMMARY",
+            source_sheet="汇总",
+            source_row=20,
+        ),
+        QcIssue(
+            asset_id=None,
+            rule_id="rollforward_exists",
+            field=None,
+            severity=Severity.NEED_REVIEW,
+            message="后推页缺失",
+            suggestion="补充",
+            procedure_code="K.01",
+            source_sheet="K.01 Agree SL to GL",
+            source_row=5,
+        ),
+    ]
+    rows = build_main_comments_rows(issues, [])
+    tabs = [r[1] for r in rows]
+    assert tabs == ["汇总", "K.00 Lead Sheet", "K.01 Agree SL to GL"]
+
+
+def test_question_comment_is_compact():
+    issue = QcIssue(
+        asset_id=None,
+        rule_id="psp_completion",
+        field="waiver_reason",
+        severity=Severity.WARN,
+        message=(
+            "程序「K.03.2 折旧测试TOD」不执行理由语义上不足；模型提示："
+            "未说明业务风险、阈值判断与替代程序，建议补充详细说明并给出证据来源。"
+        ),
+        suggestion="补充说明",
+        procedure_code="SUMMARY",
+        source_sheet="汇总",
+        source_row=18,
+    )
+    rows = build_main_comments_rows([issue], [])
+    question = rows[0][3]
+    assert question.startswith("[WARN] psp_completion ")
+    assert "模型提示" not in question
+    assert len(question) <= 90
+
+
+def test_question_comment_uses_short_title_mapping():
+    issue = QcIssue(
+        asset_id=None,
+        rule_id="psp_completion",
+        field="execution_status_consistency",
+        severity=Severity.NEED_REVIEW,
+        message="很长的原始信息，不应直接出现在 Question/Comment 里。",
+        suggestion="补充说明",
+        procedure_code="SUMMARY",
+        source_sheet="汇总",
+        source_row=18,
+        dict_rule_code="AE-003",
+    )
+    rows = build_main_comments_rows([issue], [])
+    question = rows[0][3]
+    assert question == "[NEED_REVIEW] AE-003 汇总勾选与底稿证据不一致（K.03.2/TOD）"
