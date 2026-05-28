@@ -25,6 +25,26 @@ def check_rollforward_exists(
             )
         ]
 
+    presence = rollforward.section_presence or {}
+    if presence and not presence.get("b1_bkd_main_table"):
+        b1_region = rollforward.section_regions.get("b1_bkd_main_table")
+        return [
+            QcIssue(
+                asset_id=None,
+                rule_id=RULE_ID,
+                field="b1_bkd_main_table",
+                severity=Severity.FAIL,
+                message=(
+                    f"已找到工作表「{rollforward.source_sheet}」，"
+                    "但未定位表1/BKD 主矩阵区（固定资产类别×交易行）"
+                ),
+                suggestion="请按 SOP【01】完善表1 或类别汇总主表，并避免与插入说明表混在同一锚点区",
+                procedure_code="K.01",
+                source_sheet=rollforward.source_sheet,
+                source_row=b1_region.anchor_row if b1_region else rollforward.header_row,
+            )
+        ]
+
     if rollforward_sheet_parseable(rollforward):
         return []
 

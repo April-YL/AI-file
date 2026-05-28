@@ -2,6 +2,7 @@
 
 > **来源**：`FY26_SOP K1 SWP 固定资产.xlsx` → `K.01 Agree SL to GL`（K1.01-【01】～【03】）、案例库 B–G 实测、`docs/qc-checklist.md` §三。  
 > **版式**：见 [k01-workpaper-layouts.md](./k01-workpaper-layouts.md)。  
+> **六区块覆盖矩阵（开发进度）**：见 [k01-six-block-qc-matrix.md](./k01-six-block-qc-matrix.md)；总索引 [program-qc-coverage-index.md](./program-qc-coverage-index.md)。  
 > **实现前必读**：`docs/qc-checklist.md`、`docs/workpaper-fields.md` § K.01、`docs/audit-workflow.md` § K.01。
 
 ## 背景
@@ -55,12 +56,12 @@
 
 | 规则 ID | 检查内容 | Layout | M2 | 默认 severity | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| `rollforward_exists` | A.1：识别 K.01 sheet 且可解析主表（header 或表1 锚点） | all | M2a | `FAIL` | **planned** |
-| `rollforward_columns_complete` | A.2：**L1** 四口径×期初/变动/期末（layouts 定义） | dual, hybrid | M2a | `FAIL` | **planned** |
+| `rollforward_exists` | A.1：识别 K.01 sheet 且可解析主表（header 或表1 锚点） | all | M2a | `FAIL` | **implemented** |
+| `rollforward_columns_complete` | A.2：**L1** 四口径×期初/变动/期末（layouts 定义） | dual, hybrid | M2a | `FAIL` | **implemented** |
 | `rollforward_columns_complete` | A.2：**L2** 矩阵+三子列 | sop_bkd | P1 | `FAIL`/`WARN` | planned |
 | `rollforward_sign_convention` | A.3：减少类为负（抽样/合计行） | sop, hybrid | P1 | `WARN` | planned |
 | `rollforward_adjustment_link_lead` | A.3：调整列与 Lead 一致 | sop_bkd | P1 | `FAIL`/`WARN` | planned |
-| `rollforward_abnormal_amounts` | A.4：累折>原值、负净值；处置转出勾稽 | all | M2a | `FAIL`/`WARN` | planned |
+| `rollforward_abnormal_amounts` | A.4：累折>原值、负净值；处置转出勾稽 | all | M2a | `FAIL`/`WARN` | **implemented** |
 | — | A.5 期初滚调 | all | 摘录 | `NEED_REVIEW` | manual |
 
 **字典编码（规划）**：`GL-006` exists、`GL-007` columns_complete；`GL-005` abnormal（procedure 应为 **K.01**，见 rule-dictionary 修正说明）。

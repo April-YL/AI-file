@@ -76,6 +76,15 @@ def print_summary(report, output_path: Path) -> None:
             f"| Lead QC: {lqc.get('overall_severity')} "
             f"({lqc.get('issue_count', 0)} findings)"
         )
+    if getattr(report, "rollforward_sheet_section", None):
+        sec = report.rollforward_sheet_section
+        rqc = (sec or {}).get("rollforward_qc") or {}
+        present = sum(1 for v in (sec.get("section_presence") or {}).values() if v)
+        print(
+            f"K.01: sheet={sec.get('source_sheet')!r} profile={sec.get('layout_profile')!r} "
+            f"sections={present}/6 conf={sec.get('recognition_confidence')} "
+            f"| K.01 QC: {rqc.get('overall_severity')} ({rqc.get('issue_count', 0)} findings)"
+        )
     if getattr(report, "llm_enrichment", None):
         le = report.llm_enrichment
         if le.error:

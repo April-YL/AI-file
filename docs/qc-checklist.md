@@ -54,6 +54,8 @@ Agent 规则化建议：
 
 **交叉规则（procedure 可能为 K.00）**：`lead_rollforward_tb_reconciliation`（Lead 期末 vs K.01 合计，见 planning/k01-qc-rules 模块 B）。
 
+**开发进度矩阵**：[planning/program-qc-coverage-index.md](planning/program-qc-coverage-index.md) · K.01 六区块：[planning/k01-six-block-qc-matrix.md](planning/k01-six-block-qc-matrix.md)
+
 ## 四、FA List
 
 | 检查点 | 检查描述 | 自动化等级 | 建议规则 ID |

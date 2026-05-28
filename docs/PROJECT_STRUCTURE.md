@@ -39,6 +39,10 @@
 | `docs/planning/lead-qc-rules.md` | K.00 Lead 分模块质检规划、SOP 对照与待建 rule_id。 |
 | `docs/planning/k01-qc-rules.md` | K.01 后推分模块质检规划、SOP【01】–【03】与 rule_id 总映射。 |
 | `docs/planning/k01-workpaper-layouts.md` | K.01 底稿版式 profile、列完整 L1/L2、ingest 契约。 |
+| `docs/planning/program-qc-coverage-index.md` | **程序质检覆盖总索引**（汇总 / Lead / K.01 / K.02 / K.03 开发进度）。 |
+| `docs/planning/k01-six-block-qc-matrix.md` | K.01 工作表六区块 × 风险点 × 规则实现状态。 |
+| `docs/planning/summary-sheet-qc-matrix.md` | 汇总页 PSP 质检覆盖矩阵。 |
+| `docs/planning/k02-k03-qc-matrix.md` | K.02/K.03 质检覆盖矩阵（规划模板）。 |
 
 ## Cursor 配置
 

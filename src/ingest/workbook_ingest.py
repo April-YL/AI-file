@@ -78,6 +78,19 @@ def _rollforward_summary(rf: RollforwardSheetDataset | None) -> dict[str, Any] |
         "ending_totals": {k: str(v) for k, v in rf.ending_totals.items() if v is not None},
         "layout_profile": rf.layout_profile.value,
         "has_movement_rows": rf.has_movement_rows,
+        "section_presence": rf.section_presence,
+        "section_evidence": rf.section_evidence,
+        "section_regions": {
+            sid: {
+                "anchor_row": reg.anchor_row,
+                "start_row": reg.start_row,
+                "end_row": reg.end_row,
+                "evidence": reg.evidence,
+            }
+            for sid, reg in rf.section_regions.items()
+        },
+        "section_conflicts": rf.section_conflicts,
+        "recognition_confidence": rf.recognition_confidence,
         "notes": rf.notes,
     }
 

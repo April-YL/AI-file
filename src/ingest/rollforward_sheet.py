@@ -28,6 +28,27 @@ from rules.parsing import parse_amount
 
 TOTAL_ROW_PATTERN = re.compile(r"(合计|总计|期末余额|账面余额合计|Grand\s*Total)", re.I)
 
+# K.01 六区块标准顺序（用于锚点行序校验）
+K01_SECTION_IDS: tuple[str, ...] = (
+    "b1_bkd_main_table",
+    "b2_movement_tb_reconciliation",
+    "b3_table2_fa_summary",
+    "b4_table3_check_with_table1",
+    "b5_table4_depreciation_pl",
+    "b6_notes_investigation_routing",
+)
+
+
+@dataclass
+class K01SectionRegion:
+    """K.01 工作表内某一标准区块的行范围（1-based，含首尾）。"""
+
+    section_id: str
+    anchor_row: int | None = None
+    start_row: int | None = None
+    end_row: int | None = None
+    evidence: list[str] = field(default_factory=list)
+
 
 @dataclass
 class RollforwardSheetDataset:
@@ -48,6 +69,11 @@ class RollforwardSheetDataset:
     total_row: int | None = None
     layout_profile: RollforwardLayoutProfile = RollforwardLayoutProfile.UNRECOGNIZED
     has_movement_rows: bool = False
+    section_presence: dict[str, bool] = field(default_factory=dict)
+    section_evidence: dict[str, list[str]] = field(default_factory=dict)
+    section_regions: dict[str, K01SectionRegion] = field(default_factory=dict)
+    section_conflicts: list[str] = field(default_factory=list)
+    recognition_confidence: float = 0.0
     notes: list[str] = field(default_factory=list)
 
 
@@ -286,6 +312,302 @@ def _sheet_text_blob(rows: list[tuple[Any, ...]], *, max_rows: int = 80) -> str:
     return " ".join(parts)
 
 
+def _detect_k01_sections(
+    rows: list[tuple[Any, ...]],
+    *,
+    has_movement_rows: bool,
+) -> tuple[dict[str, bool], dict[str, list[str]]]:
+    """识别 K.01 六区块（presence + 证据锚点）。"""
+    blob = _sheet_text_blob(rows, max_rows=140)
+    short_labels = {
+        _cell_str(v)
+        for row in rows[:140]
+        for v in row[:30]
+        if _cell_str(v) and len(_cell_str(v) or "") <= 24
+    }
+
+    def _contains_any(tokens: tuple[str, ...]) -> list[str]:
+        hits = [t for t in tokens if t in blob]
+        return hits[:4]
+
+    evidence: dict[str, list[str]] = {}
+    presence: dict[str, bool] = {}
+
+    # 区块 1：表1 BKD 主矩阵
+    b1_hits = _contains_any(("表1", "固定资产类别", "年初余额", "年末余额", "账面数", "审定数"))
+    presence["b1_bkd_main_table"] = ("固定资产类别" in blob) and (
+        ("表1" in blob) or ("年初余额" in blob and "年末余额" in blob)
+    )
+    evidence["b1_bkd_main_table"] = b1_hits
+
+    # 区块 2：变动/TB 勾稽区
+    b2_hits = _contains_any(
+        ("原值变动金额", "累计折旧变动金额", "减值准备变动金额", "TB-原值", "TB-累计折旧", "差异")
+    )
+    presence["b2_movement_tb_reconciliation"] = has_movement_rows or any(
+        token.startswith("TB-") or token == "差异" for token in b2_hits
+    )
+    evidence["b2_movement_tb_reconciliation"] = b2_hits
+
+    # 区块 3：表2（FA list 分类汇总）
+    b3_hits = _contains_any(("表2", "固定资产清单", "分类汇总", "表2 check with 表1"))
+    presence["b3_table2_fa_summary"] = ("表2" in short_labels) or ("固定资产清单" in blob and "表2" in blob)
+    evidence["b3_table2_fa_summary"] = b3_hits
+
+    # 区块 4：表3（表2 与表1 对勾）
+    b4_hits = _contains_any(("表3", "表2 check with 表1", "check with", "核对一致"))
+    presence["b4_table3_check_with_table1"] = ("表3" in short_labels) or ("表2 check with 表1" in blob)
+    evidence["b4_table3_check_with_table1"] = b4_hits
+
+    # 区块 5：表4（折旧费用与利润表核对）
+    b5_hits = _contains_any(("表4", "折旧费用与利润表科目核对", "利润表金额", "折旧费用"))
+    presence["b5_table4_depreciation_pl"] = ("表4" in short_labels) or (
+        "折旧费用" in blob and ("利润表" in blob or "试算表" in blob)
+    )
+    evidence["b5_table4_depreciation_pl"] = b5_hits
+
+    # 区块 6：Notes / 差异调查 / 程序路由（TE）
+    b6_hits = _contains_any(("Notes", "SAD", "TE", "K.02", "K.03", "拒绝", "不执行的原因", "调查"))
+    presence["b6_notes_investigation_routing"] = bool(b6_hits)
+    evidence["b6_notes_investigation_routing"] = b6_hits
+
+    return presence, evidence
+
+
+def _anchor_hits_in_row(row: tuple[Any, ...], section_id: str) -> list[str]:
+    """单行内命中某区块的锚点词（用于定位行号）。"""
+    hits: list[str] = []
+    cells = [_cell_str(v) for v in row[:24]]
+    texts = [t for t in cells if t]
+
+    def _short_label(t: str, max_len: int = 12) -> bool:
+        return len(t) <= max_len
+
+    if section_id == "b1_bkd_main_table":
+        for t in texts:
+            if t == "表1" or (t.startswith("表1") and len(t) <= 4):
+                hits.append("表1")
+            if "固定资产类别" in t and _short_label(t, 20):
+                hits.append("固定资产类别")
+            if t in ("年初余额", "年末余额", "账面数", "审定数"):
+                hits.append(t)
+    elif section_id == "b2_movement_tb_reconciliation":
+        for t in texts:
+            if "原值变动金额" in t or "累计折旧变动金额" in t:
+                hits.append(t)
+            if t.startswith("TB-"):
+                hits.append(t)
+            if t == "变动" or t == "差异":
+                hits.append(t)
+    elif section_id == "b3_table2_fa_summary":
+        for t in texts:
+            if t == "表2":
+                hits.append("表2")
+            if "固定资产清单" in t:
+                hits.append("固定资产清单")
+    elif section_id == "b4_table3_check_with_table1":
+        for t in texts:
+            if t == "表3":
+                hits.append("表3")
+            if "表2 check with 表1" in t:
+                hits.append("表2 check with 表1")
+    elif section_id == "b5_table4_depreciation_pl":
+        for t in texts:
+            if t == "表4":
+                hits.append("表4")
+            if "折旧费用与利润表" in t:
+                hits.append(t)
+    elif section_id == "b6_notes_investigation_routing":
+        for t in texts:
+            if t == "Notes" or t.startswith("Notes"):
+                hits.append("Notes")
+            if t in ("SAD", "TE") or "调查" in t:
+                hits.append(t)
+    return hits[:4]
+
+
+def _locate_section_anchor_rows(rows: list[tuple[Any, ...]]) -> dict[str, list[int]]:
+    """各区块首次命中锚点的行号（1-based），同区块可出现多次。"""
+    found: dict[str, list[int]] = {sid: [] for sid in K01_SECTION_IDS}
+    for r_idx, row in enumerate(rows):
+        if row is None:
+            continue
+        row_no = r_idx + 1
+        for sid in K01_SECTION_IDS:
+            if _anchor_hits_in_row(row, sid):
+                found[sid].append(row_no)
+    return found
+
+
+def _build_section_regions(
+    rows: list[tuple[Any, ...]],
+    anchor_rows: dict[str, list[int]],
+) -> dict[str, K01SectionRegion]:
+    """按锚点行序切分各区块起止行（未命中锚点则无行范围）。"""
+    ordered: list[tuple[int, str, str]] = []
+    for sid in K01_SECTION_IDS:
+        for row_no in anchor_rows.get(sid, []):
+            ordered.append((row_no, sid, ""))
+    ordered.sort(key=lambda x: x[0])
+    if not ordered:
+        return {}
+
+    row_count = len(rows)
+    # 去重：同一行只保留最先出现的 section（避免一行多标签）
+    seen_rows: set[int] = set()
+    unique_ordered: list[tuple[int, str]] = []
+    for row_no, sid, _ in ordered:
+        if row_no in seen_rows:
+            continue
+        seen_rows.add(row_no)
+        unique_ordered.append((row_no, sid))
+
+    regions: dict[str, K01SectionRegion] = {}
+    for i, (anchor_row, sid) in enumerate(unique_ordered):
+        end_row = unique_ordered[i + 1][0] - 1 if i + 1 < len(unique_ordered) else row_count
+        hits = _anchor_hits_in_row(rows[anchor_row - 1], sid) if anchor_row <= len(rows) else []
+        regions[sid] = K01SectionRegion(
+            section_id=sid,
+            anchor_row=anchor_row,
+            start_row=anchor_row,
+            end_row=max(anchor_row, end_row),
+            evidence=hits,
+        )
+    return regions
+
+
+def _detect_section_conflicts(
+    rows: list[tuple[Any, ...]],
+    *,
+    anchor_rows: dict[str, list[int]],
+    regions: dict[str, K01SectionRegion],
+    header_row: int | None,
+    col_by_field: dict[str, int],
+    bindings: list[RollforwardColumnBinding],
+) -> list[str]:
+    conflicts: list[str] = []
+
+    for sid, rows_hit in anchor_rows.items():
+        if len(rows_hit) > 1:
+            conflicts.append(f"duplicate_anchor:{sid}:rows={rows_hit[:5]}")
+
+    b3_row = anchor_rows.get("b3_table2_fa_summary", [None])[0] if anchor_rows.get("b3_table2_fa_summary") else None
+    b4_row = anchor_rows.get("b4_table3_check_with_table1", [None])[0] if anchor_rows.get(
+        "b4_table3_check_with_table1"
+    ) else None
+    if b3_row is not None and b4_row is not None and b4_row < b3_row:
+        conflicts.append("anchor_order:table3_before_table2")
+
+    b1 = regions.get("b1_bkd_main_table")
+    if b1 and b1.start_row and b1.end_row:
+        total_hits = 0
+        for r_idx in range(b1.start_row - 1, min(b1.end_row, len(rows))):
+            row = rows[r_idx]
+            if row is None:
+                continue
+            if not _row_has_total_label(row):
+                continue
+            if _row_plausible_total(row, col_by_field, bindings):
+                total_hits += 1
+        if total_hits > 1:
+            conflicts.append(f"ambiguous_total_rows_in_b1:count={total_hits}")
+
+    # 同一标准列号在多个区块表头行被赋予不同 measure
+    measure_by_col: dict[int, set[str]] = {}
+    for sid, region in regions.items():
+        if not region.start_row or not region.end_row:
+            continue
+        for r_idx in range(region.start_row - 1, min(region.end_row, len(rows))):
+            row = rows[r_idx]
+            if row is None:
+                continue
+            for col_i, val in enumerate(row[:30]):
+                raw = _cell_str(val)
+                if not raw:
+                    continue
+                measure = _infer_rollforward_measure(raw)
+                if measure is None:
+                    continue
+                col = col_i + 1
+                measure_by_col.setdefault(col, set()).add(f"{sid}:{measure}")
+    for col, tags in measure_by_col.items():
+        measures = {t.split(":", 1)[1] for t in tags}
+        if len(measures) > 1:
+            conflicts.append(f"duplicate_column_semantics:col{col}={sorted(measures)}")
+
+    if header_row and b1 and b1.start_row and b1.end_row:
+        if header_row < b1.start_row or header_row > b1.end_row:
+            conflicts.append("header_outside_b1_region")
+
+    return conflicts
+
+
+def _compute_recognition_confidence(
+    *,
+    section_presence: dict[str, bool],
+    section_conflicts: list[str],
+    layout_profile: RollforwardLayoutProfile,
+) -> float:
+    score = 0.2
+    if layout_profile != RollforwardLayoutProfile.UNRECOGNIZED:
+        score += 0.15
+    present = sum(1 for ok in section_presence.values() if ok)
+    score += min(0.45, present * 0.075)
+    score -= min(0.4, len(section_conflicts) * 0.08)
+    return round(max(0.0, min(1.0, score)), 3)
+
+
+def _presence_from_regions(regions: dict[str, K01SectionRegion]) -> dict[str, bool]:
+    return {sid: sid in regions for sid in K01_SECTION_IDS}
+
+
+def _merge_section_presence(
+    blob_presence: dict[str, bool],
+    regions: dict[str, K01SectionRegion],
+) -> dict[str, bool]:
+    """行锚点优先：有 region 则视为 presence；否则保留全文扫描结果。"""
+    out = dict(blob_presence)
+    for sid in K01_SECTION_IDS:
+        if sid in regions:
+            out[sid] = True
+    return out
+
+
+def _col_by_field_in_row_range(
+    rows: list[tuple[Any, ...]],
+    *,
+    start_row: int,
+    end_row: int,
+) -> dict[str, int]:
+    """仅在区块行范围内扫描表头，避免插入表同名列污染列绑定。"""
+    if start_row < 1 or end_row < start_row:
+        return {}
+    sub = rows[start_row - 1 : end_row]
+    _, header_cells, _ = scan_rows_for_headers(sub, sheet_kind=SheetKind.ROLLFORWARD)
+    if not header_cells:
+        return {}
+    mapped, _ = map_headers(header_cells, sheet_kind=SheetKind.ROLLFORWARD)
+    return {m.standard_field: m.column_index for m in mapped}
+
+
+def _find_total_row_in_range(
+    rows: list[tuple[Any, ...]],
+    *,
+    start_row: int,
+    end_row: int,
+    col_by_field: dict[str, int],
+    bindings: list[RollforwardColumnBinding],
+) -> tuple[int | None, tuple[Any, ...] | None]:
+    for r_idx in range(max(0, start_row - 1), min(end_row, len(rows))):
+        row = rows[r_idx]
+        if row is None or not _row_has_total_label(row):
+            continue
+        if not _row_plausible_total(row, col_by_field, bindings):
+            continue
+        return r_idx + 1, row
+    return None, None
+
+
 def _detect_layout_profile(
     rows: list[tuple[Any, ...]],
     bindings: list[RollforwardColumnBinding],
@@ -427,11 +749,37 @@ def parse_rollforward_rows(
     bindings = _supplement_movement_bindings(rows, bindings)
     has_movement_rows = _detect_movement_rows(rows)
     layout_profile = _detect_layout_profile(rows, bindings, has_movement_rows=has_movement_rows)
+    blob_presence, section_evidence = _detect_k01_sections(rows, has_movement_rows=has_movement_rows)
+    anchor_rows = _locate_section_anchor_rows(rows)
+    section_regions = _build_section_regions(rows, anchor_rows)
+    section_presence = _merge_section_presence(blob_presence, section_regions)
+    section_conflicts = _detect_section_conflicts(
+        rows,
+        anchor_rows=anchor_rows,
+        regions=section_regions,
+        header_row=header_row,
+        col_by_field=col_by_field,
+        bindings=bindings,
+    )
+    recognition_confidence = _compute_recognition_confidence(
+        section_presence=section_presence,
+        section_conflicts=section_conflicts,
+        layout_profile=layout_profile,
+    )
 
     ending: dict[str, Decimal | None] = {}
     opening: dict[str, Decimal | None] = {}
     total_row: int | None = None
     notes: list[str] = []
+    if section_presence:
+        present_cnt = sum(1 for ok in section_presence.values() if ok)
+        notes.append(f"k01_sections_detected:{present_cnt}/6")
+    if section_regions:
+        notes.append(f"k01_section_regions:{len(section_regions)}")
+    if section_conflicts:
+        notes.append("k01_section_conflicts")
+    if recognition_confidence < 0.65:
+        notes.append("k01_recognition_needs_review")
     if any(
         b.period_role in (RollforwardPeriodRole.OPENING, RollforwardPeriodRole.ENDING)
         for b in bindings
@@ -439,13 +787,33 @@ def parse_rollforward_rows(
         notes.append("period_labels_applied")
     total_row_data: tuple[Any, ...] | None = None
 
-    if header_row and (col_by_field or bindings):
+    b1_region = section_regions.get("b1_bkd_main_table")
+    col_for_totals = col_by_field
+    if b1_region and b1_region.start_row and b1_region.end_row:
+        scoped = _col_by_field_in_row_range(
+            rows,
+            start_row=b1_region.start_row,
+            end_row=b1_region.end_row,
+        )
+        if scoped:
+            col_for_totals = scoped
+            notes.append("totals_columns_from_b1_region")
+    if b1_region and b1_region.start_row and b1_region.end_row and (col_for_totals or bindings):
+        total_row, total_row_data = _find_total_row_in_range(
+            rows,
+            start_row=b1_region.start_row,
+            end_row=b1_region.end_row,
+            col_by_field=col_for_totals,
+            bindings=bindings,
+        )
+
+    if total_row_data is None and header_row and (col_for_totals or bindings):
         start = header_row
         for r_idx in range(start, len(rows)):
             row = rows[r_idx]
             if row is None or not _row_has_total_label(row):
                 continue
-            if not _row_plausible_total(row, col_by_field, bindings):
+            if not _row_plausible_total(row, col_for_totals, bindings):
                 continue
             total_row_data = row
             total_row = r_idx + 1
@@ -468,11 +836,11 @@ def parse_rollforward_rows(
                 )
                 if _binding_totals_have_values(unk):
                     ending = unk
-                elif col_by_field:
-                    ending = _extract_totals_from_row(total_row_data, col_by_field)
+                elif col_for_totals:
+                    ending = _extract_totals_from_row(total_row_data, col_for_totals)
             notes.append("totals_from_period_bindings")
-        elif col_by_field:
-            ending = _extract_totals_from_row(total_row_data, col_by_field)
+        elif col_for_totals:
+            ending = _extract_totals_from_row(total_row_data, col_for_totals)
             notes.append("ending_from_total_row")
         elif bindings:
             ending = _extract_totals_from_bindings(
@@ -511,6 +879,11 @@ def parse_rollforward_rows(
         total_row=total_row,
         layout_profile=layout_profile,
         has_movement_rows=has_movement_rows,
+        section_presence=section_presence,
+        section_evidence=section_evidence,
+        section_regions=section_regions,
+        section_conflicts=section_conflicts,
+        recognition_confidence=recognition_confidence,
         notes=notes,
     )
 

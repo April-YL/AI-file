@@ -1,0 +1,476 @@
+{
+  "generated_at": "2026-05-28T15:31:31Z",
+  "case_dir": "D:\\AI file\\固定资产质检agent\\案例库",
+  "max_mb": 20.0,
+  "max_rows": 150,
+  "expected_profile": "hybrid",
+  "expected_sections": 6,
+  "skipped": [
+    {
+      "file": "K1 SWP 固定资产 20251231 A有限公司.xlsx",
+      "size_mb": 40.87,
+      "skip_reason": "name_contains:A有限公司"
+    }
+  ],
+  "rows": [
+    {
+      "file": "K1 SWP 固定资产 20251231 B医疗公司.xlsx",
+      "label": "B",
+      "elapsed_s": 9.57,
+      "error": null,
+      "status": "ok",
+      "rollforward_sheet": "K.01 Agree SL to GL",
+      "layout_profile": "hybrid",
+      "has_movement_rows": true,
+      "header_row": 54,
+      "total_row": 62,
+      "sections_detected": 6,
+      "section_presence": {
+        "b1_bkd_main_table": true,
+        "b2_movement_tb_reconciliation": true,
+        "b3_table2_fa_summary": true,
+        "b4_table3_check_with_table1": true,
+        "b5_table4_depreciation_pl": true,
+        "b6_notes_investigation_routing": true
+      },
+      "section_regions": {
+        "b6_notes_investigation_routing": {
+          "anchor_row": 85,
+          "start_row": 85,
+          "end_row": 85
+        },
+        "b1_bkd_main_table": {
+          "anchor_row": 54,
+          "start_row": 54,
+          "end_row": 64
+        },
+        "b2_movement_tb_reconciliation": {
+          "anchor_row": 82,
+          "start_row": 82,
+          "end_row": 84
+        },
+        "b3_table2_fa_summary": {
+          "anchor_row": 52,
+          "start_row": 52,
+          "end_row": 52
+        },
+        "b4_table3_check_with_table1": {
+          "anchor_row": 53,
+          "start_row": 53,
+          "end_row": 53
+        },
+        "b5_table4_depreciation_pl": {
+          "anchor_row": 86,
+          "start_row": 86,
+          "end_row": 150
+        }
+      },
+      "section_conflicts": [
+        "duplicate_anchor:b1_bkd_main_table:rows=[9, 10, 11, 12, 18]",
+        "duplicate_anchor:b2_movement_tb_reconciliation:rows=[33, 35, 42, 43, 44]",
+        "duplicate_anchor:b4_table3_check_with_table1:rows=[52, 53]",
+        "duplicate_anchor:b5_table4_depreciation_pl:rows=[72, 73, 86]",
+        "duplicate_anchor:b6_notes_investigation_routing:rows=[7, 51, 65, 85]"
+      ],
+      "recognition_confidence": 0.4,
+      "ending_totals": {
+        "original_value": "0",
+        "accumulated_depreciation": "0",
+        "impairment_provision": "0",
+        "net_value": "-3.725290298461914E-9"
+      },
+      "notes": [
+        "k01_sections_detected:6/6",
+        "k01_section_regions:6",
+        "k01_section_conflicts",
+        "k01_recognition_needs_review",
+        "period_labels_applied",
+        "totals_columns_from_b1_region",
+        "totals_from_period_bindings"
+      ]
+    },
+    {
+      "file": "K1 SWP 固定资产 20251231 C新材料有限公司.xlsx",
+      "label": "C",
+      "elapsed_s": 16.7,
+      "error": null,
+      "status": "ok",
+      "rollforward_sheet": "K.01 Agree SL to GL",
+      "layout_profile": "hybrid",
+      "has_movement_rows": true,
+      "header_row": 54,
+      "total_row": 62,
+      "sections_detected": 6,
+      "section_presence": {
+        "b1_bkd_main_table": true,
+        "b2_movement_tb_reconciliation": true,
+        "b3_table2_fa_summary": true,
+        "b4_table3_check_with_table1": true,
+        "b5_table4_depreciation_pl": true,
+        "b6_notes_investigation_routing": true
+      },
+      "section_regions": {
+        "b6_notes_investigation_routing": {
+          "anchor_row": 81,
+          "start_row": 81,
+          "end_row": 81
+        },
+        "b1_bkd_main_table": {
+          "anchor_row": 54,
+          "start_row": 54,
+          "end_row": 64
+        },
+        "b2_movement_tb_reconciliation": {
+          "anchor_row": 78,
+          "start_row": 78,
+          "end_row": 80
+        },
+        "b3_table2_fa_summary": {
+          "anchor_row": 52,
+          "start_row": 52,
+          "end_row": 52
+        },
+        "b4_table3_check_with_table1": {
+          "anchor_row": 53,
+          "start_row": 53,
+          "end_row": 53
+        },
+        "b5_table4_depreciation_pl": {
+          "anchor_row": 82,
+          "start_row": 82,
+          "end_row": 150
+        }
+      },
+      "section_conflicts": [
+        "duplicate_anchor:b1_bkd_main_table:rows=[9, 10, 11, 12, 18]",
+        "duplicate_anchor:b2_movement_tb_reconciliation:rows=[33, 35, 42, 43, 44]",
+        "duplicate_anchor:b4_table3_check_with_table1:rows=[52, 53]",
+        "duplicate_anchor:b5_table4_depreciation_pl:rows=[72, 73, 82]",
+        "duplicate_anchor:b6_notes_investigation_routing:rows=[7, 51, 65, 81]"
+      ],
+      "recognition_confidence": 0.4,
+      "ending_totals": {
+        "original_value": "0",
+        "accumulated_depreciation": "0",
+        "impairment_provision": "0",
+        "net_value": "0"
+      },
+      "notes": [
+        "k01_sections_detected:6/6",
+        "k01_section_regions:6",
+        "k01_section_conflicts",
+        "k01_recognition_needs_review",
+        "period_labels_applied",
+        "totals_columns_from_b1_region",
+        "totals_from_period_bindings"
+      ]
+    },
+    {
+      "file": "K1 SWP 固定资产 20251231 D锂电科技有限公司.xlsx",
+      "label": "D",
+      "elapsed_s": 16.15,
+      "error": null,
+      "status": "ok",
+      "rollforward_sheet": "K.01 Agree SL to GL",
+      "layout_profile": "hybrid",
+      "has_movement_rows": true,
+      "header_row": 54,
+      "total_row": 64,
+      "sections_detected": 6,
+      "section_presence": {
+        "b1_bkd_main_table": true,
+        "b2_movement_tb_reconciliation": true,
+        "b3_table2_fa_summary": true,
+        "b4_table3_check_with_table1": true,
+        "b5_table4_depreciation_pl": true,
+        "b6_notes_investigation_routing": true
+      },
+      "section_regions": {
+        "b6_notes_investigation_routing": {
+          "anchor_row": 86,
+          "start_row": 86,
+          "end_row": 150
+        },
+        "b1_bkd_main_table": {
+          "anchor_row": 54,
+          "start_row": 54,
+          "end_row": 66
+        },
+        "b2_movement_tb_reconciliation": {
+          "anchor_row": 83,
+          "start_row": 83,
+          "end_row": 85
+        },
+        "b3_table2_fa_summary": {
+          "anchor_row": 52,
+          "start_row": 52,
+          "end_row": 52
+        },
+        "b4_table3_check_with_table1": {
+          "anchor_row": 53,
+          "start_row": 53,
+          "end_row": 53
+        },
+        "b5_table4_depreciation_pl": {
+          "anchor_row": 75,
+          "start_row": 75,
+          "end_row": 82
+        }
+      },
+      "section_conflicts": [
+        "duplicate_anchor:b1_bkd_main_table:rows=[9, 10, 11, 12, 18]",
+        "duplicate_anchor:b2_movement_tb_reconciliation:rows=[33, 35, 42, 43, 44]",
+        "duplicate_anchor:b4_table3_check_with_table1:rows=[52, 53]",
+        "duplicate_anchor:b5_table4_depreciation_pl:rows=[74, 75]",
+        "duplicate_anchor:b6_notes_investigation_routing:rows=[7, 51, 67, 86]",
+        "duplicate_column_semantics:col5=['accumulated_depreciation', 'impairment_provision']"
+      ],
+      "recognition_confidence": 0.4,
+      "ending_totals": {
+        "original_value": "-45673.74999976158",
+        "accumulated_depreciation": "-86798.8900000006",
+        "impairment_provision": "0",
+        "net_value": "41125.14000034332"
+      },
+      "notes": [
+        "k01_sections_detected:6/6",
+        "k01_section_regions:6",
+        "k01_section_conflicts",
+        "k01_recognition_needs_review",
+        "period_labels_applied",
+        "totals_columns_from_b1_region",
+        "totals_from_period_bindings"
+      ]
+    },
+    {
+      "file": "K1 SWP 固定资产 20251231 E锂原.xlsx",
+      "label": "E",
+      "elapsed_s": 13.36,
+      "error": null,
+      "status": "ok",
+      "rollforward_sheet": "K.01 Agree SL to GL",
+      "layout_profile": "hybrid",
+      "has_movement_rows": true,
+      "header_row": 54,
+      "total_row": 63,
+      "sections_detected": 6,
+      "section_presence": {
+        "b1_bkd_main_table": true,
+        "b2_movement_tb_reconciliation": true,
+        "b3_table2_fa_summary": true,
+        "b4_table3_check_with_table1": true,
+        "b5_table4_depreciation_pl": true,
+        "b6_notes_investigation_routing": true
+      },
+      "section_regions": {
+        "b6_notes_investigation_routing": {
+          "anchor_row": 84,
+          "start_row": 84,
+          "end_row": 150
+        },
+        "b1_bkd_main_table": {
+          "anchor_row": 54,
+          "start_row": 54,
+          "end_row": 65
+        },
+        "b2_movement_tb_reconciliation": {
+          "anchor_row": 81,
+          "start_row": 81,
+          "end_row": 83
+        },
+        "b3_table2_fa_summary": {
+          "anchor_row": 52,
+          "start_row": 52,
+          "end_row": 52
+        },
+        "b4_table3_check_with_table1": {
+          "anchor_row": 53,
+          "start_row": 53,
+          "end_row": 53
+        },
+        "b5_table4_depreciation_pl": {
+          "anchor_row": 74,
+          "start_row": 74,
+          "end_row": 80
+        }
+      },
+      "section_conflicts": [
+        "duplicate_anchor:b1_bkd_main_table:rows=[9, 10, 11, 12, 18]",
+        "duplicate_anchor:b2_movement_tb_reconciliation:rows=[33, 35, 42, 43, 44]",
+        "duplicate_anchor:b4_table3_check_with_table1:rows=[52, 53]",
+        "duplicate_anchor:b5_table4_depreciation_pl:rows=[73, 74]",
+        "duplicate_anchor:b6_notes_investigation_routing:rows=[7, 51, 66, 84]",
+        "duplicate_column_semantics:col5=['accumulated_depreciation', 'impairment_provision']"
+      ],
+      "recognition_confidence": 0.4,
+      "ending_totals": {
+        "original_value": "0",
+        "accumulated_depreciation": "0",
+        "impairment_provision": "0",
+        "net_value": "0"
+      },
+      "notes": [
+        "k01_sections_detected:6/6",
+        "k01_section_regions:6",
+        "k01_section_conflicts",
+        "k01_recognition_needs_review",
+        "period_labels_applied",
+        "totals_columns_from_b1_region",
+        "totals_from_period_bindings"
+      ]
+    },
+    {
+      "file": "K1 SWP 固定资产 20251231 F有限公司.xlsx",
+      "label": "F",
+      "elapsed_s": 20.18,
+      "error": null,
+      "status": "ok",
+      "rollforward_sheet": "K.01 Agree SL to GL",
+      "layout_profile": "hybrid",
+      "has_movement_rows": true,
+      "header_row": 54,
+      "total_row": 62,
+      "sections_detected": 6,
+      "section_presence": {
+        "b1_bkd_main_table": true,
+        "b2_movement_tb_reconciliation": true,
+        "b3_table2_fa_summary": true,
+        "b4_table3_check_with_table1": true,
+        "b5_table4_depreciation_pl": true,
+        "b6_notes_investigation_routing": true
+      },
+      "section_regions": {
+        "b6_notes_investigation_routing": {
+          "anchor_row": 85,
+          "start_row": 85,
+          "end_row": 150
+        },
+        "b1_bkd_main_table": {
+          "anchor_row": 54,
+          "start_row": 54,
+          "end_row": 64
+        },
+        "b2_movement_tb_reconciliation": {
+          "anchor_row": 82,
+          "start_row": 82,
+          "end_row": 84
+        },
+        "b3_table2_fa_summary": {
+          "anchor_row": 52,
+          "start_row": 52,
+          "end_row": 52
+        },
+        "b4_table3_check_with_table1": {
+          "anchor_row": 53,
+          "start_row": 53,
+          "end_row": 53
+        },
+        "b5_table4_depreciation_pl": {
+          "anchor_row": 73,
+          "start_row": 73,
+          "end_row": 81
+        }
+      },
+      "section_conflicts": [
+        "duplicate_anchor:b1_bkd_main_table:rows=[9, 10, 11, 12, 18]",
+        "duplicate_anchor:b2_movement_tb_reconciliation:rows=[33, 35, 42, 43, 44]",
+        "duplicate_anchor:b4_table3_check_with_table1:rows=[52, 53]",
+        "duplicate_anchor:b5_table4_depreciation_pl:rows=[72, 73]",
+        "duplicate_anchor:b6_notes_investigation_routing:rows=[7, 51, 65, 85]",
+        "duplicate_column_semantics:col5=['accumulated_depreciation', 'impairment_provision']"
+      ],
+      "recognition_confidence": 0.4,
+      "ending_totals": {
+        "original_value": "-31257260.010000035",
+        "accumulated_depreciation": "-6120928.499999999",
+        "impairment_provision": "0",
+        "net_value": "-25136331.510000035"
+      },
+      "notes": [
+        "k01_sections_detected:6/6",
+        "k01_section_regions:6",
+        "k01_section_conflicts",
+        "k01_recognition_needs_review",
+        "period_labels_applied",
+        "totals_columns_from_b1_region",
+        "totals_from_period_bindings"
+      ]
+    },
+    {
+      "file": "K1 SWP 固定资产 20251231 G科技.xlsx",
+      "label": "G",
+      "elapsed_s": 12.06,
+      "error": null,
+      "status": "ok",
+      "rollforward_sheet": "K.01 Agree SL to GL",
+      "layout_profile": "hybrid",
+      "has_movement_rows": true,
+      "header_row": 54,
+      "total_row": 61,
+      "sections_detected": 6,
+      "section_presence": {
+        "b1_bkd_main_table": true,
+        "b2_movement_tb_reconciliation": true,
+        "b3_table2_fa_summary": true,
+        "b4_table3_check_with_table1": true,
+        "b5_table4_depreciation_pl": true,
+        "b6_notes_investigation_routing": true
+      },
+      "section_regions": {
+        "b6_notes_investigation_routing": {
+          "anchor_row": 89,
+          "start_row": 89,
+          "end_row": 89
+        },
+        "b1_bkd_main_table": {
+          "anchor_row": 54,
+          "start_row": 54,
+          "end_row": 63
+        },
+        "b2_movement_tb_reconciliation": {
+          "anchor_row": 81,
+          "start_row": 81,
+          "end_row": 83
+        },
+        "b3_table2_fa_summary": {
+          "anchor_row": 52,
+          "start_row": 52,
+          "end_row": 52
+        },
+        "b4_table3_check_with_table1": {
+          "anchor_row": 53,
+          "start_row": 53,
+          "end_row": 53
+        },
+        "b5_table4_depreciation_pl": {
+          "anchor_row": 90,
+          "start_row": 90,
+          "end_row": 150
+        }
+      },
+      "section_conflicts": [
+        "duplicate_anchor:b1_bkd_main_table:rows=[9, 10, 11, 12, 18]",
+        "duplicate_anchor:b2_movement_tb_reconciliation:rows=[33, 35, 42, 43, 44]",
+        "duplicate_anchor:b4_table3_check_with_table1:rows=[52, 53]",
+        "duplicate_anchor:b5_table4_depreciation_pl:rows=[71, 72, 90]",
+        "duplicate_anchor:b6_notes_investigation_routing:rows=[7, 51, 64, 84, 89]"
+      ],
+      "recognition_confidence": 0.4,
+      "ending_totals": {
+        "original_value": "0.33000025153160095",
+        "accumulated_depreciation": "0",
+        "impairment_provision": "0",
+        "net_value": "0.3300003558397293"
+      },
+      "notes": [
+        "k01_sections_detected:6/6",
+        "k01_section_regions:6",
+        "k01_section_conflicts",
+        "k01_recognition_needs_review",
+        "period_labels_applied",
+        "totals_columns_from_b1_region",
+        "totals_from_period_bindings"
+      ]
+    }
+  ]
+}

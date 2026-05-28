@@ -144,6 +144,78 @@ def test_rollforward_opening_ending_bindings_and_totals():
     assert rf.ending_totals.get("net_value") == Decimal("960")
 
 
+def test_rollforward_detects_k01_sections_six_blocks():
+    rows = [
+        ("K.01 Agree SL to GL",),
+        ("表1", "固定资产类别", "账面数", "审定数", "年初余额", "年末余额"),
+        ("机器设备", 1000, 1000, 1000, 1000, 1000),
+        ("原值变动金额", "TB-原值", "差异"),
+        ("表2", "固定资产清单", "分类汇总"),
+        ("表3", "表2 check with 表1"),
+        ("表4", "折旧费用与利润表科目核对"),
+        ("Notes", "超过SAD差异调查", "超过TE转K.02/K.03", "拒绝执行原因"),
+    ]
+    rf = parse_rollforward_rows(rows, source_sheet="K.01 Agree SL to GL")
+    presence = rf.section_presence
+    assert presence["b1_bkd_main_table"] is True
+    assert presence["b2_movement_tb_reconciliation"] is True
+    assert presence["b3_table2_fa_summary"] is True
+    assert presence["b4_table3_check_with_table1"] is True
+    assert presence["b5_table4_depreciation_pl"] is True
+    assert presence["b6_notes_investigation_routing"] is True
+    assert "k01_sections_detected:6/6" in rf.notes
+    assert "表1" in rf.section_evidence["b1_bkd_main_table"]
+
+
+def test_rollforward_detects_partial_sections_when_missing_blocks():
+    rows = [
+        ("K.01 Agree SL to GL",),
+        ("固定资产类别", "原值", "累计折旧", "净值"),
+        ("设备A", 100, 10, 90),
+        ("合计", 100, 10, 90),
+    ]
+    rf = parse_rollforward_rows(rows, source_sheet="K.01")
+    # 仅有类别简表：行锚点可识别 b1，但无表2–表6
+    assert rf.section_presence["b1_bkd_main_table"] is True
+    assert "b1_bkd_main_table" in rf.section_regions
+    assert rf.section_presence["b2_movement_tb_reconciliation"] is False
+    assert rf.section_presence["b3_table2_fa_summary"] is False
+    assert rf.section_presence["b6_notes_investigation_routing"] is False
+    assert rf.recognition_confidence < 0.65
+    assert "k01_recognition_needs_review" in rf.notes
+
+
+def test_rollforward_b1_total_prefers_region_over_insert_block():
+    """插入表与标准字段重叠时，合计行应取自 b1 区块而非上方插入表。"""
+    rows = [
+        ("项目特殊说明",),
+        ("原值", "累计折旧", "净值"),
+        ("插入合计", 9999, 1000, 8999),
+        ("表1", "固定资产类别", "原值", "累计折旧", "净值"),
+        ("", "设备A", 100, 10, 90),
+        ("", "合计", 100, 10, 90),
+    ]
+    rf = parse_rollforward_rows(rows, source_sheet="K.01")
+    assert rf.total_row == 6
+    assert rf.ending_totals.get("net_value") == Decimal("90")
+    assert any(c.startswith("ambiguous_total_rows") for c in rf.section_conflicts) is False
+
+
+def test_rollforward_section_regions_and_conflicts_on_six_blocks():
+    rows = [
+        ("表1", "固定资产类别", "原值", "净值"),
+        ("原值变动金额", "TB-原值", "差异"),
+        ("表2", "固定资产清单"),
+        ("表3", "表2 check with 表1"),
+        ("表4", "折旧费用与利润表科目核对"),
+        ("Notes", "SAD调查"),
+    ]
+    rf = parse_rollforward_rows(rows, source_sheet="K.01")
+    assert len(rf.section_regions) >= 5
+    assert rf.section_regions["b3_table2_fa_summary"].anchor_row == 3
+    assert rf.recognition_confidence >= 0.65
+
+
 def test_reconciliation_match(reconciliation_workbook: Path):
     ctx = load_workbook_ingest(reconciliation_workbook)
     assert ctx.fa_list is not None
@@ -166,3 +238,24 @@ def test_load_workbook_ingest_on_fixture():
     ctx = load_workbook_ingest(path)
     assert ctx.structure.sheets_by_kind
     assert ctx.fa_list is not None or ctx.fa_list_sheets
+
+
+def test_rollforward_summary_contains_section_outputs():
+    rows = [
+        ("K.01 Agree SL to GL",),
+        ("表1", "固定资产类别", "账面数", "审定数"),
+        ("原值变动金额", "TB-原值", "差异"),
+        ("表2", "固定资产清单"),
+        ("表3", "表2 check with 表1"),
+        ("表4", "折旧费用与利润表科目核对"),
+        ("Notes", "超过SAD差异调查", "超过TE转K.02/K.03"),
+    ]
+    rf = parse_rollforward_rows(rows, source_sheet="K.01")
+    from ingest.workbook_ingest import _rollforward_summary
+
+    data = _rollforward_summary(rf)
+    assert data is not None
+    assert "section_presence" in data
+    assert "section_evidence" in data
+    assert data["section_presence"]["b1_bkd_main_table"] is True
+    assert isinstance(data["section_evidence"]["b6_notes_investigation_routing"], list)

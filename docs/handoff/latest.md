@@ -59,6 +59,12 @@
   - `export_annotated_workbook`：`Question/Comment` 短标题化（规则码映射 + 通用压缩）、去除冗长“模型提示”；`Comments【归档前删除】` 排序改为“汇总 → Lead → 其他”。
   - 验证：`tests/rules/test_psp_completion.py`（21 通过）、`tests/report/test_export_annotated_workbook.py`（8 通过）；实测 `...G科技-测试0526-01...` 输出中 `K.02.2a` 误报消失，K.03 改为一致性提示项。
 
+- **K.01 识别层 + P0 规则（2026-05-28）**：
+  - ingest：`section_presence` / `section_regions` / `section_conflicts` / `recognition_confidence`；b1 区内合计/表头防干扰
+  - 规则：`rollforward_exists`、`rollforward_columns_complete`、`rollforward_abnormal_amounts`（GL-006/007/005）；`rollforward_sheet_section`
+  - 回归：`scripts/run_case_rollforward_regression.py`、`tests/ingest/test_case_rollforward_regression.py`
+- **程序质检覆盖文档（2026-05-28）**：`docs/planning/program-qc-coverage-index.md`（总索引）、`k01-six-block-qc-matrix.md`、`summary-sheet-qc-matrix.md`、`k02-k03-qc-matrix.md`（规划模板）；Lead 仍见 `lead-qc-rules.md`
+
 ## 进行中（M2a = Agent P1）
 
 - **字段映射与读取准确性**（接入主线，已起步）：
@@ -68,13 +74,12 @@
   - **Lead 回归表**：`artifacts/case_lead_regression.md`（B–G 共 6 份；A 42MB 永久跳过）
   - **待做**：对案例库 6 份底稿重跑 `fa-qc-diagnose` 更新 `case-workpaper-diagnostic.md`
 - **Lead 质检规则（模块 1–5 P0）**：含 `lead_check_with_a3_row`（ingest 摘录 Check with A3/Diff/Notes + Diff≠0/缺说明 FAIL）；其余 `lead_*`、AE-004、`lead_rollforward_tb_reconciliation`；`lead_runner` + `lead_sheet_section`
-- **K.01 规划文档（2026-05-26）**：`docs/planning/k01-qc-rules.md`、`docs/planning/k01-workpaper-layouts.md`
-- **K.01 P0 规则（2026-05-26）**：ingest 增强（审2/审3 列块、变动行、多 sheet 优选）；`rollforward_exists`、`rollforward_columns_complete`（L1）；`rollforward_runner` + pipeline；registry **GL-006/007** implemented
+- **K.01 M2b（区块 2–6 勾稽）**：`rollforward_fa_list_reconciliation`、SAD/TE 路由、TB/PL（见 `k01-six-block-qc-matrix.md`）
 
 ## 下一步（M2a 验收导向）
 
-1. **K.01**：案例库 B–G `fa-qc-run` 回归；`rollforward_abnormal_amounts`（GL-005）；可选 `rollforward_sheet_report` / UI 页签
-2. **rules（Lead 余量）**：`lead_fluctuation_notes_refs`、`lead_arp_three_triggers`；`rollforward_abnormal_amounts`；Streamlit Lead/K.01 页签（可选）
+1. **K.01 M2b**：表2/3↔FA list、>SAD 差异、>TE 路由；识别置信度/锚点去重优化
+2. **rules（Lead 余量）**：`lead_fluctuation_notes_refs`、`lead_arp_three_triggers`；Streamlit K.01 页签（可选）
 2. **M3c（P1）**：`--llm-rules`、`--llm-checklist`（见 roadmap）；**非**优先扩展 `--llm` 报告叙述
 3. **ingest**：案例库字段映射回归
 4. report：独立 Excel 质检报告（非标注副本）、标注 Cell Ref. 与共性合并规则优化
@@ -142,7 +147,8 @@
 - `docs/ONBOARDING.md`
 - `docs/llm-agent-roadmap.md` — 三层 LLM 分工与 M3c 任务（C1–C9）
 - `docs/planning/lead-qc-rules.md` — K.00 分模块质检点、SOP 对照遗漏、M2 实现顺序
-- `docs/planning/k01-qc-rules.md`、`docs/planning/k01-workpaper-layouts.md` — K.01 SOP 对照、版式 profile、P0 实现顺序
+- `docs/planning/program-qc-coverage-index.md` — **程序质检覆盖总索引**（汇总 / Lead / K.01 / K.02 / K.03 开发进度）
+- `docs/planning/k01-qc-rules.md`、`docs/planning/k01-workpaper-layouts.md`、`docs/planning/k01-six-block-qc-matrix.md` — K.01 SOP 对照、版式、六区块矩阵
 
 ## Demo 命令（本次收工验证）
 

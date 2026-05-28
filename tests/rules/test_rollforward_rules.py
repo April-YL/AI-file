@@ -7,6 +7,7 @@ from decimal import Decimal
 from ingest.models import RollforwardLayoutProfile, RollforwardPeriodRole
 from ingest.rollforward_sheet import RollforwardSheetDataset, parse_rollforward_rows
 from rules.registry import attach_rule_metadata, get_by_dict_code
+from rules.rollforward_abnormal_amounts import check_rollforward_abnormal_amounts
 from rules.rollforward_columns_complete import check_rollforward_columns_complete
 from rules.rollforward_exists import check_rollforward_exists
 from rules.rollforward_runner import run_rollforward_rules
@@ -36,8 +37,23 @@ def test_rollforward_exists_pass_parseable():
     rf = _minimal_rf(
         amount_column_bindings=[],
         ending_totals={"original_value": Decimal("1")},
+        section_presence={"b1_bkd_main_table": True},
     )
     assert not check_rollforward_exists(rf)
+
+
+def test_rollforward_exists_fail_missing_b1_section():
+    rf = _minimal_rf(
+        header_row=5,
+        section_presence={
+            "b1_bkd_main_table": False,
+            "b2_movement_tb_reconciliation": True,
+        },
+    )
+    issues = check_rollforward_exists(rf)
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.FAIL
+    assert "表1" in issues[0].message or "BKD" in issues[0].message
 
 
 def test_rollforward_columns_complete_l1_pass():
@@ -134,6 +150,57 @@ def test_dual_period_audit_labels_ingest_and_rules():
     assert not [i for i in issues if i.rule_id == "rollforward_columns_complete"]
 
 
+def test_rollforward_abnormal_amounts_fail_accum_exceeds_original():
+    rf = _minimal_rf(
+        section_presence={"b1_bkd_main_table": True},
+        ending_totals={
+            "original_value": Decimal("100"),
+            "accumulated_depreciation": Decimal("150"),
+            "net_value": Decimal("-50"),
+        },
+        total_row=10,
+    )
+    issues = check_rollforward_abnormal_amounts(rf)
+    assert issues
+    assert any(i.severity == Severity.FAIL for i in issues)
+    assert any("累计折旧" in i.message for i in issues)
+
+
+def test_rollforward_abnormal_amounts_fail_negative_net():
+    rf = _minimal_rf(
+        section_presence={"b1_bkd_main_table": True},
+        ending_totals={
+            "original_value": Decimal("100"),
+            "accumulated_depreciation": Decimal("80"),
+            "net_value": Decimal("-1"),
+        },
+    )
+    issues = check_rollforward_abnormal_amounts(rf)
+    assert any("净值为负" in i.message for i in issues)
+
+
+def test_rollforward_abnormal_amounts_pass_normal_totals():
+    rf = _minimal_rf(
+        section_presence={"b1_bkd_main_table": True},
+        ending_totals={
+            "original_value": Decimal("1000"),
+            "accumulated_depreciation": Decimal("400"),
+            "impairment_provision": Decimal("0"),
+            "net_value": Decimal("600"),
+        },
+    )
+    assert not check_rollforward_abnormal_amounts(rf)
+
+
+def test_registry_gl005_implemented():
+    spec = get_by_dict_code("GL-005")
+    assert spec is not None
+    assert spec.rule_id == "rollforward_abnormal_amounts"
+    from rules.registry import ImplementationStatus
+
+    assert spec.implementation == ImplementationStatus.IMPLEMENTED
+
+
 def test_registry_gl006_gl007_implemented():
     assert get_by_dict_code("GL-006") is not None
     assert get_by_dict_code("GL-007") is not None
@@ -141,3 +208,50 @@ def test_registry_gl006_gl007_implemented():
 
     assert get_by_dict_code("GL-006").implementation == ImplementationStatus.IMPLEMENTED
     assert get_by_dict_code("GL-007").implementation == ImplementationStatus.IMPLEMENTED
+
+
+def test_rollforward_sheet_report_section():
+    from ingest.models import RollforwardColumnBinding
+    from report.rollforward_sheet_report import build_rollforward_sheet_section
+
+    bindings = []
+    for measure in ("original_value", "accumulated_depreciation", "impairment_provision", "net_value"):
+        bindings.append(
+            RollforwardColumnBinding(
+                measure=measure,
+                period_role=RollforwardPeriodRole.OPENING,
+                column_index=3,
+                source_header="审2",
+            )
+        )
+        bindings.append(
+            RollforwardColumnBinding(
+                measure=measure,
+                period_role=RollforwardPeriodRole.ENDING,
+                column_index=8,
+                source_header="审3",
+            )
+        )
+    bindings.append(
+        RollforwardColumnBinding(
+            measure="original_value",
+            period_role=RollforwardPeriodRole.MOVEMENT,
+            column_index=12,
+            source_header="原值变动金额",
+        )
+    )
+    rf = _minimal_rf(
+        amount_column_bindings=bindings,
+        section_presence={"b1_bkd_main_table": True},
+        ending_totals={
+            "impairment_provision": Decimal("0"),
+            "original_value": Decimal("100"),
+            "accumulated_depreciation": Decimal("20"),
+            "net_value": Decimal("80"),
+        },
+        opening_totals={"original_value": Decimal("100")},
+    )
+    issues = attach_rule_metadata(run_rollforward_rules(rf))
+    sec = build_rollforward_sheet_section(rf, issues)
+    assert sec["ingested"] is True
+    assert sec["rollforward_qc"]["overall_severity"] == "PASS"

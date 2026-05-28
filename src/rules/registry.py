@@ -518,8 +518,8 @@ def _specs() -> list[RuleSpec]:
             qc_checkpoint="Y-审计基础程序",
             k1_ref="qc-checklist K.01 / SOP K1.01 易错点【01】",
             agent_priority=AgentPriority.P1,
-            implementation=ImplementationStatus.PLANNED,
-            notes="累折>原值、负净值、处置转出勾稽；见 planning/k01-qc-rules",
+            implementation=ImplementationStatus.IMPLEMENTED,
+            notes="累折>原值、负净值等；见 planning/k01-six-block-qc-matrix",
         ),
         RuleSpec(
             dict_code="GL-006",
