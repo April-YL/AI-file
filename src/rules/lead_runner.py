@@ -2,11 +2,19 @@ from __future__ import annotations
 
 from ingest.lead_sheet import LeadSheetDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset
+from rules.lead_adjustment_internal_consistency import (
+    check_lead_adjustment_internal_consistency,
+)
 from rules.lead_analysis_date_after_period_end import (
     check_lead_analysis_date_after_period_end,
 )
 from rules.lead_check_with_a3_row import check_lead_check_with_a3_row
 from rules.lead_expectation_analysis import check_lead_expectation_analysis
+from rules.lead_expectation_basis_present import check_lead_expectation_basis_present
+from rules.lead_expectation_vs_movement_review import (
+    check_lead_expectation_vs_movement_review,
+)
+from rules.lead_fluctuation_notes_refs import check_lead_fluctuation_notes_refs
 from rules.lead_movement_consistency import check_lead_movement_consistency
 from rules.lead_movement_notes_required import check_lead_movement_notes_required
 from rules.lead_movement_rows_complete import check_lead_movement_rows_complete
@@ -30,12 +38,16 @@ LEAD_RULE_IDS: tuple[str, ...] = (
     "lead_tt_overall_min",
     "lead_tt_gam_range",
     "lead_expectation_analysis",
+    "lead_expectation_basis_present",
+    "lead_expectation_vs_movement_review",
     "lead_volatility_threshold_link",
     "lead_movement_rows_complete",
     "lead_movement_consistency",
     "lead_movement_notes_required",
     "lead_check_with_a3_row",
     "unexpected_movement_investigation",
+    "lead_fluctuation_notes_refs",
+    "lead_adjustment_internal_consistency",
     "lead_rollforward_tb_reconciliation",
 )
 
@@ -54,11 +66,15 @@ def run_lead_rules(
     issues.extend(check_lead_tt_overall_min(lead))
     issues.extend(check_lead_tt_gam_range(lead))
     issues.extend(check_lead_expectation_analysis(lead))
+    issues.extend(check_lead_expectation_basis_present(lead))
+    issues.extend(check_lead_expectation_vs_movement_review(lead))
     issues.extend(check_lead_volatility_threshold_link(lead))
     issues.extend(check_lead_movement_rows_complete(lead))
     issues.extend(check_lead_movement_consistency(lead))
     issues.extend(check_lead_movement_notes_required(lead))
     issues.extend(check_lead_check_with_a3_row(lead))
     issues.extend(check_unexpected_movement_investigation(lead))
+    issues.extend(check_lead_fluctuation_notes_refs(lead))
+    issues.extend(check_lead_adjustment_internal_consistency(lead))
     issues.extend(check_lead_rollforward_tb_reconciliation(lead, rollforward))
     return issues

@@ -354,7 +354,20 @@ checklist 的 `lead_exception_investigation` 与 AE-004 **合并为一个 rule_i
 4. **模块 3–4**：`lead_expectation_analysis`、`lead_volatility_threshold_link`；`lead_movement_*`、`lead_rollforward_tb_reconciliation`  
 5. **模块 5**：AE-004 确定性子集 + Notes 弱检查  
 6. **模块 6**：调整摘录 + 有/无调整分支  
-7. **M3**：预期一致性、波动说明充分性、调整恰当性  
+7. **M3**：预期一致性、波动说明充分性、调整恰当性 
+
+### 2026-05-30 补充：Lead 内部闭环规则
+
+本轮先按“只使用 Lead 表内部信息、不接入 A5/A3A5”的边界，补充 4 条规则：
+
+| rule_id | dict_code | 覆盖内容 | 结论口径 |
+| --- | --- | --- | --- |
+| `lead_expectation_basis_present` | `LEAD-014` | 预期分析为空或仅为简短结论时提示补充判断依据 | `WARN` / `NEED_REVIEW` |
+| `lead_expectation_vs_movement_review` | `LEAD-015` | 预期为无重大变化但主表实际波动超过阈值时提示复核 | `NEED_REVIEW` |
+| `lead_fluctuation_notes_refs` | `LEAD-016` | Lead 主表 Notes 引用与波动说明区编号弱匹配 | `FAIL` / `WARN` / `NEED_REVIEW` |
+| `lead_adjustment_internal_consistency` | `LEAD-017` | Lead 主表调整列与 Lead 调整事项汇总表内部一致 | `FAIL` / `WARN` / `NEED_REVIEW` |
+
+说明：`LEAD-017` 暂不检查外部 A5/A3A5 调整表；`LEAD-014/015/016` 为规则层弱判断与复核提示，LLM 语义规则仍仅作补充，不覆盖确定性规则结论。
 
 ---
 
