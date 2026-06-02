@@ -13,6 +13,7 @@ _DICT_CODES: dict[str, str | None] = {
     "rollforward_exists": "GL-006",
     "rollforward_columns_complete": "GL-007",
     "rollforward_abnormal_amounts": "GL-005",
+    "rollforward_fa_list_reconciliation": "GL-002",
 }
 
 _MAX_BINDINGS = 24
@@ -88,6 +89,18 @@ def build_rollforward_sheet_section(
         },
         "ending_totals": {
             k: str(v) for k, v in rollforward.ending_totals.items() if v is not None
+        },
+        "table2_amount_count": rollforward.table2_amount_count,
+        "table3_check_values": [str(v) for v in rollforward.table3_check_values[:20]],
+        "table3_check_row": rollforward.table3_check_row,
+        "tb_reconciliation": {
+            "detected": rollforward.tb_reconciliation_detected,
+            "confidence": rollforward.tb_reconciliation_confidence,
+            "difference_values": [str(v) for v in rollforward.tb_difference_values[:20]],
+            "difference_row": rollforward.tb_difference_row,
+            "notes_text_present": rollforward.tb_notes_text_present,
+            "notes_row": rollforward.tb_notes_row,
+            "notes_text": rollforward.tb_notes_text,
         },
         "ingest_notes": list(rollforward.notes or [])[:40],
         "rollforward_qc": {

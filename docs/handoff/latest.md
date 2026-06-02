@@ -7,7 +7,8 @@
 固定资产质检 Agent 的完整目标是：
 
 - **输入**：固定资产底稿 + 必要辅助文件（checklist、TE/SAD 等）。
-- **过程**：按 `docs/qc-checklist.md` 检查是否存在 findings，模拟质检人员复核底稿。
+- **过程**：按 `docs/qc-checklist.md` 和 SOP 执行基础 review 与可结构化检查，识别 findings；需要审计判断或风险判断的事项标为 `NEED_REVIEW`，交由质检人员重点复核。
+- **定位**：让 Agent 承担重复性核对和基础检查，帮助质检人员把更多时间用于高风险事项识别、重大审计判断和风险管理。
 - **必交付**：
   1. **质检报告**（findings 清单、严重级别、程序/资产维度汇总、复核建议）。
   2. **底稿标注**（在原底稿副本上批注/高亮问题位置，与 findings 一一对应）。
@@ -63,6 +64,15 @@
   - ingest：`section_presence` / `section_regions` / `section_conflicts` / `recognition_confidence`；b1 区内合计/表头防干扰
   - 规则：`rollforward_exists`、`rollforward_columns_complete`、`rollforward_abnormal_amounts`（GL-006/007/005）；`rollforward_sheet_section`
   - 回归：`scripts/run_case_rollforward_regression.py`、`tests/ingest/test_case_rollforward_regression.py`
+- **K.01 GL-002 首版（2026-06-02）**：
+  - 规则：`rollforward_fa_list_reconciliation` 已接入 K.01 runner；主检查读取 K.01 表3（FA list 汇总表与后推明细表 check）结果。
+  - 口径：表3 check 非零差异输出 `WARN`；表3不可读时，检查表2是否存在/是否有 SUMIF 汇总金额，并把 Agent 自算 FA list 合计仅作为 `NEED_REVIEW` 兜底提示。
+  - 验证：`tests/rules` 106 通过；`tests/ingest/test_workbook_ingest.py --basetemp .pytest_tmp` 12 通过；`tests/report/test_workbook_pipeline.py --basetemp .pytest_tmp_report` 1 通过。
+- **K.01 TB check 读取层（2026-06-02）**：
+  - ingest：新增 `tb_reconciliation_detected`、`tb_reconciliation_confidence`、`tb_difference_values`、`tb_difference_row`、`tb_notes_text_present`、`tb_notes_row`、`tb_notes_text`。
+  - 口径：只有 TB/试算表口径和“差异”同时出现，才视为可靠 TB check；仅有“变动金额”时不强判，后续规则应给 `NEED_REVIEW` 或人工复核提示。
+  - 报告：`rollforward_sheet_section` 已输出 TB check 摘录字段，供后续 `rollforward_difference_over_sad` 使用。
+  - 验证：`tests/rules` 108 通过；`tests/ingest/test_workbook_ingest.py --basetemp .pytest_tmp` 12 通过；`tests/report/test_workbook_pipeline.py --basetemp .pytest_tmp_report` 1 通过。
 - **程序质检覆盖文档（2026-05-28）**：`docs/planning/program-qc-coverage-index.md`（总索引）、`k01-six-block-qc-matrix.md`、`summary-sheet-qc-matrix.md`、`k02-k03-qc-matrix.md`（规划模板）；Lead 仍见 `lead-qc-rules.md`
 
 ## 进行中（M2a = Agent P1）
@@ -74,11 +84,11 @@
   - **Lead 回归表**：`artifacts/case_lead_regression.md`（B–G 共 6 份；A 42MB 永久跳过）
   - **待做**：对案例库 6 份底稿重跑 `fa-qc-diagnose` 更新 `case-workpaper-diagnostic.md`
 - **Lead 质检规则（模块 1–5 P0）**：含 `lead_check_with_a3_row`（ingest 摘录 Check with A3/Diff/Notes + Diff≠0/缺说明 FAIL）；其余 `lead_*`、AE-004、`lead_rollforward_tb_reconciliation`；`lead_runner` + `lead_sheet_section`
-- **K.01 M2b（区块 2–6 勾稽）**：`rollforward_fa_list_reconciliation`、SAD/TE 路由、TB/PL（见 `k01-six-block-qc-matrix.md`）
+- **K.01 M2b（区块 2–6 勾稽）**：TB check 读取层已加；下一步补 `rollforward_difference_over_sad`（差异 > SAD 时检查 Notes），再做 GL-002 表3模板变体增强、TE 路由、PL（见 `k01-six-block-qc-matrix.md`）
 
 ## 下一步（M2a 验收导向）
 
-1. **K.01 M2b**：表2/3↔FA list、>SAD 差异、>TE 路由；识别置信度/锚点去重优化
+1. **K.01 M2b**：先做 `rollforward_difference_over_sad`（TB check 差异 > SAD 时，要求有 Notes 解释）；再做 GL-002 表3模板变体增强、>TE 路由；识别置信度/锚点去重优化
 2. **rules（Lead 余量）**：`lead_fluctuation_notes_refs`、`lead_arp_three_triggers`；Streamlit K.01 页签（可选）
 2. **M3c（P1）**：`--llm-rules`、`--llm-checklist`（见 roadmap）；**非**优先扩展 `--llm` 报告叙述
 3. **ingest**：案例库字段映射回归

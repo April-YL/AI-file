@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from ingest.reconciliation import ReconciliationCheck, ReconciliationStatus
 from ingest.models import RollforwardLayoutProfile, RollforwardPeriodRole
 from ingest.rollforward_sheet import RollforwardSheetDataset, parse_rollforward_rows
 from rules.registry import attach_rule_metadata, get_by_dict_code
 from rules.rollforward_abnormal_amounts import check_rollforward_abnormal_amounts
 from rules.rollforward_columns_complete import check_rollforward_columns_complete
 from rules.rollforward_exists import check_rollforward_exists
+from rules.rollforward_fa_list_reconciliation import check_rollforward_fa_list_reconciliation
 from rules.rollforward_runner import run_rollforward_rules
 from rules.models import Severity
 
@@ -150,6 +152,67 @@ def test_dual_period_audit_labels_ingest_and_rules():
     assert not [i for i in issues if i.rule_id == "rollforward_columns_complete"]
 
 
+def test_rollforward_ingest_extracts_table2_and_table3_check_values():
+    rows = [
+        ("表1", "固定资产类别", "原值", "累计折旧", "净值"),
+        ("", "合计", 100, 10, 90),
+        ("原值变动金额", "TB-原值", "差异"),
+        ("表2", "固定资产清单"),
+        ("类别", "原值", "累计折旧", "净值"),
+        ("设备", 100, 10, 90),
+        ("表3", "表2 check with 表1"),
+        ("原值差异", 0),
+        ("累计折旧差异", 0),
+        ("净值差异", 1),
+        ("表4", "折旧费用与利润表科目核对"),
+    ]
+    rf = parse_rollforward_rows(rows, source_sheet="K.01 Agree SL to GL")
+    assert rf.section_presence["b3_table2_fa_summary"] is True
+    assert rf.section_presence["b4_table3_check_with_table1"] is True
+    assert rf.table2_amount_count >= 3
+    assert Decimal("1") in rf.table3_check_values
+    assert rf.table3_check_row == 8
+
+
+def test_rollforward_ingest_extracts_tb_check_and_notes():
+    rows = [
+        ("表1", "固定资产类别", "原值", "累计折旧", "净值"),
+        ("", "合计", 100, 10, 90),
+        ("原值变动金额", "TB-原值", "差异"),
+        ("与TB核对", 100, 0),
+        ("累计折旧变动金额", "TB-累计折旧", "差异"),
+        ("与TB核对", 8, 2),
+        ("表2", "固定资产清单"),
+        ("表3", "表2 check with 表1"),
+        ("表4", "折旧费用与利润表科目核对"),
+        ("Notes", "超过SAD差异调查", "超过TE转K.02/K.03"),
+        ("说明", "累计折旧差异为重分类影响，已与项目组确认"),
+    ]
+    rf = parse_rollforward_rows(rows, source_sheet="K.01 Agree SL to GL")
+    assert rf.section_presence["b2_movement_tb_reconciliation"] is True
+    assert rf.tb_reconciliation_detected is True
+    assert rf.tb_reconciliation_confidence >= 0.65
+    assert Decimal("2") in rf.tb_difference_values
+    assert rf.tb_difference_row in (4, 6)
+    assert rf.tb_notes_text_present is True
+    assert "重分类影响" in (rf.tb_notes_text or "")
+
+
+def test_rollforward_ingest_does_not_treat_movement_only_as_reliable_tb_check():
+    rows = [
+        ("表1", "固定资产类别", "原值", "累计折旧", "净值"),
+        ("", "合计", 100, 10, 90),
+        ("原值变动金额", "本年VS上年", 10),
+        ("表2", "固定资产清单"),
+        ("表3", "表2 check with 表1"),
+    ]
+    rf = parse_rollforward_rows(rows, source_sheet="K.01 Agree SL to GL")
+    assert rf.section_presence["b2_movement_tb_reconciliation"] is True
+    assert rf.tb_reconciliation_detected is False
+    assert rf.tb_reconciliation_confidence < 0.65
+    assert "k01_tb_check_needs_review" in " ".join(rf.notes)
+
+
 def test_rollforward_abnormal_amounts_fail_accum_exceeds_original():
     rf = _minimal_rf(
         section_presence={"b1_bkd_main_table": True},
@@ -192,6 +255,116 @@ def test_rollforward_abnormal_amounts_pass_normal_totals():
     assert not check_rollforward_abnormal_amounts(rf)
 
 
+def _reconciliation_check(
+    *,
+    link_id: str = "fa_list_rollforward_net",
+    status: ReconciliationStatus,
+    left_value: str | None = "100",
+    right_value: str | None = "90",
+    difference: str | None = "10",
+) -> ReconciliationCheck:
+    return ReconciliationCheck(
+        link_id=link_id,
+        dict_rule_code="GL-002",
+        name="FA list 净值与后推期末净值",
+        status=status,
+        left_ref="FA list!fa_list",
+        right_ref="K.01 Agree SL to GL!row10",
+        left_value=left_value,
+        right_value=right_value,
+        difference=difference,
+        message="FA list 净值合计与 K.01 后推期末净值不一致",
+        suggestion="调查差异是否超过 SAD，并核对底稿与台账来源",
+    )
+
+
+def test_rollforward_fa_list_reconciliation_table3_zero_passes():
+    rf = _minimal_rf(
+        section_presence={
+            "b3_table2_fa_summary": True,
+            "b4_table3_check_with_table1": True,
+        },
+        table2_amount_count=4,
+        table3_check_values=[Decimal("0"), Decimal("0.00")],
+        table3_check_row=30,
+        total_row=10,
+    )
+    issues = check_rollforward_fa_list_reconciliation(
+        [_reconciliation_check(status=ReconciliationStatus.MISMATCH)],
+        rollforward=rf,
+    )
+    assert issues == []
+
+
+def test_rollforward_fa_list_reconciliation_table3_difference_warns():
+    rf = _minimal_rf(
+        section_presence={
+            "b3_table2_fa_summary": True,
+            "b4_table3_check_with_table1": True,
+        },
+        table2_amount_count=4,
+        table3_check_values=[Decimal("0"), Decimal("12.34")],
+        table3_check_row=30,
+        total_row=10,
+    )
+    issues = check_rollforward_fa_list_reconciliation(
+        [_reconciliation_check(status=ReconciliationStatus.MATCH)],
+        rollforward=rf,
+    )
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.rule_id == "rollforward_fa_list_reconciliation"
+    assert issue.severity == Severity.WARN
+    assert issue.procedure_code == "K.01"
+    assert issue.source_sheet == "K.01 Agree SL to GL"
+    assert issue.source_row == 30
+    assert issue.field == "table3_check_with_table1"
+    assert "表3" in issue.message
+    assert "12.34" in issue.message
+    assert "SAD" in issue.suggestion
+
+
+def test_rollforward_fa_list_reconciliation_unreadable_table3_uses_fallback_as_review():
+    rf = _minimal_rf(
+        section_presence={"b3_table2_fa_summary": True},
+        table2_amount_count=3,
+        total_row=10,
+    )
+    issues = check_rollforward_fa_list_reconciliation(
+        [
+            _reconciliation_check(
+                status=ReconciliationStatus.MISMATCH,
+            )
+        ],
+        rollforward=rf,
+    )
+    assert len(issues) == 2
+    assert all(i.severity == Severity.NEED_REVIEW for i in issues)
+    assert any(i.field == "b4_table3_check_with_table1" for i in issues)
+    fallback = [i for i in issues if i.field == "fa_list_rollforward_fallback"][0]
+    assert "兜底提示" in fallback.message
+    assert "自算差异" in fallback.message
+
+
+def test_rollforward_runner_includes_fa_list_reconciliation():
+    rf = _minimal_rf(
+        amount_column_bindings=[],
+        ending_totals={"net_value": Decimal("90")},
+        section_presence={
+            "b1_bkd_main_table": True,
+            "b4_table3_check_with_table1": True,
+        },
+        table3_check_values=[Decimal("1")],
+        table3_check_row=30,
+        total_row=10,
+    )
+    issues = run_rollforward_rules(
+        rf,
+        reconciliations=[_reconciliation_check(status=ReconciliationStatus.MISMATCH)],
+    )
+    assert any(i.rule_id == "rollforward_fa_list_reconciliation" for i in issues)
+
+
 def test_registry_gl005_implemented():
     spec = get_by_dict_code("GL-005")
     assert spec is not None
@@ -208,6 +381,15 @@ def test_registry_gl006_gl007_implemented():
 
     assert get_by_dict_code("GL-006").implementation == ImplementationStatus.IMPLEMENTED
     assert get_by_dict_code("GL-007").implementation == ImplementationStatus.IMPLEMENTED
+
+
+def test_registry_gl002_implemented():
+    spec = get_by_dict_code("GL-002")
+    assert spec is not None
+    assert spec.rule_id == "rollforward_fa_list_reconciliation"
+    from rules.registry import ImplementationStatus
+
+    assert spec.implementation == ImplementationStatus.IMPLEMENTED
 
 
 def test_rollforward_sheet_report_section():
@@ -242,7 +424,12 @@ def test_rollforward_sheet_report_section():
     )
     rf = _minimal_rf(
         amount_column_bindings=bindings,
-        section_presence={"b1_bkd_main_table": True},
+        section_presence={
+            "b1_bkd_main_table": True,
+            "b4_table3_check_with_table1": True,
+        },
+        table3_check_values=[Decimal("0")],
+        table3_check_row=30,
         ending_totals={
             "impairment_provision": Decimal("0"),
             "original_value": Decimal("100"),

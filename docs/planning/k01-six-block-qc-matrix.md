@@ -41,9 +41,10 @@
 
 | 风险点 | 应如何检查 | 实现状态 | 规则 / 方式 |
 | --- | --- | --- | --- |
-| 无 TB 勾稽区 | 识别 `b2`（TB-、差异、变动金额） | ✅ 识别 | 缺失 → 规划 WARN |
-| 期末账面 vs TB | K.01 vs 外部 TB | ❌ 无 TB | `rollforward_ending_reconciliation` → `NEED_REVIEW` |
-| 差异 >SAD | 差异 vs Lead SAD + Notes | ❌ | `rollforward_difference_over_sad` |
+| TB 勾稽区可靠识别 | 同时出现 TB/试算表口径 + 差异 | ✅ 读取层 | `tb_reconciliation_detected` / `tb_reconciliation_confidence` |
+| 差异金额摘录 | 从差异行/列读取金额 | ✅ 读取层 | `tb_difference_values` / `tb_difference_row` |
+| 期末账面 vs TB | K.01 vs 外部 TB | ⏳ 摘录 | `rollforward_ending_reconciliation` → `NEED_REVIEW` |
+| 差异 >SAD | 差异 vs Lead SAD + Notes | ⏳ 下一步 | `rollforward_difference_over_sad` |
 | 差异说明不充分 | Notes 四要素 | ❌ | LLM / 人工 |
 
 ---
@@ -53,7 +54,7 @@
 | 风险点 | 应如何检查 | 实现状态 | 规则 / 方式 |
 | --- | --- | --- | --- |
 | 表2 缺失 | 识别 `b3` | ✅ 识别 | hybrid 缺表2 → WARN（规划） |
-| 表2 vs FA list 合计 | ingest 两侧汇总 | ❌ | `rollforward_fa_list_reconciliation`（GL-002 交叉） |
+| 表2 vs FA list 合计 | 识别表2，确认有 SUMIF 汇总金额 | ✅ 辅助 | `rollforward_fa_list_reconciliation`（GL-002；表2作辅助，不作为主结论） |
 | 分类口径不一致 | 类别映射 + 说明 | ❌ | `NEED_REVIEW` |
 
 ---
@@ -63,7 +64,7 @@
 | 风险点 | 应如何检查 | 实现状态 | 规则 / 方式 |
 | --- | --- | --- | --- |
 | 表3 / check-with 缺失 | 识别 `b4` | ✅ 识别 | 缺失 → WARN（规划） |
-| 表2 与表1 不一致 | 表3 差异 | ❌ | 同上 FA list 规则或独立表3 规则 |
+| 表2 与表1 不一致 | 表3 差异 / check 结果 | ✅ | `rollforward_fa_list_reconciliation`（GL-002 主检查） |
 | 与 b2、Notes 矛盾 | 报告层交叉 | ❌ | 冲突清单（规划） |
 
 ---
@@ -96,19 +97,21 @@
 | 区块 | 表内 P0 | 跨表 M2b | 说明 / 程序 |
 | --- | --- | --- | --- |
 | 1 表1 | ✅ GL-006/007/005 | ⏳ Lead 调整 | 滚调人工 |
-| 2 变动/TB | ✅ 识别 | ❌ TB、SAD | Notes |
-| 3 表2 | ✅ 识别 | ❌ FA list | 分类说明 |
-| 4 表3 | ✅ 识别 | ❌ 表2↔表1 | — |
+| 2 变动/TB | ✅ 识别 + TB check 摘录 | ⏳ SAD | Notes |
+| 3 表2 | ✅ 识别 | ✅ SUMIF 汇总辅助 | 分类说明 |
+| 4 表3 | ✅ 识别 | ✅ 表2↔表1 check | GL-002 主检查 |
 | 5 表4 | ✅ 识别 | ❌ PL/TB | 分摊 LLM |
 | 6 Notes | ✅ 识别 | — | TE、AE-003、LLM |
 
 ---
 
-## 当前实现摘要（2026-05-28）
+## 当前实现摘要（2026-06-02）
 
 - **识别层**：`RollforwardSheetDataset.section_*`；案例库 B–G：`hybrid`，六区块 **6/6**（`scripts/run_case_rollforward_regression.py`）。  
 - **P0 规则**：`run_rollforward_rules` → exists + columns_complete + abnormal_amounts。  
+- **M2b 首版**：`rollforward_fa_list_reconciliation`（GL-002）主读 K.01 表3 check 结果；表3非零差异为 `WARN`，表3不可读时结合表2识别和 Agent 自算合计给 `NEED_REVIEW` 兜底提示。  
+- **TB check 读取层**：已新增 `tb_reconciliation_detected`、`tb_reconciliation_confidence`、`tb_difference_values`、`tb_notes_text` 等字段；只有 TB/试算表口径和“差异”同时出现，才视为可靠 TB check，单纯“变动金额”不直接当作 TB 核对结论。
 - **报告**：`rollforward_sheet_section`；CLI `fa-qc-run` 打印 K.01 QC 一行。  
 - **交叉**：`lead_rollforward_tb_reconciliation`（LEAD-010）在 Lead 规则中执行，非 K.01 表内。
 
-**下一步建议（M2b）**：`rollforward_fa_list_reconciliation` → `rollforward_difference_over_sad` → `rollforward_te_program_routing`。
+**下一步建议（M2b）**：`rollforward_difference_over_sad` → GL-002 表3模板变体增强 → `rollforward_te_program_routing`。

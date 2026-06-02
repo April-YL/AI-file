@@ -117,7 +117,12 @@ def run_workbook_qc(
 
     rollforward_sheet_section = None
     if ctx.rollforward:
-        rollforward_issues = attach_rule_metadata(run_rollforward_rules(ctx.rollforward))
+        rollforward_issues = attach_rule_metadata(
+            run_rollforward_rules(
+                ctx.rollforward,
+                reconciliations=ctx.reconciliations,
+            )
+        )
         issues.extend(rollforward_issues)
         rollforward_sheet_section = build_rollforward_sheet_section(
             ctx.rollforward, rollforward_issues

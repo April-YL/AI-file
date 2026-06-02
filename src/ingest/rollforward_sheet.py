@@ -74,6 +74,16 @@ class RollforwardSheetDataset:
     section_regions: dict[str, K01SectionRegion] = field(default_factory=dict)
     section_conflicts: list[str] = field(default_factory=list)
     recognition_confidence: float = 0.0
+    table2_amount_count: int = 0
+    table3_check_values: list[Decimal] = field(default_factory=list)
+    table3_check_row: int | None = None
+    tb_reconciliation_detected: bool = False
+    tb_reconciliation_confidence: float = 0.0
+    tb_difference_values: list[Decimal] = field(default_factory=list)
+    tb_difference_row: int | None = None
+    tb_notes_text_present: bool = False
+    tb_notes_row: int | None = None
+    tb_notes_text: str | None = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -557,6 +567,122 @@ def _compute_recognition_confidence(
     return round(max(0.0, min(1.0, score)), 3)
 
 
+def _numeric_values_in_region(
+    rows: list[tuple[Any, ...]],
+    region: K01SectionRegion | None,
+    *,
+    max_cols: int = 30,
+) -> list[tuple[int, Decimal]]:
+    if region is None or not region.start_row or not region.end_row:
+        return []
+
+    values: list[tuple[int, Decimal]] = []
+    for r_idx in range(region.start_row - 1, min(region.end_row, len(rows))):
+        row = rows[r_idx]
+        if row is None:
+            continue
+        for val in row[:max_cols]:
+            amt = parse_amount(_cell_str(val))
+            if amt is not None:
+                values.append((r_idx + 1, amt))
+    return values
+
+
+def _text_cells_in_region(
+    rows: list[tuple[Any, ...]],
+    region: K01SectionRegion | None,
+    *,
+    max_cols: int = 30,
+) -> list[tuple[int, int, str]]:
+    if region is None or not region.start_row or not region.end_row:
+        return []
+
+    cells: list[tuple[int, int, str]] = []
+    for r_idx in range(region.start_row - 1, min(region.end_row, len(rows))):
+        row = rows[r_idx]
+        if row is None:
+            continue
+        for c_idx, val in enumerate(row[:max_cols]):
+            text = _cell_str(val)
+            if text:
+                cells.append((r_idx + 1, c_idx + 1, text))
+    return cells
+
+
+def _extract_tb_check(
+    rows: list[tuple[Any, ...]],
+    *,
+    tb_region: K01SectionRegion | None,
+    notes_region: K01SectionRegion | None,
+) -> tuple[bool, float, list[Decimal], int | None, bool, int | None, str | None]:
+    """读取 K.01 区块2的 TB 核对信息。
+
+    可靠识别必须看到 TB 相关字样和差异字段；仅有“变动金额”不视为已完成 TB check。
+    """
+    tb_cells = _text_cells_in_region(rows, tb_region)
+    tb_hits = [
+        t
+        for _, _, t in tb_cells
+        if t.startswith("TB-") or "试算表" in t or t.upper() == "TB"
+    ]
+    diff_cells = [(r, c, t) for r, c, t in tb_cells if "差异" in t]
+    diff_cols = {c for _, c, t in diff_cells if len(t) <= 20}
+    diff_rows = {r for r, _, _ in diff_cells}
+
+    diff_values: list[tuple[int, Decimal]] = []
+    if tb_region and tb_region.start_row and tb_region.end_row:
+        for r_idx in range(tb_region.start_row - 1, min(tb_region.end_row, len(rows))):
+            row = rows[r_idx]
+            if row is None:
+                continue
+            row_no = r_idx + 1
+            row_has_diff_label = row_no in diff_rows
+            for c_idx, val in enumerate(row[:30]):
+                col_no = c_idx + 1
+                if not row_has_diff_label and col_no not in diff_cols:
+                    continue
+                amt = parse_amount(_cell_str(val))
+                if amt is not None:
+                    diff_values.append((row_no, amt))
+
+    confidence = 0.0
+    if tb_region is not None:
+        confidence += 0.1
+    if tb_hits:
+        confidence += 0.45
+    if diff_cells:
+        confidence += 0.35
+    if diff_values:
+        confidence += 0.1
+    confidence = round(min(confidence, 1.0), 3)
+    detected = bool(tb_hits and diff_cells and confidence >= 0.65)
+
+    notes_cells = _text_cells_in_region(rows, notes_region)
+    note_parts: list[str] = []
+    notes_row: int | None = None
+    for row_no, _, text in notes_cells:
+        norm = re.sub(r"\s+", "", text).lower()
+        if norm in ("notes", "sad", "te") or text in ("Notes", "SAD", "TE"):
+            continue
+        if "超过SAD差异调查" in text or "超过TE" in text or "拒绝执行原因" in text:
+            continue
+        if parse_amount(text) is not None:
+            continue
+        if len(text) >= 4:
+            note_parts.append(text)
+            notes_row = notes_row or row_no
+    notes_text = "\n".join(note_parts).strip() if note_parts else None
+    return (
+        detected,
+        confidence,
+        [v for _, v in diff_values],
+        diff_values[0][0] if diff_values else None,
+        bool(notes_text),
+        notes_row,
+        notes_text,
+    )
+
+
 def _presence_from_regions(regions: dict[str, K01SectionRegion]) -> dict[str, bool]:
     return {sid: sid in regions for sid in K01_SECTION_IDS}
 
@@ -780,6 +906,38 @@ def parse_rollforward_rows(
         notes.append("k01_section_conflicts")
     if recognition_confidence < 0.65:
         notes.append("k01_recognition_needs_review")
+    table2_values = _numeric_values_in_region(
+        rows,
+        section_regions.get("b3_table2_fa_summary"),
+    )
+    table3_values_with_rows = _numeric_values_in_region(
+        rows,
+        section_regions.get("b4_table3_check_with_table1"),
+    )
+    table2_amount_count = len(table2_values)
+    table3_check_values = [v for _, v in table3_values_with_rows]
+    table3_check_row = table3_values_with_rows[0][0] if table3_values_with_rows else None
+    if table2_amount_count:
+        notes.append(f"k01_table2_amounts:{table2_amount_count}")
+    if table3_check_values:
+        notes.append(f"k01_table3_check_values:{len(table3_check_values)}")
+    (
+        tb_reconciliation_detected,
+        tb_reconciliation_confidence,
+        tb_difference_values,
+        tb_difference_row,
+        tb_notes_text_present,
+        tb_notes_row,
+        tb_notes_text,
+    ) = _extract_tb_check(
+        rows,
+        tb_region=section_regions.get("b2_movement_tb_reconciliation"),
+        notes_region=section_regions.get("b6_notes_investigation_routing"),
+    )
+    if tb_reconciliation_detected:
+        notes.append(f"k01_tb_check_confidence:{tb_reconciliation_confidence}")
+    elif section_presence.get("b2_movement_tb_reconciliation"):
+        notes.append(f"k01_tb_check_needs_review:{tb_reconciliation_confidence}")
     if any(
         b.period_role in (RollforwardPeriodRole.OPENING, RollforwardPeriodRole.ENDING)
         for b in bindings
@@ -884,6 +1042,16 @@ def parse_rollforward_rows(
         section_regions=section_regions,
         section_conflicts=section_conflicts,
         recognition_confidence=recognition_confidence,
+        table2_amount_count=table2_amount_count,
+        table3_check_values=table3_check_values,
+        table3_check_row=table3_check_row,
+        tb_reconciliation_detected=tb_reconciliation_detected,
+        tb_reconciliation_confidence=tb_reconciliation_confidence,
+        tb_difference_values=tb_difference_values,
+        tb_difference_row=tb_difference_row,
+        tb_notes_text_present=tb_notes_text_present,
+        tb_notes_row=tb_notes_row,
+        tb_notes_text=tb_notes_text,
         notes=notes,
     )
 

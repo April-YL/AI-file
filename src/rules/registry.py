@@ -537,8 +537,8 @@ def _specs() -> list[RuleSpec]:
             k1_ref="K1 CheckList 第14条",
             manual_priority="P1-最高优先级",
             agent_priority=AgentPriority.P1,
-            implementation=ImplementationStatus.PLANNED,
-            notes="M2a 优先；台账/FA list 与后推核对",
+            implementation=ImplementationStatus.IMPLEMENTED,
+            notes="主检查读取 K.01 表3 check 结果；表2 SUMIF 汇总作辅助；Agent 自算 FA list 合计仅作兜底提示",
         ),
         RuleSpec(
             dict_code="GL-003",

@@ -9,7 +9,7 @@
 
 | 项 | 状态 |
 | --- | --- |
-| Ingest | `rollforward_sheet.py` → `RollforwardSheetDataset`（bindings、opening/ending totals、合计行） |
+| Ingest | `rollforward_sheet.py` → `RollforwardSheetDataset`（bindings、opening/ending totals、合计行、表2/表3 check、TB check 摘录） |
 | 已有规则 | `lead_rollforward_tb_reconciliation`（Lead 期末 vs K.01 `ending_totals`，procedure **K.00**） |
 | 规划 P0 | `rollforward_exists`、`rollforward_columns_complete`（**L1**，见 layouts 文档） |
 | 案例库 | B–G 多为 `hybrid`；ingest 期初/期末列语义待增强 |
@@ -21,7 +21,7 @@
 | --- | --- | --- |
 | **M2a 确定性** | 表存在、列矩阵 L1、明显异常金额 | `FAIL` / `WARN` |
 | **M2b 勾稽** | 两侧金额可比（Lead、FA list、清单合计） | `FAIL` / `WARN` |
-| **M2 摘录** | 无 TB/PL/滚调输入 | `NEED_REVIEW` + 人工核对 HTML |
+| **M2 摘录** | TB check 仅可摘录、无外部 TB/PL/滚调输入 | `NEED_REVIEW` + 人工核对 HTML |
 | **M3 / LLM** | 差异调查是否充分、分类是否合理 | 不改 severity |
 
 ---
@@ -87,10 +87,10 @@
 | --- | --- | --- | --- | --- |
 | `lead_rollforward_tb_reconciliation` | B.2/B.4 部分：Lead 引导表期末 vs K.01 合计 | Lead + K.01 ending | M2b | **implemented** |
 | `rollforward_opening_lead_reconciliation` | B.1 期初 vs Lead | Lead opening | M2b | planned |
-| `rollforward_fa_list_reconciliation` | B.3 表2/3 vs FA list | FA list + K.01 | M2b | planned（GL-002） |
-| `rollforward_ending_reconciliation` | B.2 期末 vs TB（无 TB 输入） | 外部 TB | 摘录 | planned（checklist REVIEW） |
+| `rollforward_fa_list_reconciliation` | B.3 表2/3 vs FA list | K.01 表2/表3 + 兜底 FA list 自算 | M2b | **implemented**（GL-002：主读表3 check；表2 SUMIF 辅助；自算合计仅兜底） |
+| `rollforward_ending_reconciliation` | B.2 期末 vs TB | K.01 TB check 摘录 / 外部 TB | 摘录 | planned（当前先摘录，不直接判 FAIL） |
 | `rollforward_depreciation_pl_reconciliation` | B.5 表4 | PL/TB | P1 | planned |
-| `rollforward_difference_over_sad` | B.6 差异>SAD 须调查 | Lead SAD + diff 行 | M2b | planned |
+| `rollforward_difference_over_sad` | B.6 差异>SAD 须调查 | Lead SAD + `tb_difference_values` + Notes | M2b | planned（读取层已起步） |
 | `rollforward_notes_on_material_diff` | B.6 Notes 是否填写 | Notes 区文本 | P1 | planned |
 | GL-001 `lead_tb_reconciliation` | Lead vs 外部 TB | TB | 摘录 | manual_only |
 
@@ -126,13 +126,13 @@
 
 | checklist §三 | rule_id | SOP | dict_code（规划） | Profile | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| 后推明细表存在 | `rollforward_exists` | 【01】 | GL-006 | all | planned |
-| 金额口径完整 | `rollforward_columns_complete` | 【01】L1/L2 | GL-007 | dual/hybrid；sop L2 | planned |
-| 期末核对 | `rollforward_ending_reconciliation` | 【02】② | — | all | planned / REVIEW |
-| 差异调查 | `rollforward_difference_over_sad` | 【02】⑤ | — | all | planned |
-| 异常金额 | `rollforward_abnormal_amounts` | 【01】易错 | GL-005 | all | planned |
+| 后推明细表存在 | `rollforward_exists` | 【01】 | GL-006 | all | **implemented** |
+| 金额口径完整 | `rollforward_columns_complete` | 【01】L1/L2 | GL-007 | dual/hybrid；sop L2 | **implemented**（L1） |
+| 期末核对 | `rollforward_ending_reconciliation` | 【02】② | — | all | planned / TB check 已摘录 |
+| 差异调查 | `rollforward_difference_over_sad` | 【02】⑤ | — | all | planned / 读取层已起步 |
+| 异常金额 | `rollforward_abnormal_amounts` | 【01】易错 | GL-005 | all | **implemented** |
 | （交叉） | `lead_rollforward_tb_reconciliation` | 【02】④ | LEAD-010 | hybrid+ | **implemented** |
-| （交叉） | `rollforward_fa_list_reconciliation` | 【02】③ | GL-002 | dual/hybrid | planned |
+| （交叉） | `rollforward_fa_list_reconciliation` | 【02】③ | GL-002 | dual/hybrid | **implemented**（主读表3 check） |
 
 ---
 
@@ -144,7 +144,7 @@
 | **P0-2** | ingest：审2/审3、变动 token、选 sheet | B–G bindings 有 opening/ending |
 | **P0-3** | `rollforward_exists` + `rollforward_columns_complete`（L1）+ runner + registry | pytest + `fa-qc-run` 案例 B |
 | **P0-4** | `rollforward_abnormal_amounts` | 负净值、处置转出 |
-| **P1** | `rollforward_fa_list_reconciliation`、opening Lead、表4、TE 路由、L2 矩阵 ingest | 案例+SOP 模板 |
+| **P1** | `rollforward_difference_over_sad`、GL-002 表3模板变体增强、opening Lead、表4、TE 路由、L2 矩阵 ingest | 案例+SOP 模板 |
 
 ---
 
