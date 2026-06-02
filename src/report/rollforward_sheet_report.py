@@ -14,6 +14,7 @@ _DICT_CODES: dict[str, str | None] = {
     "rollforward_columns_complete": "GL-007",
     "rollforward_abnormal_amounts": "GL-005",
     "rollforward_fa_list_reconciliation": "GL-002",
+    "rollforward_difference_over_sad": "GL-008",
 }
 
 _MAX_BINDINGS = 24

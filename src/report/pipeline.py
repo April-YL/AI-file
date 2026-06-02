@@ -120,6 +120,7 @@ def run_workbook_qc(
         rollforward_issues = attach_rule_metadata(
             run_rollforward_rules(
                 ctx.rollforward,
+                lead=ctx.lead,
                 reconciliations=ctx.reconciliations,
             )
         )

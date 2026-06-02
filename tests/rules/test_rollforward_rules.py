@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from ingest.lead_sheet import LeadBasicInfoField, LeadSheetDataset, MaterialityCapture
 from ingest.reconciliation import ReconciliationCheck, ReconciliationStatus
 from ingest.models import RollforwardLayoutProfile, RollforwardPeriodRole
 from ingest.rollforward_sheet import RollforwardSheetDataset, parse_rollforward_rows
 from rules.registry import attach_rule_metadata, get_by_dict_code
 from rules.rollforward_abnormal_amounts import check_rollforward_abnormal_amounts
 from rules.rollforward_columns_complete import check_rollforward_columns_complete
+from rules.rollforward_difference_over_sad import check_rollforward_difference_over_sad
 from rules.rollforward_exists import check_rollforward_exists
 from rules.rollforward_fa_list_reconciliation import check_rollforward_fa_list_reconciliation
 from rules.rollforward_runner import run_rollforward_rules
@@ -27,6 +29,36 @@ def _minimal_rf(**kwargs) -> RollforwardSheetDataset:
   )
   base.update(kwargs)
   return RollforwardSheetDataset(**base)
+
+
+def _lead_with_sad(value: str | None = "5") -> LeadSheetDataset:
+    fields = []
+    materiality = []
+    if value is not None:
+        fields.append(
+            LeadBasicInfoField(
+                field_key="sad",
+                label="名义金额 (SAD)",
+                value=value,
+                source_row=3,
+                source_col=2,
+            )
+        )
+        materiality.append(
+            MaterialityCapture(
+                field_key="sad",
+                label="名义金额 (SAD)",
+                workpaper_value=value,
+                source_row=3,
+                source_col_workpaper=2,
+            )
+        )
+    return LeadSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        basic_info_fields=fields,
+        materiality=materiality,
+    )
 
 
 def test_rollforward_exists_fail_when_missing():
@@ -365,6 +397,92 @@ def test_rollforward_runner_includes_fa_list_reconciliation():
     assert any(i.rule_id == "rollforward_fa_list_reconciliation" for i in issues)
 
 
+def test_rollforward_difference_over_sad_pass_when_difference_within_sad():
+    rf = _minimal_rf(
+        section_presence={"b2_movement_tb_reconciliation": True},
+        tb_reconciliation_detected=True,
+        tb_difference_values=[Decimal("5"), Decimal("-4")],
+        tb_difference_row=8,
+    )
+    issues = check_rollforward_difference_over_sad(rf, lead=_lead_with_sad("5"))
+    assert issues == []
+
+
+def test_rollforward_difference_over_sad_fails_when_no_note():
+    rf = _minimal_rf(
+        section_presence={"b2_movement_tb_reconciliation": True},
+        tb_reconciliation_detected=True,
+        tb_difference_values=[Decimal("6")],
+        tb_difference_row=8,
+        tb_notes_text_present=False,
+    )
+    issues = check_rollforward_difference_over_sad(rf, lead=_lead_with_sad("5"))
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.rule_id == "rollforward_difference_over_sad"
+    assert issue.severity == Severity.FAIL
+    assert issue.source_row == 8
+    assert "超过 SAD" in issue.message
+    assert "未读取到 Notes" in issue.message
+
+
+def test_rollforward_difference_over_sad_needs_review_when_note_exists():
+    rf = _minimal_rf(
+        section_presence={"b2_movement_tb_reconciliation": True},
+        tb_reconciliation_detected=True,
+        tb_difference_values=[Decimal("6")],
+        tb_difference_row=8,
+        tb_notes_text_present=True,
+        tb_notes_row=12,
+        tb_notes_text="差异为重分类影响，已与项目组确认",
+    )
+    issues = check_rollforward_difference_over_sad(rf, lead=_lead_with_sad("5"))
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.severity == Severity.NEED_REVIEW
+    assert issue.source_row == 12
+    assert "已有 Notes" in issue.message
+
+
+def test_rollforward_difference_over_sad_needs_review_when_sad_missing():
+    rf = _minimal_rf(
+        section_presence={"b2_movement_tb_reconciliation": True},
+        tb_reconciliation_detected=True,
+        tb_difference_values=[Decimal("6")],
+        tb_difference_row=8,
+    )
+    issues = check_rollforward_difference_over_sad(rf, lead=_lead_with_sad(None))
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.NEED_REVIEW
+    assert issues[0].field == "sad"
+
+
+def test_rollforward_difference_over_sad_needs_review_when_tb_unreliable():
+    rf = _minimal_rf(
+        section_presence={"b2_movement_tb_reconciliation": True},
+        tb_reconciliation_detected=False,
+        tb_reconciliation_confidence=0.45,
+    )
+    issues = check_rollforward_difference_over_sad(rf, lead=_lead_with_sad("5"))
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.NEED_REVIEW
+    assert issues[0].field == "tb_reconciliation"
+
+
+def test_rollforward_runner_includes_difference_over_sad():
+    rf = _minimal_rf(
+        section_presence={
+            "b1_bkd_main_table": True,
+            "b2_movement_tb_reconciliation": True,
+        },
+        tb_reconciliation_detected=True,
+        tb_difference_values=[Decimal("6")],
+        tb_difference_row=8,
+    )
+    issues = run_rollforward_rules(rf, lead=_lead_with_sad("5"))
+    assert any(i.rule_id == "rollforward_difference_over_sad" for i in issues)
+
+
 def test_registry_gl005_implemented():
     spec = get_by_dict_code("GL-005")
     assert spec is not None
@@ -387,6 +505,15 @@ def test_registry_gl002_implemented():
     spec = get_by_dict_code("GL-002")
     assert spec is not None
     assert spec.rule_id == "rollforward_fa_list_reconciliation"
+    from rules.registry import ImplementationStatus
+
+    assert spec.implementation == ImplementationStatus.IMPLEMENTED
+
+
+def test_registry_gl008_implemented():
+    spec = get_by_dict_code("GL-008")
+    assert spec is not None
+    assert spec.rule_id == "rollforward_difference_over_sad"
     from rules.registry import ImplementationStatus
 
     assert spec.implementation == ImplementationStatus.IMPLEMENTED

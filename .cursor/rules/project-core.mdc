@@ -6,6 +6,7 @@ alwaysApply: true
 # 固定资产质检 Agent 全局约定
 
 - **先答后改（默认）**：先回答问题、说明原因与拟改方案；**用户确认后再**修改代码/文档/配置；**`git commit`/`git push` 前须列清单并确认**。未经确认不直接改仓库、不默认提交/推送。详见 [docs/agent-collaboration.md](../../docs/agent-collaboration.md)。
+- **通俗沟通（默认）**：用户有审计专业背景、只有少量 IT 基础。回复先讲结论和业务影响，再讲技术原因；少用黑话，必须使用时同步解释（如 `ingest`=读取底稿并整理字段，`rules`=自动检查规则，`pytest`=跑自动测试）。
 - 新任务开始前，先阅读 `AGENTS.md`、`docs/agent-collaboration.md`、`docs/handoff/latest.md` 和 `docs/PROJECT_STRUCTURE.md`。
 - 领域字段和业务口径以 `docs/domain-glossary.md` 为准。
 - 架构和模块边界以 `docs/architecture.md` 为准。

@@ -44,8 +44,8 @@
 | TB 勾稽区可靠识别 | 同时出现 TB/试算表口径 + 差异 | ✅ 读取层 | `tb_reconciliation_detected` / `tb_reconciliation_confidence` |
 | 差异金额摘录 | 从差异行/列读取金额 | ✅ 读取层 | `tb_difference_values` / `tb_difference_row` |
 | 期末账面 vs TB | K.01 vs 外部 TB | ⏳ 摘录 | `rollforward_ending_reconciliation` → `NEED_REVIEW` |
-| 差异 >SAD | 差异 vs Lead SAD + Notes | ⏳ 下一步 | `rollforward_difference_over_sad` |
-| 差异说明不充分 | Notes 四要素 | ❌ | LLM / 人工 |
+| 差异 >SAD | 差异 vs Lead SAD + Notes | ✅ | `rollforward_difference_over_sad`（GL-008） |
+| 差异说明不充分 | Notes 四要素 | ⏳ 人工/LLM | 有 Notes → `NEED_REVIEW` |
 
 ---
 
@@ -97,7 +97,7 @@
 | 区块 | 表内 P0 | 跨表 M2b | 说明 / 程序 |
 | --- | --- | --- | --- |
 | 1 表1 | ✅ GL-006/007/005 | ⏳ Lead 调整 | 滚调人工 |
-| 2 变动/TB | ✅ 识别 + TB check 摘录 | ⏳ SAD | Notes |
+| 2 变动/TB | ✅ 识别 + TB check 摘录 | ✅ SAD + Notes | GL-008 |
 | 3 表2 | ✅ 识别 | ✅ SUMIF 汇总辅助 | 分类说明 |
 | 4 表3 | ✅ 识别 | ✅ 表2↔表1 check | GL-002 主检查 |
 | 5 表4 | ✅ 识别 | ❌ PL/TB | 分摊 LLM |
@@ -111,7 +111,8 @@
 - **P0 规则**：`run_rollforward_rules` → exists + columns_complete + abnormal_amounts。  
 - **M2b 首版**：`rollforward_fa_list_reconciliation`（GL-002）主读 K.01 表3 check 结果；表3非零差异为 `WARN`，表3不可读时结合表2识别和 Agent 自算合计给 `NEED_REVIEW` 兜底提示。  
 - **TB check 读取层**：已新增 `tb_reconciliation_detected`、`tb_reconciliation_confidence`、`tb_difference_values`、`tb_notes_text` 等字段；只有 TB/试算表口径和“差异”同时出现，才视为可靠 TB check，单纯“变动金额”不直接当作 TB 核对结论。
+- **GL-008**：`rollforward_difference_over_sad` 已接入 K.01 runner；TB check 差异未超过 SAD 不报，超过 SAD 且无 Notes 输出 `FAIL`，超过 SAD 且已有 Notes 输出 `NEED_REVIEW`。
 - **报告**：`rollforward_sheet_section`；CLI `fa-qc-run` 打印 K.01 QC 一行。  
 - **交叉**：`lead_rollforward_tb_reconciliation`（LEAD-010）在 Lead 规则中执行，非 K.01 表内。
 
-**下一步建议（M2b）**：`rollforward_difference_over_sad` → GL-002 表3模板变体增强 → `rollforward_te_program_routing`。
+**下一步建议（M2b）**：GL-002 表3模板变体增强 → `rollforward_te_program_routing` → 表4/PL 勾稽。

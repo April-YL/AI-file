@@ -61,6 +61,7 @@
 | GL-005 | rollforward_abnormal_amounts | 后推表异常金额（累折>原值、负净值、处置转出） | **K.01** | **P1** | AUTO_FAIL/WARN | **implemented**（procedure 以 K.01 为准，见 [planning/k01-qc-rules.md](planning/k01-qc-rules.md)） |
 | GL-006 | rollforward_exists | 后推明细表存在 | K.01 | **P1** | AUTO_FAIL | **implemented**（qc-checklist §三；字典主表待增行） |
 | GL-007 | rollforward_columns_complete | 后推金额列完整（M2a=L1） | K.01 | **P1** | AUTO_FAIL | **implemented**（L2 矩阵见 [planning/k01-workpaper-layouts.md](planning/k01-workpaper-layouts.md)） |
+| GL-008 | rollforward_difference_over_sad | K.01 TB差异超过SAD调查 | K.01 | **P1** | AUTO_WARN/REVIEW | **implemented**（TB check 差异>SAD 且无 Notes → FAIL；有 Notes → NEED_REVIEW） |
 | FA-RC-001 | fa_list_required_fields | FA list 必需字段完整 | FA_LIST | **P1** | AUTO_FAIL | **implemented** |
 | FA-RC-002 | unique_asset_id | 资产编号唯一 | FA_LIST | **P1** | AUTO_FAIL | **implemented** |
 | FA-RC-003 | asset_value_consistency | 金额勾稽一致 | FA_LIST | **P1** | AUTO_FAIL | **implemented** |

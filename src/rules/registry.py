@@ -621,6 +621,23 @@ def _specs() -> list[RuleSpec]:
             agent_priority=AgentPriority.P1,
             implementation=ImplementationStatus.IMPLEMENTED,
         ),
+        RuleSpec(
+            dict_code="GL-008",
+            rule_id="rollforward_difference_over_sad",
+            rule_name="K.01 TB差异超过SAD调查",
+            procedure_code="K.01",
+            sheet_hints=("K.00 Lead Sheet", "K.01 Agree SL to GL"),
+            sheet_kinds=("lead", "rollforward"),
+            automation=AutomationLevel.AUTO_WARN,
+            default_severity=Severity.FAIL,
+            problem_category="基础程序",
+            reviewer_role="preparer",
+            qc_checkpoint="Y-审计基础程序",
+            k1_ref="qc-checklist K.01 §三；SOP K1.01【02】差异调查",
+            agent_priority=AgentPriority.P1,
+            implementation=ImplementationStatus.IMPLEMENTED,
+            notes="K.01 TB check 差异超过 Lead SAD 时检查 Notes；有 Notes 输出 NEED_REVIEW，无 Notes 输出 FAIL",
+        ),
         # --- FA list 数据质量（qc-checklist 补充，字典待增行）---
         RuleSpec(
             dict_code="FA-RC-001",
