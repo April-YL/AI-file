@@ -48,6 +48,7 @@ def _findings_only_html(report: QcReport) -> str:
             f'<tr class="{_severity_class(issue.severity.value)}">'
             f"<td>{idx}</td>"
             f'<td><strong>{_esc(issue.severity.value)}</strong></td>'
+            f"<td>{_esc(d.get('review_source'))}</td>"
             f"<td>{_esc(procedure_label(d.get('procedure_code')))}</td>"
             f"<td>{_esc(d.get('source_sheet'))}</td>"
             f"<td><code>{_esc(cell) if cell else '—'}</code></td>"
@@ -71,10 +72,10 @@ def _findings_only_html(report: QcReport) -> str:
     </div>
     <table id="findings-table">
       <thead><tr>
-        <th>#</th><th>级别</th><th>程序</th><th>工作表</th>
+        <th>#</th><th>级别</th><th>判断来源</th><th>程序</th><th>工作表</th>
         <th>单元格</th><th>规则</th><th>说明</th>
       </tr></thead>
-      <tbody>{rows or '<tr><td colspan="7">无 findings（均为 PASS）</td></tr>'}</tbody>
+      <tbody>{rows or '<tr><td colspan="8">无 findings（均为 PASS）</td></tr>'}</tbody>
     </table>
   </section>
     """

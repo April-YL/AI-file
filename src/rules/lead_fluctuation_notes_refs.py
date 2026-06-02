@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from ingest.lead_sheet import LeadMovementRow, LeadSheetDataset
 from rules.lead_common import (
+    exceeds_volatility_threshold,
     is_affirmative,
     movement_amount_for_row,
     parse_threshold_amount,
@@ -67,9 +68,12 @@ def _row_requires_note(
 
     movement = movement_amount_for_row(row.values)
     movement_pct = _parse_percent(row.values.get("movement_pct"))
-    if vol_amount is not None and movement is not None and abs(movement) > vol_amount:
-        return True
-    if vol_percent is not None and movement_pct is not None and abs(movement_pct) > vol_percent:
+    if exceeds_volatility_threshold(
+        movement,
+        movement_pct,
+        vol_amount=vol_amount,
+        vol_percent=vol_percent,
+    ):
         return True
     return False
 

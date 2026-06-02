@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from ingest.lead_sheet import LeadSheetDataset
 from rules.lead_common import (
+    exceeds_volatility_threshold,
     is_affirmative,
     is_trivial_fluctuation_note,
     movement_amount_for_row,
@@ -30,22 +31,6 @@ def _parse_percent(value: str | None) -> Decimal | None:
     return val
 
 
-def _exceeds_volatility(
-    movement_amt: Decimal | None,
-    movement_pct: Decimal | None,
-    *,
-    vol_amount: Decimal | None,
-    vol_percent: Decimal | None,
-) -> bool:
-    if vol_amount is not None and movement_amt is not None:
-        if abs(movement_amt) > vol_amount:
-            return True
-    if vol_percent is not None and movement_pct is not None:
-        if abs(movement_pct) > vol_percent:
-            return True
-    return False
-
-
 def check_unexpected_movement_investigation(lead: LeadSheetDataset | None) -> list[QcIssue]:
     """超波动门槛或调查=是时，波动说明不得为空或仅「无异常波动」。"""
     if lead is None or not lead.source_sheet or not lead.movement_rows:
@@ -64,7 +49,7 @@ def check_unexpected_movement_investigation(lead: LeadSheetDataset | None) -> li
         mov = movement_amount_for_row(row.values)
         pct_raw = row.values.get("movement_pct")
         mov_pct = _parse_percent(pct_raw) if pct_raw else None
-        if _exceeds_volatility(mov, mov_pct, vol_amount=vol_amt, vol_percent=vol_pct):
+        if exceeds_volatility_threshold(mov, mov_pct, vol_amount=vol_amt, vol_percent=vol_pct):
             triggers.append(f"{row.account_label}:超门槛")
         for role in _INVESTIGATE_ROLES:
             if role in roles and is_affirmative(row.values.get(role)):

@@ -1,4 +1,5 @@
 from pathlib import Path
+import zipfile
 
 import openpyxl
 import pytest
@@ -15,6 +16,7 @@ from report.export_annotated_workbook import (
     split_fa_list_issues,
 )
 from report.pipeline import run_workbook_qc_from_path
+from report.summary import ReportSummary, QcReport
 from rules.models import QcIssue, Severity
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -72,6 +74,110 @@ def test_export_two_comment_sheets(tmp_path: Path):
     wb.close()
 
 
+def test_main_comments_cell_ref_has_internal_hyperlink(tmp_path: Path):
+    src = tmp_path / "source.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.00 Lead Sheet"
+    ws["B7"] = "问题位置"
+    wb.save(src)
+    wb.close()
+
+    issue = QcIssue(
+        asset_id=None,
+        rule_id="lead_required_fields",
+        field="gaap",
+        severity=Severity.FAIL,
+        message="缺少适用会计准则",
+        suggestion="补充",
+        procedure_code="K.00",
+        source_sheet="K.00 Lead Sheet",
+        source_row=7,
+        dict_rule_code="LEAD-001",
+    )
+    report = QcReport(
+        source_file=str(src),
+        source_sheet="K.00 Lead Sheet",
+        procedure_code="K.00",
+        rule_ids=["lead_required_fields"],
+        issues=[issue],
+        asset_results=[],
+        summary=ReportSummary(
+            total_records=0,
+            pass_count=0,
+            warn_count=0,
+            fail_count=1,
+            need_review_count=0,
+            overall_severity=Severity.FAIL,
+        ),
+    )
+    out = tmp_path / "out.xlsx"
+    export_annotated_workbook(report, src, out)
+
+    wb2 = openpyxl.load_workbook(out)
+    cell = wb2[COMMENTS_SHEET_NAME]["C2"]
+    assert cell.value == "$B$7"
+    assert cell.hyperlink is not None
+    assert cell.hyperlink.location == "'K.00 Lead Sheet'!B7"
+    assert wb2["K.00 Lead Sheet"]["B7"].comment is not None
+    assert "缺少适用会计准则" in wb2["K.00 Lead Sheet"]["B7"].comment.text
+    wb2.close()
+
+
+def test_external_link_workbook_gets_ooxml_cell_comment(tmp_path: Path):
+    src = tmp_path / "source_external.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.00 Lead Sheet"
+    ws["B7"] = "问题位置"
+    wb.save(src)
+    wb.close()
+
+    with zipfile.ZipFile(src, "a", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("xl/externalLinks/externalLink1.xml", "<externalLink/>")
+
+    issue = QcIssue(
+        asset_id=None,
+        rule_id="lead_required_fields",
+        field="gaap",
+        severity=Severity.FAIL,
+        message="缺少适用会计准则",
+        suggestion="补充",
+        procedure_code="K.00",
+        source_sheet="K.00 Lead Sheet",
+        source_row=7,
+        dict_rule_code="LEAD-001",
+    )
+    report = QcReport(
+        source_file=str(src),
+        source_sheet="K.00 Lead Sheet",
+        procedure_code="K.00",
+        rule_ids=["lead_required_fields"],
+        issues=[issue],
+        asset_results=[],
+        summary=ReportSummary(
+            total_records=0,
+            pass_count=0,
+            warn_count=0,
+            fail_count=1,
+            need_review_count=0,
+            overall_severity=Severity.FAIL,
+        ),
+    )
+    out = tmp_path / "out.xlsx"
+    export_annotated_workbook(report, src, out)
+
+    with zipfile.ZipFile(out, "r") as zf:
+        names = set(zf.namelist())
+        assert "xl/externalLinks/externalLink1.xml" in names
+        comment_parts = [n for n in names if n.startswith("xl/comments/comment")]
+        assert comment_parts
+        comment_xml = zf.read(comment_parts[0]).decode("utf-8")
+        assert 'ref="B7"' in comment_xml
+        assert "缺少适用会计准则" in comment_xml
+        assert any(n.startswith("xl/drawings/vmlDrawing") for n in names)
+
+
 def test_answer_blank_agent_ref_in_last_column():
     issue = QcIssue(
         asset_id=None,
@@ -89,6 +195,28 @@ def test_answer_blank_agent_ref_in_last_column():
     assert rows[0][4] is None
     assert "Agent 参考" not in (rows[0][3] or "")
     assert rows[0][6] == "在 Lead 表补充适用会计准则"
+    assert rows[0][7] == "规则判断"
+
+
+def test_comment_rows_include_llm_review_source():
+    issue = QcIssue(
+        asset_id=None,
+        rule_id="psp_completion",
+        field="waiver_reason",
+        severity=Severity.WARN,
+        message="程序不执行理由语义上不足；模型提示：仅说明小于TE。",
+        suggestion="补充单项TT和性质异常判断",
+        procedure_code="SUMMARY",
+        source_sheet="汇总",
+        source_row=18,
+        review_source="规则+LLM",
+        llm_review_type="PSP不执行理由充分性",
+    )
+    rows = build_main_comments_rows([issue], [])
+    assert rows[0][7] == "规则+LLM（PSP不执行理由充分性）"
+    data = issue.to_dict()
+    assert data["review_source"] == "规则+LLM"
+    assert data["llm_review_type"] == "PSP不执行理由充分性"
 
 
 def test_build_comments_rows_compat():
@@ -200,3 +328,4 @@ def test_locator_rows_include_navigate_ref():
     assert rows[0][2] == "LEAD-001"
     assert rows[0][4] == "$B$7"
     assert rows[0][7] == "K.00 Lead Sheet!B7"
+    assert rows[0][8] == "规则判断"

@@ -285,7 +285,13 @@ def test_waiver_semantic_reviewer_controls_severity():
         _dataset(rows),
         waiver_reason_reviewer=reviewer,
     )
-    assert any(i.field == "waiver_reason" and i.severity == Severity.WARN for i in issues)
+    assert any(
+        i.field == "waiver_reason"
+        and i.severity == Severity.WARN
+        and i.review_source == "规则+LLM"
+        and i.llm_review_type == "PSP不执行理由充分性"
+        for i in issues
+    )
 
 
 def test_template_completeness_allows_sap_or_tod():

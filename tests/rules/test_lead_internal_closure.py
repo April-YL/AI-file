@@ -63,6 +63,44 @@ def test_fluctuation_notes_refs_fail_when_triggered_row_has_no_note_ref():
     assert any(i.rule_id == "lead_fluctuation_notes_refs" and i.severity == Severity.FAIL for i in issues)
 
 
+def test_fluctuation_threshold_requires_amount_and_percent():
+    lead = _lead_with_notes()
+    lead.movement_bindings = [
+        LeadMovementColumnBinding(role="notes", source_header="Notes", column_index=12),
+    ]
+    lead.movement_rows[0].values.update(
+        {
+            "movement_amount": "500",
+            "movement_pct": "5%",
+            "investigate_quantitative": "",
+            "notes": "",
+        }
+    )
+    lead.fluctuation_notes = ""
+
+    issues = check_lead_fluctuation_notes_refs(lead)
+    assert not any(i.field == "movement_notes" for i in issues)
+
+
+def test_fluctuation_threshold_triggers_when_amount_and_percent_exceed():
+    lead = _lead_with_notes()
+    lead.movement_bindings = [
+        LeadMovementColumnBinding(role="notes", source_header="Notes", column_index=12),
+    ]
+    lead.movement_rows[0].values.update(
+        {
+            "movement_amount": "500",
+            "movement_pct": "20%",
+            "investigate_quantitative": "",
+            "notes": "",
+        }
+    )
+    lead.fluctuation_notes = ""
+
+    issues = check_lead_fluctuation_notes_refs(lead)
+    assert any(i.field == "movement_notes" and i.severity == Severity.FAIL for i in issues)
+
+
 def test_expectation_basis_warns_when_all_expectations_are_trivial():
     lead = LeadSheetDataset(
         source_file="t.xlsx",
@@ -99,6 +137,27 @@ def test_expectation_vs_movement_marks_review_when_no_change_expectation_conflic
         and i.severity == Severity.NEED_REVIEW
         for i in issues
     )
+
+
+def test_expectation_vs_movement_does_not_trigger_on_amount_only():
+    lead = LeadSheetDataset(
+        source_file="t.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        expectations=[
+            ExpectationRow(account_change="固定资产", expectation="预计无重大变化", source_row=28),
+        ],
+        volatility=VolatilityThreshold(amount="100", percent="10%"),
+        movement_rows=[
+            LeadMovementRow(
+                account_label="原值",
+                sheet_ref="K.01",
+                values={"movement_amount": "500", "movement_pct": "5%"},
+                source_row=49,
+            )
+        ],
+    )
+    issues = check_lead_expectation_vs_movement_review(lead)
+    assert issues == []
 
 
 def test_adjustment_internal_consistency_fails_when_main_adjustment_has_no_summary():

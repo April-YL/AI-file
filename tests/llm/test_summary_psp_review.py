@@ -39,6 +39,75 @@ def test_review_waiver_reason_with_llm_parses_result():
     assert res.adequacy == "insufficient"
 
 
+def test_review_waiver_reason_prompt_uses_calibrated_psp_criteria():
+    row = PspProgramRow(
+        procedure_name="K.02.1 新增测试",
+        sheet_ref="K.02.1 新增测试",
+        execution_status="否",
+        waiver_reason="N/A",
+        notes=None,
+        source_row=12,
+        is_psp=False,
+    )
+    with patch(
+        "llm.summary_psp_review.chat_completion_json",
+        return_value={
+            "adequacy": "insufficient",
+            "rationale": "空泛理由",
+            "suggested_action": "补充金额和性质风险判断",
+        },
+    ) as mock_call:
+        res = review_waiver_reason_with_llm(row, _config())
+
+    assert res is not None
+    system = mock_call.call_args.kwargs["system"]
+    user = mock_call.call_args.kwargs["user"]
+    assert "包括但不限于" in system
+    assert "N/A" in system and "NA" in system and "N/a" in system
+    assert "总体金额小于 TE" in system
+    assert "无单项大于 TT" in system
+    assert "新增/处置金额小于底稿内 SAD" in system
+    assert "底稿内读取到的数据" in system
+    assert "K.01 Agree SL to GL" in system
+    assert "减值迹象" in system
+    assert "不得编造" in system
+    assert '"waiver_reason": "N/A"' in user
+
+
+def test_review_waiver_reason_prompt_rejects_te_only_disposal_reason():
+    row = PspProgramRow(
+        procedure_name="K.02.2 处置测试",
+        sheet_ref="K.02.2 处置测试",
+        execution_status="否",
+        waiver_reason="本期处置资产净值小于TE。",
+        notes=None,
+        source_row=18,
+        is_psp=False,
+    )
+    with patch(
+        "llm.summary_psp_review.chat_completion_json",
+        return_value={
+            "adequacy": "insufficient",
+            "rationale": "仅说明小于TE，未说明单项TT和性质异常。",
+            "suggested_action": "补充无单项大于TT且无性质异常项，或说明金额小于SAD。",
+        },
+    ) as mock_call:
+        res = review_waiver_reason_with_llm(row, _config())
+
+    assert res is not None
+    assert res.adequacy == "insufficient"
+    system = mock_call.call_args.kwargs["system"]
+    user = mock_call.call_args.kwargs["user"]
+    assert "总体金额小于底稿内 TE" in system
+    assert "无单项大于底稿内 TT" in system
+    assert "新增/处置金额小于底稿内 TT" in system
+    assert "新增/处置金额小于底稿内 SAD" in system
+    assert "仅写“总体金额小于 TE”" in system
+    assert "处置资产净值小于 TE" in system
+    assert "不足以判断充分" in system
+    assert '"waiver_reason": "本期处置资产净值小于TE。"' in user
+
+
 def test_build_sheet_semantic_issues_for_weak_match(tmp_path):
     wb_path = tmp_path / "wb.xlsx"
     wb = Workbook()
@@ -83,3 +152,5 @@ def test_build_sheet_semantic_issues_for_weak_match(tmp_path):
 
     assert len(issues) == 1
     assert "更可能对应" in issues[0].message
+    assert issues[0].review_source == "LLM辅助判断"
+    assert issues[0].llm_review_type == "汇总页程序页语义匹配"

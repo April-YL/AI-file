@@ -32,7 +32,7 @@ st.set_page_config(
 )
 
 # 规则/ingest 变更时递增，避免 @st.cache_data 返回旧质检结果。
-_QC_CACHE_VERSION = "20260602-ui-overview-downloads"
+_QC_CACHE_VERSION = "20260602-review-source-labels"
 
 
 def _inject_style() -> None:

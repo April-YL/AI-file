@@ -166,6 +166,38 @@ def test_ae004_trivial_note_when_threshold_exceeded(swp_lead_xlsx: Path):
     assert any(i.rule_id == "unexpected_movement_investigation" for i in issues)
 
 
+def test_ae004_threshold_requires_amount_and_percent(swp_lead_xlsx: Path):
+    lead = load_lead_from_workbook(swp_lead_xlsx)
+    assert lead.volatility is not None
+    lead.volatility.amount = "100000"
+    lead.volatility.percent = "10%"
+    lead.fluctuation_notes = "无异常波动"
+    orig = next(r for r in lead.movement_rows if r.account_label == "原值")
+    orig.values["movement_amount"] = "500000"
+    orig.values["movement_pct"] = "5%"
+    orig.values["investigate_quantitative"] = ""
+    orig.values["investigate_qualitative"] = ""
+
+    issues = check_unexpected_movement_investigation(lead)
+    assert not any(i.rule_id == "unexpected_movement_investigation" for i in issues)
+
+
+def test_ae004_threshold_triggers_when_amount_and_percent_exceed(swp_lead_xlsx: Path):
+    lead = load_lead_from_workbook(swp_lead_xlsx)
+    assert lead.volatility is not None
+    lead.volatility.amount = "100000"
+    lead.volatility.percent = "10%"
+    lead.fluctuation_notes = "无异常波动"
+    orig = next(r for r in lead.movement_rows if r.account_label == "原值")
+    orig.values["movement_amount"] = "500000"
+    orig.values["movement_pct"] = "20%"
+    orig.values["investigate_quantitative"] = ""
+    orig.values["investigate_qualitative"] = ""
+
+    issues = check_unexpected_movement_investigation(lead)
+    assert any(i.rule_id == "unexpected_movement_investigation" for i in issues)
+
+
 def test_rollforward_reconciliation_match(tmp_path: Path):
     path = tmp_path / "lead_rf.xlsx"
     wb = openpyxl.Workbook()

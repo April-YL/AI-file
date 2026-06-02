@@ -3,7 +3,11 @@ from __future__ import annotations
 from decimal import Decimal
 
 from ingest.lead_sheet import LeadSheetDataset
-from rules.lead_common import movement_amount_for_row, parse_threshold_amount
+from rules.lead_common import (
+    exceeds_volatility_threshold,
+    movement_amount_for_row,
+    parse_threshold_amount,
+)
 from rules.models import QcIssue, Severity
 from rules.parsing import is_blank
 
@@ -66,9 +70,12 @@ def check_lead_expectation_vs_movement_review(
     for row in lead.movement_rows:
         movement = movement_amount_for_row(row.values)
         pct = _movement_pct(row.values)
-        exceeds_amount = vol_amount is not None and movement is not None and abs(movement) > vol_amount
-        exceeds_percent = vol_percent is not None and pct is not None and abs(pct) > vol_percent
-        if exceeds_amount or exceeds_percent:
+        if exceeds_volatility_threshold(
+            movement,
+            pct,
+            vol_amount=vol_amount,
+            vol_percent=vol_percent,
+        ):
             triggered.append(row.account_label)
             first_row = first_row or row.source_row
 

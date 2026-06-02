@@ -311,6 +311,8 @@ def _check_program_row(
                         procedure_code="SUMMARY",
                         source_sheet=source_sheet,
                         source_row=row.source_row,
+                        review_source="规则+LLM",
+                        llm_review_type="PSP不执行理由充分性",
                     )
                 )
         elif len(waiver) < _MIN_WAIVER_LEN:

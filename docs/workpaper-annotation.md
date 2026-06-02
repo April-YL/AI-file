@@ -17,7 +17,7 @@ fa-qc-run path\to\workbook.xlsx
 fa-qc-ui   # 界面下载「带标注底稿」
 ```
 
-实现：`src/report/export_annotated_workbook.py` + `src/report/ooxml_workbook.py`（ZIP 注入 Comments，**不**整本 `openpyxl.save`，避免破坏 A3 外链）。
+实现：`src/report/export_annotated_workbook.py` + `src/report/ooxml_workbook.py`（ZIP / OOXML 注入 Comments、定位链接与业务表批注，**不**整本 `openpyxl.save`，避免破坏 A3 外链）。
 
 ## 两张 Comments 表
 
@@ -34,15 +34,18 @@ fa-qc-ui   # 界面下载「带标注底稿」
 | Answer/Comment | **prepare** 根据 review comments 回复（**留空**） |
 | Agent 参考（质检建议） | Agent 规则 `suggestion`，**勿写入 Answer** |
 
-外链底稿（如 A3 `=[n]A3!...`）注入 Comments 时 **不重写** `workbook.xml` 的 `externalReference`，避免 Check with A3 变 `#REF`。
+外链底稿（如 A3 `=[n]A3!...`）注入 Comments 与业务表批注时 **不重写** `workbook.xml` 的 `externalReference`，避免 Check with A3 变 `#REF`。
+
+`Cell Ref.` 列为内部跳转索引：点击可跳到对应 `Tab Ref.` 工作表的定位单元格（目前默认 B 列，如 `$B$7`）。
 
 **不**将 PM/TE/SAD、CRA 摘录写入 Comments 表；人工核对见 JSON `manual_review_sections` 与 UI「人工复核摘录」。
 
 ## 单元格批注
 
-- 对有 `source_row` 的 finding，在对应 **Tab Ref.** 工作表的 B 列写入 Excel **批注** + 浅色高亮（FAIL / WARN / NEED_REVIEW）。
-- **含外部工作簿链接**（如 Lead 上 `=[5]A3!...`）的底稿：**跳过**业务表批注与整本 save，以免 Check with A3 变为 `#REF`；findings 仍在 Comments 表。
-- 无外部链接的简单底稿仍使用 openpyxl 写批注。
+- 对有 `source_row` 的 finding，在对应 **Tab Ref.** 工作表的 B 列写入 Excel **批注**。
+- **含外部工作簿链接**（如 Lead 上 `=[5]A3!...`）的底稿：通过 OOXML 原位注入业务表批注，避免整本 save 导致 Check with A3 变为 `#REF`。
+- 若某张业务表已存在复杂批注/VML 结构，首版会跳过该表的单元格批注；findings 仍在 Comments 表和定位表中。
+- 无外部链接且 OOXML 注入跳过时，才使用 openpyxl 作为兼容兜底。
 - 无行号的 sheet 级问题仅出现在 Comments 表中。
 
 ## Streamlit UI（`fa-qc-ui`）

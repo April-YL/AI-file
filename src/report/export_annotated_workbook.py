@@ -13,6 +13,7 @@ from openpyxl.utils import get_column_letter
 
 from report.ooxml_workbook import (
     build_worksheet_xml,
+    inject_cell_comments,
     inject_worksheets_at_front,
     workbook_has_external_links,
 )
@@ -23,6 +24,7 @@ COMMENTS_SHEET_NAME = "Comments【归档前删除】"
 FA_LIST_COMMENTS_SHEET_NAME = "Comments【FA list】"
 LOCATOR_SHEET_NAME = "QC_Locator"
 _AGENT_REF_HEADER = "Agent 参考（质检建议）"
+_REVIEW_SOURCE_HEADER = "判断来源"
 _COMMENT_HEADERS = (
     "EY Ref.",
     "Tab Ref.",
@@ -31,6 +33,7 @@ _COMMENT_HEADERS = (
     "Answer/Comment",
     "Closed?",
     _AGENT_REF_HEADER,
+    _REVIEW_SOURCE_HEADER,
 )
 _LOCATOR_HEADERS = (
     "EY Ref.",
@@ -41,6 +44,7 @@ _LOCATOR_HEADERS = (
     "Question/Comment",
     _AGENT_REF_HEADER,
     "Navigate",
+    _REVIEW_SOURCE_HEADER,
 )
 
 _DEFAULT_COMMENT_COL = 2
@@ -71,9 +75,27 @@ def _cell_ref_a1(row: int | None, col: int = _DEFAULT_COMMENT_COL) -> str:
     return f"${get_column_letter(col)}${row}"
 
 
+def _cell_ref_plain(row: int | None, col: int = _DEFAULT_COMMENT_COL) -> str:
+    if not row or row < 1:
+        return ""
+    return f"{get_column_letter(col)}{row}"
+
+
+def _quote_sheet_for_location(sheet: str) -> str:
+    escaped = sheet.replace("'", "''")
+    return f"'{escaped}'"
+
+
+def _cell_location(sheet: str | None, row: int | None) -> str | None:
+    if not sheet or not row or row < 1:
+        return None
+    return f"{_quote_sheet_for_location(sheet)}!{_cell_ref_plain(row)}"
+
+
 def _issue_comment_text(issue: QcIssue) -> str:
     code = issue.dict_rule_code or issue.rule_id
     lines = [f"[{issue.severity.value}] {code}"]
+    lines.append(f"判断来源: {_review_source_text(issue)}")
     if issue.field:
         lines.append(f"字段: {issue.field}")
     lines.append(issue.message)
@@ -91,6 +113,13 @@ def _question_text(issue: QcIssue) -> str:
 
 def _agent_suggestion(issue: QcIssue) -> str | None:
     return issue.suggestion or None
+
+
+def _review_source_text(issue: QcIssue) -> str:
+    source = (issue.review_source or "规则判断").strip()
+    if issue.llm_review_type:
+        return f"{source}（{issue.llm_review_type}）"
+    return source
 
 
 def _answer_for_preparer() -> None:
@@ -169,6 +198,7 @@ def build_main_comments_rows(
                 _answer_for_preparer(),
                 "No",
                 _agent_suggestion(issue),
+                _review_source_text(issue),
             )
         )
 
@@ -189,10 +219,36 @@ def build_main_comments_rows(
                 _answer_for_preparer(),
                 "No",
                 _agent_suggestion(rep),
+                _review_source_text(rep),
             )
         )
 
     return rows
+
+
+def build_main_comments_hyperlinks(
+    other_issues: list[QcIssue],
+    fa_list_issues: list[QcIssue],
+) -> dict[tuple[int, int], str]:
+    """主 Comments 表 Cell Ref. 列内部跳转链接。"""
+    links: dict[tuple[int, int], str] = {}
+    row_idx = 2
+    for issue in sorted(
+        other_issues,
+        key=lambda i: (
+            _sheet_group_rank(i),
+            (i.source_sheet or "").strip(),
+            _SEV_RANK.get(i.severity, 9),
+            i.source_row or 0,
+        ),
+    ):
+        loc = _cell_location(issue.source_sheet, issue.source_row)
+        if loc:
+            links[(row_idx, 3)] = loc
+        row_idx += 1
+    for _rep, _count, _sheets in _aggregate_fa_list_issues(fa_list_issues):
+        row_idx += 1
+    return links
 
 
 def _compact_issue_message(message: str | None) -> str:
@@ -245,9 +301,25 @@ def build_fa_list_detail_rows(fa_list_issues: list[QcIssue]) -> list[tuple]:
                 _answer_for_preparer(),
                 "No",
                 _agent_suggestion(issue),
+                _review_source_text(issue),
             )
         )
     return rows
+
+
+def build_fa_list_detail_hyperlinks(
+    fa_list_issues: list[QcIssue],
+) -> dict[tuple[int, int], str]:
+    sorted_issues = sorted(
+        fa_list_issues,
+        key=lambda i: (_SEV_RANK.get(i.severity, 9), i.source_sheet or "", i.source_row or 0),
+    )
+    links: dict[tuple[int, int], str] = {}
+    for idx, issue in enumerate(sorted_issues, start=2):
+        loc = _cell_location(issue.source_sheet, issue.source_row)
+        if loc:
+            links[(idx, 3)] = loc
+    return links
 
 
 def build_locator_rows(issues: list[QcIssue]) -> list[tuple]:
@@ -280,9 +352,30 @@ def build_locator_rows(issues: list[QcIssue]) -> list[tuple]:
                 _question_text(issue),
                 _agent_suggestion(issue),
                 navigate,
+                _review_source_text(issue),
             )
         )
     return rows
+
+
+def build_locator_hyperlinks(issues: list[QcIssue]) -> dict[tuple[int, int], str]:
+    sorted_issues = sorted(
+        issues,
+        key=lambda i: (
+            _sheet_group_rank(i),
+            (i.source_sheet or "").strip(),
+            _SEV_RANK.get(i.severity, 9),
+            i.source_row or 0,
+            i.rule_id,
+        ),
+    )
+    links: dict[tuple[int, int], str] = {}
+    for idx, issue in enumerate(sorted_issues, start=2):
+        loc = _cell_location(issue.source_sheet, issue.source_row)
+        if loc:
+            links[(idx, 5)] = loc
+            links[(idx, 8)] = loc
+    return links
 
 
 def build_comments_rows(issues: list[QcIssue]) -> list[tuple]:
@@ -325,6 +418,17 @@ def _apply_cell_annotations(wb: openpyxl.Workbook, issues: list[QcIssue]) -> int
     return count
 
 
+def _ooxml_comments_by_sheet(issues: list[QcIssue]) -> dict[str, list[tuple[str, str, str]]]:
+    by_sheet: dict[str, list[tuple[str, str, str]]] = {}
+    for issue in issues:
+        sheet = (issue.source_sheet or "").strip()
+        cell = _cell_ref_plain(issue.source_row)
+        if not sheet or not cell:
+            continue
+        by_sheet.setdefault(sheet, []).append((cell, _issue_comment_text(issue), _AUTHOR))
+    return by_sheet
+
+
 def export_annotated_workbook(
     report: QcReport,
     input_path: str | Path,
@@ -356,11 +460,14 @@ def export_annotated_workbook(
     )
     has_external = workbook_has_external_links(input_path)
     if has_external:
-        footer += " | 已跳过业务表单元格批注（保留 A3 等外部链接）"
+        footer += " | 业务表批注使用 OOXML 注入（保留 A3 等外部链接）"
 
     main_rows = build_main_comments_rows(other_issues, fa_issues)
+    main_links = build_main_comments_hyperlinks(other_issues, fa_issues)
     fa_rows = build_fa_list_detail_rows(fa_issues)
+    fa_links = build_fa_list_detail_hyperlinks(fa_issues)
     locator_rows = build_locator_rows(issues)
+    locator_links = build_locator_hyperlinks(issues)
     inject_worksheets_at_front(
         out,
         [
@@ -370,6 +477,7 @@ def export_annotated_workbook(
                     _COMMENT_HEADERS,
                     main_rows,
                     footer=f"源文件: {input_path.name}{footer}",
+                    hyperlinks=main_links,
                 ),
             ),
             (
@@ -378,6 +486,7 @@ def export_annotated_workbook(
                     _COMMENT_HEADERS,
                     fa_rows,
                     footer=f"源文件: {input_path.name} | FA list 专项明细",
+                    hyperlinks=fa_links,
                 ),
             ),
             (
@@ -387,15 +496,18 @@ def export_annotated_workbook(
                     locator_rows,
                     footer=(
                         f"源文件: {input_path.name} | 定位表用于快速检索 Tab/Cell，"
-                        "不修改业务表单元格（兼容外部链接底稿）"
+                        "业务表批注通过 OOXML 写入（兼容外部链接底稿）"
                     ),
+                    hyperlinks=locator_links,
                 ),
             ),
         ],
         remove_sheet_names=(COMMENTS_SHEET_NAME, FA_LIST_COMMENTS_SHEET_NAME, LOCATOR_SHEET_NAME),
     )
 
-    if not has_external:
+    annotation_result = inject_cell_comments(out, _ooxml_comments_by_sheet(issues))
+    skipped = annotation_result.get("skipped_sheets") or []
+    if skipped and not has_external:
         wb = openpyxl.load_workbook(out)
         _apply_cell_annotations(wb, issues)
         wb.save(out)
@@ -428,5 +540,5 @@ def comments_summary_stats(
         "fa_list_finding_count": len(fa_issues),
         "fa_list_summary_row_count": len(_aggregate_fa_list_issues(fa_issues)),
         "has_external_links": has_external,
-        "cell_annotations_applied": not has_external,
+        "cell_annotations_applied": True,
     }

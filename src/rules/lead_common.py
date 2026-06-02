@@ -152,6 +152,31 @@ def movement_amount_for_row(values: dict[str, str | None]) -> Decimal | None:
     return None
 
 
+def exceeds_volatility_threshold(
+    movement_amt: Decimal | None,
+    movement_pct: Decimal | None,
+    *,
+    vol_amount: Decimal | None,
+    vol_percent: Decimal | None,
+) -> bool:
+    """
+    Lead 波动幅度判断口径。
+
+    标准底稿公式为金额阈值与比例阈值同时满足才为“是”。若其中一个阈值
+    未读取到，才使用可取得的单一阈值兜底，避免因版式缺列而完全漏判。
+    """
+    amount_available = vol_amount is not None and movement_amt is not None
+    percent_available = vol_percent is not None and movement_pct is not None
+
+    if amount_available and percent_available:
+        return abs(movement_amt) > vol_amount and abs(movement_pct) > vol_percent
+    if amount_available:
+        return abs(movement_amt) > vol_amount
+    if percent_available:
+        return abs(movement_pct) > vol_percent
+    return False
+
+
 def lead_book_balance(values: dict[str, str | None]) -> Decimal | None:
     for role in ("book_balance", "audited_ending", "unaudited"):
         amt = parse_threshold_amount(values.get(role))

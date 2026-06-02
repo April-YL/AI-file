@@ -73,6 +73,16 @@
   - 口径：只有 TB/试算表口径和“差异”同时出现，才视为可靠 TB check；仅有“变动金额”时不强判，后续规则应给 `NEED_REVIEW` 或人工复核提示。
   - 报告：`rollforward_sheet_section` 已输出 TB check 摘录字段，供后续 `rollforward_difference_over_sad` 使用。
   - 验证：`tests/rules` 108 通过；`tests/ingest/test_workbook_ingest.py --basetemp .pytest_tmp` 12 通过；`tests/report/test_workbook_pipeline.py --basetemp .pytest_tmp_report` 1 通过。
+- **K.01 GL-008 >SAD Notes 检查（2026-06-02）**：
+  - 规则：`rollforward_difference_over_sad` 已接入 K.01 runner，并从 K.00 Lead 读取 SAD。
+  - 口径：TB check 差异未超过 SAD 不报；超过 SAD 且无 Notes 输出 `FAIL`；超过 SAD 且有 Notes 输出 `NEED_REVIEW`，由质检人员判断说明是否充分。
+  - 兜底：TB check 或 SAD 读不可靠时输出 `NEED_REVIEW`，不直接判 PASS/FAIL。
+  - 验证：`tests/rules/test_rollforward_rules.py` 27 通过；`tests/rules` 115 通过；`tests/ingest/test_workbook_ingest.py --basetemp .pytest_tmp` 12 通过；`tests/report/test_workbook_pipeline.py --basetemp .pytest_tmp_report` 1 通过。
+- **外链底稿单元格批注 + Comments 跳转（2026-06-02）**：
+  - report：`export_annotated_workbook` 不再因 A3/外部链接跳过业务表批注；改用 OOXML 原位注入传统 Excel 批注，避免 `openpyxl.save()` 重写外链。
+  - Comments：`Comments【归档前删除】`、`Comments【FA list】`、`QC_Locator` 的 Cell Ref./Navigate 可作为内部跳转索引，点击定位到对应业务表单元格（当前默认 B 列）。
+  - 兜底：若业务表已存在复杂批注/VML 结构，首版跳过该表单元格批注，findings 仍保留在 Comments/定位表。
+  - 验证：`tests/report/test_export_annotated_workbook.py --basetemp .pytest_tmp` 12 通过。
 - **程序质检覆盖文档（2026-05-28）**：`docs/planning/program-qc-coverage-index.md`（总索引）、`k01-six-block-qc-matrix.md`、`summary-sheet-qc-matrix.md`、`k02-k03-qc-matrix.md`（规划模板）；Lead 仍见 `lead-qc-rules.md`
 
 ## 进行中（M2a = Agent P1）
@@ -84,11 +94,11 @@
   - **Lead 回归表**：`artifacts/case_lead_regression.md`（B–G 共 6 份；A 42MB 永久跳过）
   - **待做**：对案例库 6 份底稿重跑 `fa-qc-diagnose` 更新 `case-workpaper-diagnostic.md`
 - **Lead 质检规则（模块 1–5 P0）**：含 `lead_check_with_a3_row`（ingest 摘录 Check with A3/Diff/Notes + Diff≠0/缺说明 FAIL）；其余 `lead_*`、AE-004、`lead_rollforward_tb_reconciliation`；`lead_runner` + `lead_sheet_section`
-- **K.01 M2b（区块 2–6 勾稽）**：TB check 读取层已加；下一步补 `rollforward_difference_over_sad`（差异 > SAD 时检查 Notes），再做 GL-002 表3模板变体增强、TE 路由、PL（见 `k01-six-block-qc-matrix.md`）
+- **K.01 M2b（区块 2–6 勾稽）**：TB check 读取层与 `rollforward_difference_over_sad` 已加；下一步做 GL-002 表3模板变体增强、TE 路由、PL（见 `k01-six-block-qc-matrix.md`）
 
 ## 下一步（M2a 验收导向）
 
-1. **K.01 M2b**：先做 `rollforward_difference_over_sad`（TB check 差异 > SAD 时，要求有 Notes 解释）；再做 GL-002 表3模板变体增强、>TE 路由；识别置信度/锚点去重优化
+1. **K.01 M2b**：GL-002 表3模板变体增强、>TE 路由；识别置信度/锚点去重优化
 2. **rules（Lead 余量）**：`lead_fluctuation_notes_refs`、`lead_arp_three_triggers`；Streamlit K.01 页签（可选）
 2. **M3c（P1）**：`--llm-rules`、`--llm-checklist`（见 roadmap）；**非**优先扩展 `--llm` 报告叙述
 3. **ingest**：案例库字段映射回归

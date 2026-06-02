@@ -59,6 +59,9 @@ class QcIssue:
     qc_checkpoint: str | None = None
     automation_level: str | None = None
     k1_checklist_ref: str | None = None
+    # 判断来源：默认由确定性规则判断；LLM 参与时由调用方显式标记。
+    review_source: str = "规则判断"
+    llm_review_type: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -71,6 +74,7 @@ class QcIssue:
             "severity": self.severity.value,
             "message": self.message,
             "suggestion": self.suggestion,
+            "review_source": self.review_source,
         }
         optional = {
             "dict_rule_code": self.dict_rule_code,
@@ -80,6 +84,7 @@ class QcIssue:
             "qc_checkpoint": self.qc_checkpoint,
             "automation_level": self.automation_level,
             "k1_checklist_ref": self.k1_checklist_ref,
+            "llm_review_type": self.llm_review_type,
         }
         for key, value in optional.items():
             if value is not None:
