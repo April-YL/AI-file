@@ -71,7 +71,8 @@ def check_asset_value_consistency(
             )
             continue
 
-        expected = original - accumulated - impairment
+        # 客户台账常按贷方负数列示累计折旧/减值；金额关系按抵减金额绝对值勾稽。
+        expected = original - abs(accumulated) - abs(impairment)
         diff = abs(expected - net)
         tol = tolerance if tolerance is not None else amount_tolerance(original)
         if diff > tol:

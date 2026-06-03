@@ -76,6 +76,29 @@ def test_load_summary_from_workbook(summary_xlsx: Path):
     assert len(psp) == 2
 
 
+def test_load_summary_from_workbook_matches_sheet_name_with_trailing_space(tmp_path: Path):
+    path = tmp_path / "wb_summary_space.xlsx"
+    wb = openpyxl.Workbook()
+    ws_sum = wb.active
+    ws_sum.title = "汇总 "
+    ws_sum.append(["程序", "工作表", "是否执行", "不执行原因"])
+    ws_sum.append(["K.02.2 处置测试", "K.02.2", "否", "本期处置资产净值小于TE"])
+    ws_k01 = wb.create_sheet("K.01 Agree SL to GL")
+    ws_k01.append(["固定资产类别", "年初余额", "年末余额"])
+    ws_k01.append(["机器设备", 1000, 900])
+    wb.save(path)
+    wb.close()
+
+    auto_ds = load_summary_from_workbook(path)
+    assert auto_ds.source_sheet == "汇总 "
+    assert len(auto_ds.programs) == 1
+    assert auto_ds.programs[0].sheet_ref == "K.02.2"
+
+    manual_ds = load_summary_from_workbook(path, sheet_name="汇总")
+    assert manual_ds.source_sheet == "汇总 "
+    assert len(manual_ds.programs) == 1
+
+
 def test_parse_summary_swp_standard_layout():
     """K1 SWP：B/C 程序、F 程序页、G/H/I 与案例库汇总一致。"""
     rows = [

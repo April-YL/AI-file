@@ -60,10 +60,26 @@ def run_workbook_qc(
                 wb_for_psp = None
         waiver_reason_reviewer = None
         if config.enabled:
-            from llm.summary_psp_review import review_waiver_reason_with_llm
+            from llm.summary_psp_review import (
+                build_waiver_semantic_context,
+                review_waiver_reason_with_llm,
+            )
+
+            waiver_semantic_context = build_waiver_semantic_context(
+                lead=ctx.lead,
+                rollforward=ctx.rollforward,
+                addition_list=ctx.addition_list,
+                disposal_list=ctx.disposal_list,
+                reconciliations=ctx.reconciliations,
+                workbook_sheet_titles=sheet_titles,
+            )
 
             def waiver_reason_reviewer(row):
-                return review_waiver_reason_with_llm(row, config)
+                return review_waiver_reason_with_llm(
+                    row,
+                    config,
+                    semantic_context=waiver_semantic_context,
+                )
 
         psp_raw_issues = check_psp_completion(
             ctx.summary,

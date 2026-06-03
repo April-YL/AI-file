@@ -57,6 +57,18 @@ def _build_record(
     return AssetRecord(**data)
 
 
+def _is_non_asset_summary_row(record: AssetRecord) -> bool:
+    """过滤 FA list 尾部重分类/合计等非资产明细行。"""
+    aid = (record.asset_id or "").strip()
+    name = (record.asset_name or "").strip()
+    if not aid:
+        return False
+    summary_tokens = ("资产类别重分类", "重分类", "合计", "小计", "总计")
+    if any(token in aid for token in summary_tokens) and not name:
+        return True
+    return aid in {"-", "—", "N/A", "NA"}
+
+
 def parse_fa_list_rows(
     rows: list[tuple[Any, ...]],
     *,
@@ -85,7 +97,10 @@ def parse_fa_list_rows(
         row_values = {i + 1: row[i] if i < len(row) else None for i in range(len(row))}
         if not any(v is not None and str(v).strip() for v in row_values.values()):
             continue
-        records.append(_build_record(row_values, col_by_field, source_row=r_idx + 1))
+        record = _build_record(row_values, col_by_field, source_row=r_idx + 1)
+        if _is_non_asset_summary_row(record):
+            continue
+        records.append(record)
 
     return FaListDataset(
         source_file=source_file,

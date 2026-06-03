@@ -290,7 +290,7 @@ _MOVEMENT_ROLE_HEADERS: dict[str, tuple[str, ...]] = {
     "movement_amount": ("变动金额", "变动额", "changeamount"),
     "movement_pct": ("变动%", "变动%", "changepercent", "变动比例"),
     "notes": ("notes", "备注", "说明"),
-    "investigate_quantitative": ("基于波动幅度判断", "波动幅度判断", "是否进一步调查"),
+    "investigate_quantitative": ("基于波动幅度判断", "波动幅度判断"),
     "investigate_qualitative": ("基于定性考虑判断", "定性考虑", "定性判断"),
 }
 
@@ -417,6 +417,11 @@ def _match_movement_role(header: str) -> str | None:
     n = _norm(header)
     if not n:
         return None
+    if "是否进一步调查" in n:
+        if "波动幅度" in n:
+            return "investigate_quantitative"
+        if "定性" in n:
+            return "investigate_qualitative"
     # 「上期末审定数」含子串「期末审定数」：PY 列仅用 hint⊆header，避免「期末审定数」反向命中 PY
     for h in _MOVEMENT_ROLE_HEADERS["py_audited"]:
         hn = _norm(h)

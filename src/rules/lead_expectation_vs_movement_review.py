@@ -25,6 +25,34 @@ _NO_MAJOR_CHANGE_HINTS = (
     "no material",
 )
 
+_POLICY_ESTIMATE_LABELS = ("折旧方法", "使用寿命", "折旧政策", "会计估计")
+_CONTEXTUAL_NO_MAJOR_PHRASES = (
+    "无重大处置",
+    "无重大资产处置",
+    "无重大处置资产",
+    "无重大报废",
+)
+
+
+def _compact(text: str | None) -> str:
+    return "".join(str(text or "").lower().split())
+
+
+def _should_skip_no_change_row(label: str | None, text: str | None) -> bool:
+    blob = _compact(f"{label or ''}{text or ''}")
+    if any(x in blob for x in _POLICY_ESTIMATE_LABELS) and any(
+        x in blob for x in ("无变化", "未发生变化", "不会发生变化", "较上年无变化")
+    ):
+        return True
+    return False
+
+
+def _strip_contextual_phrases(text: str) -> str:
+    out = text
+    for phrase in _CONTEXTUAL_NO_MAJOR_PHRASES:
+        out = out.replace(phrase, "")
+    return out
+
 
 def _parse_percent(value: str | None) -> Decimal | None:
     if is_blank(value):
@@ -41,7 +69,9 @@ def _parse_percent(value: str | None) -> Decimal | None:
 
 def _has_no_major_change_expectation(lead: LeadSheetDataset) -> bool:
     for row in lead.expectations:
-        text = f"{row.account_change or ''} {row.expectation or ''}".lower()
+        if _should_skip_no_change_row(row.account_change, row.expectation):
+            continue
+        text = _strip_contextual_phrases(f"{row.account_change or ''} {row.expectation or ''}".lower())
         if any(hint in text for hint in _NO_MAJOR_CHANGE_HINTS):
             return True
     return False

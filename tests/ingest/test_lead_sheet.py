@@ -203,6 +203,8 @@ def test_match_movement_role_py_audited_header():
 
     assert _match_movement_role("上期末审定数") == "py_audited"
     assert _match_movement_role("期末审定数") == "audited_ending"
+    assert _match_movement_role("基于波动幅度判断，是否进一步调查？") == "investigate_quantitative"
+    assert _match_movement_role("基于定性考虑判断，是否进一步调查？") == "investigate_qualitative"
 
 
 def test_hyphen_cell_does_not_match_anchors():

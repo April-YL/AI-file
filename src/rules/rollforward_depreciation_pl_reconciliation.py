@@ -108,7 +108,35 @@ def check_rollforward_depreciation_pl_reconciliation(
         return []
 
     if rollforward.table4_notes_text_present:
-        return []
+        note_text = rollforward.table4_notes_text or ""
+        compact_note = note_text.replace(" ", "")
+        if "小于SAD" in compact_note or "低于SAD" in compact_note or "未超过SAD" in compact_note:
+            return [
+                _issue(
+                    rollforward=rollforward,
+                    severity=Severity.FAIL,
+                    field="table4_notes_text",
+                    message=(
+                        "K.01 表4折旧费用与利润表科目核对差异超过 SAD，"
+                        f"但 Notes 描述为差异小于/未超过 SAD：差异={diff}，SAD={sad}"
+                    ),
+                    suggestion="请复核表4差异金额与 Notes 说明是否一致；若差异确超过 SAD，应补充进一步分析和处理结论。",
+                    source_row=rollforward.table4_notes_row or rollforward.table4_difference_row,
+                )
+            ]
+        return [
+            _issue(
+                rollforward=rollforward,
+                severity=Severity.NEED_REVIEW,
+                field="table4_notes_text",
+                message=(
+                    "K.01 表4折旧费用与利润表科目核对存在超过 SAD 的差异，"
+                    f"且已填写 Notes：差异={diff}，SAD={sad}"
+                ),
+                suggestion="请人工判断 Notes 是否充分说明差异原因、风险影响及处理结论。",
+                source_row=rollforward.table4_notes_row or rollforward.table4_difference_row,
+            )
+        ]
 
     return [
         _issue(

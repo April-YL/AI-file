@@ -84,6 +84,19 @@
   - 口径：表4差异为 0 或差异金额不超过 SAD 时通过；超过 SAD 且无 Notes 输出 `FAIL`；超过 SAD 但有 Notes 时通过（Notes 符号/格式不限制）；表4差异或 SAD 读不到时输出 `NEED_REVIEW`。
   - 报告：`rollforward_sheet_section` 已输出表4 PL/TB 核对摘录字段。
   - 验证：`tests/rules/test_rollforward_rules.py` 38 通过；`tests/rules` 131 通过；`tests/ingest/test_workbook_ingest.py --basetemp .pytest_tmp` 12 通过；`tests/report/test_workbook_pipeline.py --basetemp .pytest_tmp_report` 1 通过。
+- **输出准确性修复（2026-06-03）**：
+  - FA list：累计折旧按贷方负数列示时不再触发金额非负 FAIL；净值勾稽按 `原值 - abs(累计折旧) - abs(减值准备)`；读取阶段过滤 `资产类别重分类`、合计/小计等非资产明细行。
+  - K.01：修复表2/表3横向并排模板读取；表3 check 可直接读取 0 值；表1期末合计不再被右侧 check 列误识别为 0；TB 区域锚点按标准顺序切分，避免表4差异被当作后推净值异常。
+  - 规则：表4折旧费用与利润表核对差异超过 SAD 且 Notes 写“差异小于 SAD”时输出 `FAIL`；超过 SAD 但有 Notes 时输出 `NEED_REVIEW`，由质检人员判断说明是否充分。
+  - Lead/汇总页：折旧方法/使用寿命“无变化”不再误报；折旧费用说明中的“无重大处置资产”不再被误判为“无重大波动”；减少/处置仅有方向无原因会提示；未启用 LLM 时，汇总页明显空泛的不执行理由（如仅小于 TE、仅无减值迹象）由规则层先给 WARN。
+  - Lead Notes：引导主表按行读取 `基于波动幅度判断，是否进一步调查？` 与 `基于定性考虑判断，是否进一步调查？` 两列；任一列为“是”时，该行必须填写 Notes 且下方异常波动分析区需有对应编号；两列均为“否”时可不填 Notes；两列空白/无法识别时退回金额+比例阈值兜底。
+  - 验证：`tests/rules -q --basetemp .pytest_tmp_rules` 140 通过；`tests/ingest/test_records_workbook.py tests/ingest/test_workbook_ingest.py -q --basetemp .pytest_tmp` 17 通过；`tests/report/test_workbook_pipeline.py tests/report/test_export_annotated_workbook.py -q --basetemp .pytest_tmp_report` 13 通过。实测 `...E锂原 - 测试0603.xlsx --no-llm`：issues 由 405 降至 14，FA list 批量误报消失，K.01 剩余 GL-008 `NEED_REVIEW` 与 GL-004 `FAIL`。
+- **汇总页识别与 LLM 规则语义复核修复（2026-06-03）**：
+  - 根因：`E锂原 - 测试0603.xlsx` 的汇总页真实表名为 `汇总 `（尾随空格）；名称识别命中 SUMMARY，但内容分类误判为 K.01 后推，导致 `ctx.summary=None`，AE-003/PSP 规则和汇总页 LLM 复核均未执行。
+  - ingest：`load_summary_from_workbook` 改为“名称明确命中汇总时优先作为汇总候选”，且手动指定 `汇总` 时可宽松匹配真实表名 `汇总 `。
+  - LLM：UI 文案改为“启用大模型规则语义复核”；汇总页 PSP 不执行理由的 LLM 输入新增 `workbook_context`，包含 Lead TE/SAD/CRA/TT/预期/波动表、K.01 后推摘要、TB/表4差异、新增/处置清单、跨表勾稽和工作表列表。
+  - 实测：真实底稿只读验证 `summary_source='汇总 '`、`program_count=12`；行15 处置测试“本期处置资产净值小于TE”输出 WARN；行22 减值测试“本期无减值迹象”输出 WARN。
+  - 验证：`tests/ingest/test_summary_sheet.py -q --basetemp .pytest_tmp_summary` 7 通过；`tests/ingest/test_summary_sheet.py tests/report/test_workbook_pipeline.py tests/llm/test_summary_psp_review.py -q --basetemp .pytest_tmp_summary_regression` 13 通过；`tests/llm -q --basetemp .pytest_tmp_llm_all` 24 通过。
 - **外链底稿单元格批注 + Comments 跳转（2026-06-02）**：
   - report：`export_annotated_workbook` 不再因 A3/外部链接跳过业务表批注；改用 OOXML 原位注入传统 Excel 批注，避免 `openpyxl.save()` 重写外链。
   - Comments：`Comments【归档前删除】`、`Comments【FA list】`、`QC_Locator` 的 Cell Ref./Navigate 可作为内部跳转索引，点击定位到对应业务表单元格（当前默认 B 列）。

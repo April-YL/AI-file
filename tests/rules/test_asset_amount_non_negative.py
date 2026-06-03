@@ -9,3 +9,13 @@ def test_negative_net_fail():
     issues = check_asset_amount_non_negative([record], ctx)
     assert len(issues) == 1
     assert issues[0].severity == Severity.FAIL
+
+
+def test_negative_accumulated_depreciation_is_allowed_for_credit_presentation():
+    ctx = ColumnContext(mapped_fields={"accumulated_depreciation", "asset_id"})
+    record = AssetRecord(
+        source_row=2,
+        asset_id="FA-TEST-001",
+        accumulated_depreciation="-100",
+    )
+    assert check_asset_amount_non_negative([record], ctx) == []

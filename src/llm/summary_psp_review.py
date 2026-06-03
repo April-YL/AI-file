@@ -6,11 +6,16 @@ from typing import Any
 
 import openpyxl
 
+from ingest.records import FaListDataset
 from ingest.summary_sheet import PspProgramRow, SummarySheetDataset
+from ingest.lead_sheet import LeadSheetDataset
+from ingest.rollforward_sheet import RollforwardSheetDataset
+from ingest.reconciliation import ReconciliationCheck
 from ingest.workbook_reader import read_worksheet_rows
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
 from rules.models import QcIssue, Severity
+from rules.parsing import parse_amount
 from rules.psp_completion import WaiverSemanticReview, normalize_execution_status
 from rules.psp_sheet_matcher import find_matching_sheet, rank_sheet_candidates
 
@@ -49,6 +54,8 @@ _SHEET_SYSTEM = """你是固定资产底稿索引匹配助手。根据汇总页�
 def review_waiver_reason_with_llm(
     row: PspProgramRow,
     config: LlmConfig,
+    *,
+    semantic_context: dict[str, Any] | None = None,
 ) -> WaiverSemanticReview | None:
     waiver = (row.waiver_reason or "").strip()
     if not waiver:
@@ -59,6 +66,7 @@ def review_waiver_reason_with_llm(
         "execution_status": row.execution_status,
         "waiver_reason": waiver,
         "notes": row.notes,
+        "workbook_context": semantic_context or {},
     }
     user = (
         "请判断该汇总页程序的不执行理由是否充分。返回 JSON：\n"
@@ -77,6 +85,153 @@ def review_waiver_reason_with_llm(
         rationale=str(out.get("rationale", "")).strip(),
         suggested_action=str(out.get("suggested_action", "")).strip(),
     )
+
+
+def build_waiver_semantic_context(
+    *,
+    lead: LeadSheetDataset | None = None,
+    rollforward: RollforwardSheetDataset | None = None,
+    addition_list: FaListDataset | None = None,
+    disposal_list: FaListDataset | None = None,
+    reconciliations: list[ReconciliationCheck] | None = None,
+    workbook_sheet_titles: list[str] | None = None,
+) -> dict[str, Any]:
+    """构造汇总页选否理由语义复核上下文，避免 LLM 只看单行文字。"""
+    context: dict[str, Any] = {}
+    if lead is not None:
+        context["lead"] = _lead_context(lead)
+    if rollforward is not None:
+        context["k01_rollforward"] = _rollforward_context(rollforward)
+    if addition_list is not None:
+        context["addition_list"] = _asset_list_context(addition_list)
+    if disposal_list is not None:
+        context["disposal_list"] = _asset_list_context(disposal_list)
+    if reconciliations:
+        context["reconciliations"] = [
+            c.to_dict() for c in reconciliations[:8]
+        ]
+    if workbook_sheet_titles:
+        context["workbook_sheets"] = workbook_sheet_titles[:80]
+    return context
+
+
+def _lead_context(lead: LeadSheetDataset) -> dict[str, Any]:
+    return {
+        "source_sheet": lead.source_sheet,
+        "materiality": [
+            {
+                "field_key": m.field_key,
+                "label": m.label,
+                "workpaper_value": m.workpaper_value,
+                "canvas_value": m.canvas_value,
+                "source_row": m.source_row,
+            }
+            for m in lead.materiality
+        ],
+        "basic_materiality_fields": [
+            {
+                "field_key": f.field_key,
+                "label": f.label,
+                "value": f.value,
+                "source_row": f.source_row,
+            }
+            for f in lead.basic_info_fields
+            if f.field_key in {"pm", "te", "sad"}
+        ],
+        "cra_tt_rows": [
+            {
+                "assertion": r.assertion,
+                "cra": r.cra,
+                "tt": r.tt,
+                "tt_overall": r.tt_overall,
+                "source_row": r.source_row,
+            }
+            for r in lead.cra_rows[:12]
+        ],
+        "expectations": [
+            {
+                "account_change": e.account_change,
+                "expectation": e.expectation,
+                "source_row": e.source_row,
+            }
+            for e in lead.expectations[:12]
+        ],
+        "movement_rows": [
+            {
+                "account_label": r.account_label,
+                "sheet_ref": r.sheet_ref,
+                "values": r.values,
+                "source_row": r.source_row,
+            }
+            for r in lead.movement_rows[:8]
+        ],
+        "fluctuation_notes": lead.fluctuation_notes,
+        "notes": lead.notes[:8],
+    }
+
+
+def _rollforward_context(rollforward: RollforwardSheetDataset) -> dict[str, Any]:
+    return {
+        "source_sheet": rollforward.source_sheet,
+        "has_movement_rows": rollforward.has_movement_rows,
+        "opening_totals": _decimal_dict(rollforward.opening_totals),
+        "ending_totals": _decimal_dict(rollforward.ending_totals),
+        "section_presence": rollforward.section_presence,
+        "section_evidence": rollforward.section_evidence,
+        "tb_reconciliation_detected": rollforward.tb_reconciliation_detected,
+        "tb_difference_values": [str(v) for v in rollforward.tb_difference_values[:8]],
+        "tb_notes_text": rollforward.tb_notes_text,
+        "table4_difference": (
+            str(rollforward.table4_difference)
+            if rollforward.table4_difference is not None
+            else None
+        ),
+        "table4_notes_text": rollforward.table4_notes_text,
+        "notes": rollforward.notes[:12],
+    }
+
+
+def _asset_list_context(dataset: FaListDataset) -> dict[str, Any]:
+    return {
+        "source_sheet": dataset.source_sheet,
+        "record_count": len(dataset.records),
+        "mapped_fields": [m.standard_field for m in dataset.mapped_fields],
+        "totals": {
+            field: total
+            for field in (
+                "original_value",
+                "accumulated_depreciation",
+                "impairment_provision",
+                "net_value",
+            )
+            if (total := _record_total(dataset, field)) is not None
+        },
+        "sample_rows": [
+            {
+                "source_row": r.source_row,
+                "asset_id": r.asset_id,
+                "asset_name": r.asset_name,
+                "original_value": r.original_value,
+                "accumulated_depreciation": r.accumulated_depreciation,
+                "net_value": r.net_value,
+            }
+            for r in dataset.records[:5]
+        ],
+    }
+
+
+def _record_total(dataset: FaListDataset, field: str) -> str | None:
+    total = None
+    for rec in dataset.records:
+        val = parse_amount(getattr(rec, field, None))
+        if val is None:
+            continue
+        total = val if total is None else total + val
+    return str(total) if total is not None else None
+
+
+def _decimal_dict(values: dict[str, Any]) -> dict[str, str]:
+    return {k: str(v) for k, v in values.items() if v is not None}
 
 
 def build_sheet_semantic_issues(

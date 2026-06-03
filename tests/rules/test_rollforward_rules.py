@@ -209,6 +209,27 @@ def test_rollforward_ingest_extracts_table2_and_table3_check_values():
     assert rf.table3_check_row == 8
 
 
+def test_rollforward_ingest_extracts_side_by_side_table2_table3_check():
+    rows = [
+        ("表1",),
+        ("固定资产类别", "设备", None, None, None, None, None, "合计"),
+        ("", "年末余额", 100, 10, 0, 90, None, 100, 10, 0, 90),
+        ("原值变动金额", "TB-原值", "差异"),
+        ("表2", None, None, None, None, None, None, "表3"),
+        (None, None, None, "汇总", None, None, None, "表2 check with 表1"),
+        (None, "固定资产类别", "原值", "累计折旧", "减值准备", "净值", None, "原值", "累计折旧", "减值准备", "净值"),
+        (None, "设备", 100, 10, 0, 90, None, 0, 0, 0, 0),
+        (None, "合计", 100, 10, 0, 90, None, 0, 0, 0, 0),
+        ("表4", "折旧费用与利润表科目核对"),
+    ]
+    rf = parse_rollforward_rows(rows, source_sheet="K.01 Agree SL to GL")
+    assert rf.ending_totals["original_value"] == Decimal("100")
+    assert rf.ending_totals["net_value"] == Decimal("90")
+    assert rf.table2_amount_count >= 4
+    assert rf.table3_check_values == [Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0")]
+    assert not all(v == 0 for v in rf.ending_totals.values() if v is not None)
+
+
 def test_rollforward_ingest_extracts_tb_check_and_notes():
     rows = [
         ("表1", "固定资产类别", "原值", "累计折旧", "净值"),
@@ -272,6 +293,21 @@ def test_rollforward_ingest_extracts_table4_depreciation_pl_check():
     assert rf.table4_difference_row == 10
     assert rf.table4_notes_text_present is True
     assert "分类口径" in (rf.table4_notes_text or "")
+
+
+def test_rollforward_depreciation_pl_reconciliation_fails_when_note_says_under_sad_but_diff_exceeds():
+    rf = _minimal_rf(
+        section_presence={"b5_table4_depreciation_pl": True},
+        table4_difference=Decimal("300"),
+        table4_difference_row=80,
+        table4_notes_text_present=True,
+        table4_notes_row=85,
+        table4_notes_text="差异小于SAD，不执行进一步程序",
+    )
+    issues = check_rollforward_depreciation_pl_reconciliation(rf, lead=_lead_with_sad("200"))
+    assert issues
+    assert issues[0].severity == Severity.FAIL
+    assert "超过 SAD" in issues[0].message
 
 
 def test_rollforward_abnormal_amounts_fail_accum_exceeds_original():
@@ -608,7 +644,7 @@ def test_rollforward_depreciation_pl_reconciliation_fails_without_note():
     assert "超过 SAD" in issue.message
 
 
-def test_rollforward_depreciation_pl_reconciliation_passes_with_note():
+def test_rollforward_depreciation_pl_reconciliation_needs_review_with_note():
     rf = _minimal_rf(
         section_presence={"b5_table4_depreciation_pl": True},
         table4_difference=Decimal("6"),
@@ -620,7 +656,8 @@ def test_rollforward_depreciation_pl_reconciliation_passes_with_note():
     issues = check_rollforward_depreciation_pl_reconciliation(
         rf, lead=_lead_with_sad("5")
     )
-    assert issues == []
+    assert issues
+    assert issues[0].severity == Severity.NEED_REVIEW
 
 
 def test_rollforward_depreciation_pl_reconciliation_needs_review_without_sad():

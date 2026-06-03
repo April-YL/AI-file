@@ -7,6 +7,7 @@ from ingest.records import (
     find_fa_list_sheets,
     load_fa_list_csv,
     load_fa_list_from_workbook,
+    parse_fa_list_rows,
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -63,3 +64,13 @@ def test_load_fa_list_from_workbook_no_fa_list(tmp_path: Path):
     dataset = load_fa_list_from_workbook(xlsx)
     assert dataset.records == []
     assert dataset.source_sheet == ""
+
+
+def test_parse_fa_list_rows_skips_reclassification_summary_rows():
+    rows = [
+        ("资产编号", "资产名称", "原值", "累计折旧", "净值"),
+        ("FA-TEST-001", "设备A", 100, -10, 90),
+        ("资产类别重分类", None, 0, 0, 0),
+    ]
+    dataset = parse_fa_list_rows(rows)
+    assert [r.asset_id for r in dataset.records] == ["FA-TEST-001"]

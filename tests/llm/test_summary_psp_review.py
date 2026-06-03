@@ -2,9 +2,17 @@ from unittest.mock import patch
 
 from openpyxl import Workbook
 
+from ingest.lead_sheet import LeadSheetDataset, MaterialityCapture
+from ingest.models import AssetRecord, FieldMapping
+from ingest.records import FaListDataset
+from ingest.rollforward_sheet import RollforwardSheetDataset
 from ingest.summary_sheet import PspProgramRow, SummarySheetDataset
 from llm.config import LlmConfig
-from llm.summary_psp_review import build_sheet_semantic_issues, review_waiver_reason_with_llm
+from llm.summary_psp_review import (
+    build_sheet_semantic_issues,
+    build_waiver_semantic_context,
+    review_waiver_reason_with_llm,
+)
 
 
 def _config() -> LlmConfig:
@@ -106,6 +114,79 @@ def test_review_waiver_reason_prompt_rejects_te_only_disposal_reason():
     assert "处置资产净值小于 TE" in system
     assert "不足以判断充分" in system
     assert '"waiver_reason": "本期处置资产净值小于TE。"' in user
+
+
+def test_review_waiver_reason_prompt_includes_workbook_context():
+    row = PspProgramRow(
+        procedure_name="K.02.2 处置测试",
+        sheet_ref="K.02.2 处置测试",
+        execution_status="否",
+        waiver_reason="本期处置资产净值小于TE。",
+        notes=None,
+        source_row=18,
+        is_psp=True,
+    )
+    rollforward = RollforwardSheetDataset(
+        source_file="case.xlsx",
+        source_sheet="K.01 Agree SL to GL",
+        header_row=None,
+        mapped_fields=[],
+        has_movement_rows=True,
+        tb_difference_values=[],
+        table4_difference=None,
+    )
+    disposal = FaListDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.2a 处置选样输出",
+        mapped_fields=[
+            FieldMapping("asset_id", "资产编号", 1),
+            FieldMapping("net_value", "账面净值", 2),
+        ],
+        records=[
+            AssetRecord(
+                source_row=5,
+                asset_id="FA-TEST-001",
+                asset_name="处置设备",
+                net_value="120000",
+            )
+        ],
+    )
+    lead = LeadSheetDataset(
+        source_file="case.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        materiality=[
+            MaterialityCapture(field_key="te", label="TE", workpaper_value="1000000"),
+            MaterialityCapture(field_key="sad", label="SAD", workpaper_value="50000"),
+        ],
+    )
+    context = build_waiver_semantic_context(
+        lead=lead,
+        rollforward=rollforward,
+        disposal_list=disposal,
+        workbook_sheet_titles=["汇总", "K.01 Agree SL to GL", "K.02.2a 处置选样输出"],
+    )
+
+    with patch(
+        "llm.summary_psp_review.chat_completion_json",
+        return_value={
+            "adequacy": "insufficient",
+            "rationale": "处置清单已有记录，仅说明小于TE不足以支持不执行。",
+            "suggested_action": "补充TT/SAD及性质风险判断，或执行处置测试。",
+        },
+    ) as mock_call:
+        res = review_waiver_reason_with_llm(
+            row,
+            _config(),
+            semantic_context=context,
+        )
+
+    assert res is not None
+    user = mock_call.call_args.kwargs["user"]
+    assert '"workbook_context"' in user
+    assert '"has_movement_rows": true' in user
+    assert "K.02.2a 处置选样输出" in user
+    assert '"record_count": 1' in user
+    assert '"field_key": "sad"' in user
 
 
 def test_build_sheet_semantic_issues_for_weak_match(tmp_path):

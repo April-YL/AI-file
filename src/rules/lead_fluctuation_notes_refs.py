@@ -55,6 +55,13 @@ def _fallback_note_ref(text: str | None) -> set[str]:
     return refs
 
 
+def _is_negative(value: str | None) -> bool:
+    if is_blank(value):
+        return False
+    n = re.sub(r"[\s_\-]", "", str(value).strip().lower())
+    return n in ("否", "no", "n", "false", "0", "不需", "不需要", "无")
+
+
 def _row_requires_note(
     row: LeadMovementRow,
     *,
@@ -62,9 +69,16 @@ def _row_requires_note(
     vol_amount: Decimal | None,
     vol_percent: Decimal | None,
 ) -> bool:
+    investigate_values = [
+        row.values.get(role)
+        for role in _INVESTIGATE_ROLES
+        if role in roles
+    ]
     for role in _INVESTIGATE_ROLES:
         if role in roles and is_affirmative(row.values.get(role)):
             return True
+    if investigate_values and all(_is_negative(v) for v in investigate_values):
+        return False
 
     movement = movement_amount_for_row(row.values)
     movement_pct = _parse_percent(row.values.get("movement_pct"))

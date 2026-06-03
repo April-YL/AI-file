@@ -55,6 +55,37 @@ class WaiverSemanticReview:
 WaiverReasonReviewer = Callable[[PspProgramRow], WaiverSemanticReview | None]
 
 
+def _rule_review_waiver_reason(row: PspProgramRow) -> WaiverSemanticReview | None:
+    waiver = _norm_token(row.waiver_reason)
+    if not waiver:
+        return None
+    proc = _norm_token(f"{row.procedure_name or ''} {row.sheet_ref or ''}")
+    empty_conclusions = ("无需执行", "不执行", "不适用", "na", "n/a", "金额小", "不重大")
+    if waiver in empty_conclusions or any(waiver == _norm_token(x) for x in empty_conclusions):
+        return WaiverSemanticReview(
+            adequacy="insufficient",
+            rationale="理由仅为结论，未说明业务原因、金额依据、性质风险或替代程序。",
+            suggested_action="补充可复核的不执行依据，例如金额与 TE/TT/SAD 的关系、性质风险判断或替代程序。",
+        )
+    if "减值" in proc and "无减值迹象" in waiver:
+        has_process = any(x in waiver for x in ("识别", "评估", "判断", "支持", "canvas", "swp", "检查"))
+        if not has_process:
+            return WaiverSemanticReview(
+                adequacy="insufficient",
+                rationale="减值测试理由仅说明“无减值迹象”，未说明减值迹象识别程序、判断原因或支持文件。",
+                suggested_action="补充减值迹象识别过程、支持文件或 Canvas/SWP 减值评估索引。",
+            )
+    if ("处置" in proc or "新增" in proc) and ("小于te" in waiver or "低于te" in waiver):
+        has_tt_nature = ("tt" in waiver and any(x in waiver for x in ("性质", "异常", "单项"))) or "sad" in waiver
+        if not has_tt_nature:
+            return WaiverSemanticReview(
+                adequacy="insufficient",
+                rationale="理由仅说明金额小于 TE，未同时说明单项 TT/性质风险判断，也未说明金额小于 SAD。",
+                suggested_action="补充总体金额、单项 TT、性质异常项和/或 SAD 口径，说明为何可不执行该测试。",
+            )
+    return None
+
+
 def _should_skip_row(row: PspProgramRow) -> bool:
     name = (row.procedure_name or "").strip()
     if not name or name in _SKIP_PROCEDURE_NAMES:
@@ -315,37 +346,57 @@ def _check_program_row(
                         llm_review_type="PSP不执行理由充分性",
                     )
                 )
-        elif len(waiver) < _MIN_WAIVER_LEN:
-            issues.append(
-                QcIssue(
-                    asset_id=None,
-                    rule_id=RULE_ID,
-                    field="waiver_reason",
-                    severity=Severity.WARN,
-                    message=f"程序「{label}」不执行理由过短，建议补充充分说明",
-                    suggestion="补充与审计准则、项目风险相匹配的拒绝理由",
-                    procedure_code="SUMMARY",
-                    source_sheet=source_sheet,
-                    source_row=row.source_row,
-                )
-            )
         else:
-            issues.append(
-                QcIssue(
-                    asset_id=None,
-                    rule_id=RULE_ID,
-                    field="waiver_reason",
-                    severity=Severity.NEED_REVIEW,
-                    message=(
-                        f"程序「{label}」标记为不执行，但未启用语义复核，"
-                        "需人工判断拒绝执行理由是否充分合理"
-                    ),
-                    suggestion="启用 LLM 语义复核（--llm）或由 reviewer 人工复核理由充分性",
-                    procedure_code="SUMMARY",
-                    source_sheet=source_sheet,
-                    source_row=row.source_row,
+            rule_reviewed = _rule_review_waiver_reason(row)
+            if rule_reviewed is not None:
+                issues.append(
+                    QcIssue(
+                        asset_id=None,
+                        rule_id=RULE_ID,
+                        field="waiver_reason",
+                        severity=Severity.WARN,
+                        message=(
+                            f"程序「{label}」不执行理由语义上不足；"
+                            f"规则提示：{rule_reviewed.rationale}"
+                        ),
+                        suggestion=rule_reviewed.suggested_action
+                        or "补充与审计准则、项目风险和替代程序相匹配的不执行说明",
+                        procedure_code="SUMMARY",
+                        source_sheet=source_sheet,
+                        source_row=row.source_row,
+                    )
                 )
-            )
+            elif len(waiver) < _MIN_WAIVER_LEN:
+                issues.append(
+                    QcIssue(
+                        asset_id=None,
+                        rule_id=RULE_ID,
+                        field="waiver_reason",
+                        severity=Severity.WARN,
+                        message=f"程序「{label}」不执行理由过短，建议补充充分说明",
+                        suggestion="补充与审计准则、项目风险相匹配的拒绝理由",
+                        procedure_code="SUMMARY",
+                        source_sheet=source_sheet,
+                        source_row=row.source_row,
+                    )
+                )
+            else:
+                issues.append(
+                    QcIssue(
+                        asset_id=None,
+                        rule_id=RULE_ID,
+                        field="waiver_reason",
+                        severity=Severity.NEED_REVIEW,
+                        message=(
+                            f"程序「{label}」标记为不执行，但未启用语义复核，"
+                            "需人工判断拒绝执行理由是否充分合理"
+                        ),
+                        suggestion="启用 LLM 语义复核（--llm）或由 reviewer 人工复核理由充分性",
+                        procedure_code="SUMMARY",
+                        source_sheet=source_sheet,
+                        source_row=row.source_row,
+                    )
+                )
         return issues
 
     if status == "ambiguous":

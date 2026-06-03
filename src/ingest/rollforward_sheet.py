@@ -365,7 +365,7 @@ def _detect_k01_sections(
         ("原值变动金额", "累计折旧变动金额", "减值准备变动金额", "TB-原值", "TB-累计折旧", "差异")
     )
     presence["b2_movement_tb_reconciliation"] = has_movement_rows or any(
-        token.startswith("TB-") or token == "差异" for token in b2_hits
+        token.startswith("TB-") or "变动金额" in token for token in b2_hits
     )
     evidence["b2_movement_tb_reconciliation"] = b2_hits
 
@@ -412,12 +412,14 @@ def _anchor_hits_in_row(row: tuple[Any, ...], section_id: str) -> list[str]:
             if t in ("年初余额", "年末余额", "账面数", "审定数"):
                 hits.append(t)
     elif section_id == "b2_movement_tb_reconciliation":
+        row_blob = " ".join(texts)
+        has_tb_context = "TB" in row_blob or "试算表" in row_blob or "变动金额" in row_blob
         for t in texts:
             if "原值变动金额" in t or "累计折旧变动金额" in t:
                 hits.append(t)
             if t.startswith("TB-"):
                 hits.append(t)
-            if t == "变动" or t == "差异":
+            if t == "变动" or (t == "差异" and has_tb_context):
                 hits.append(t)
     elif section_id == "b3_table2_fa_summary":
         for t in texts:
@@ -482,9 +484,19 @@ def _build_section_regions(
         seen_rows.add(row_no)
         unique_ordered.append((row_no, sid))
 
+    first_by_section: list[tuple[int, str]] = []
+    previous_anchor = 0
+    for sid in K01_SECTION_IDS:
+        candidates = sorted(row_no for row_no in anchor_rows.get(sid, []) if row_no > previous_anchor)
+        if not candidates:
+            continue
+        anchor_row = candidates[0]
+        first_by_section.append((anchor_row, sid))
+        previous_anchor = anchor_row
+
     regions: dict[str, K01SectionRegion] = {}
-    for i, (anchor_row, sid) in enumerate(unique_ordered):
-        end_row = unique_ordered[i + 1][0] - 1 if i + 1 < len(unique_ordered) else row_count
+    for i, (anchor_row, sid) in enumerate(first_by_section):
+        end_row = first_by_section[i + 1][0] - 1 if i + 1 < len(first_by_section) else row_count
         hits = _anchor_hits_in_row(rows[anchor_row - 1], sid) if anchor_row <= len(rows) else []
         regions[sid] = K01SectionRegion(
             section_id=sid,
@@ -596,6 +608,56 @@ def _numeric_values_in_region(
             if amt is not None:
                 values.append((r_idx + 1, amt))
     return values
+
+
+def _extract_side_by_side_table2_table3(
+    rows: list[tuple[Any, ...]],
+) -> tuple[int, list[Decimal], int | None]:
+    """读取表2/表3横向并排的模板。
+
+    常见版式：同一行左侧为“表2”，右侧为“表3”；下方左侧是 FA list
+    分类汇总金额，右侧是“表2 check with 表1”差异列。
+    """
+    for r_idx, row in enumerate(rows):
+        table2_col: int | None = None
+        table3_col: int | None = None
+        for c_idx, val in enumerate(row[:40]):
+            text = _cell_str(val)
+            if text == "表2":
+                table2_col = c_idx + 1
+            elif text == "表3":
+                table3_col = c_idx + 1
+        if table2_col is None or table3_col is None or table3_col <= table2_col:
+            continue
+
+        start = r_idx + 1
+        end = min(len(rows), start + 20)
+        table2_values: list[Decimal] = []
+        table3_values_by_row: list[tuple[int, Decimal]] = []
+        total_row_values: list[tuple[int, Decimal]] = []
+        for rr in range(start, end):
+            data = rows[rr]
+            if data is None:
+                continue
+            row_no = rr + 1
+            for c in range(table2_col + 1, table3_col - 1):
+                amt = _amount_at_col(data, c)
+                if amt is not None:
+                    table2_values.append(amt)
+            row_table3_values: list[Decimal] = []
+            for c in range(table3_col, min(table3_col + 4, len(data)) + 1):
+                amt = _amount_at_col(data, c)
+                if amt is not None:
+                    row_table3_values.append(amt)
+            for amt in row_table3_values:
+                table3_values_by_row.append((row_no, amt))
+            if row_table3_values and _row_has_total_label(data):
+                total_row_values.extend((row_no, amt) for amt in row_table3_values)
+
+        chosen = total_row_values or table3_values_by_row
+        return len(table2_values), [v for _, v in chosen], chosen[0][0] if chosen else None
+
+    return 0, [], None
 
 
 def _text_cells_in_region(
@@ -1005,6 +1067,11 @@ def _binding_totals_have_values(totals: dict[str, Decimal | None]) -> bool:
     return any(v is not None for v in totals.values())
 
 
+def _totals_all_zero(totals: dict[str, Decimal | None]) -> bool:
+    vals = [v for v in totals.values() if v is not None]
+    return bool(vals) and all(v == 0 for v in vals)
+
+
 def _row_plausible_total(
     row: tuple[Any, ...],
     col_by_field: dict[str, int],
@@ -1088,6 +1155,14 @@ def parse_rollforward_rows(
     table2_amount_count = len(table2_values)
     table3_check_values = [v for _, v in table3_values_with_rows]
     table3_check_row = table3_values_with_rows[0][0] if table3_values_with_rows else None
+    side_table2_count, side_table3_values, side_table3_row = _extract_side_by_side_table2_table3(rows)
+    if side_table2_count:
+        table2_amount_count = max(table2_amount_count, side_table2_count)
+        notes.append("k01_table2_side_by_side_amounts")
+    if side_table3_values:
+        table3_check_values = side_table3_values
+        table3_check_row = side_table3_row
+        notes.append("k01_table3_side_by_side_check_values")
     if table2_amount_count:
         notes.append(f"k01_table2_amounts:{table2_amount_count}")
     if table3_check_values:
@@ -1195,6 +1270,15 @@ def parse_rollforward_rows(
             )
             if _binding_totals_have_values(ending):
                 notes.append("ending_from_total_row_unknown_binding")
+
+    if (
+        side_table3_values
+        and _binding_totals_have_values(opening)
+        and _totals_all_zero(ending)
+    ):
+        ending = dict(opening)
+        opening = {}
+        notes.append("ending_from_left_table_when_right_side_is_check")
 
     if not _binding_totals_have_values(ending):
         detail = [

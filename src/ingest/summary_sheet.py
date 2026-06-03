@@ -8,7 +8,7 @@ from typing import Any, Literal
 import openpyxl
 
 from ingest.models import SheetKind
-from ingest.sheet_classifier import classify_sheet
+from ingest.sheet_classifier import classify_sheet, score_by_name
 from ingest.workbook_reader import read_worksheet_rows
 
 SummaryLayout = Literal["swp", "classic"]
@@ -466,6 +466,10 @@ def find_summary_sheets(
     try:
         for ws in wb.worksheets:
             rows = read_worksheet_rows(ws, max_rows=max_rows)
+            name_kind, name_score, _ = score_by_name(ws.title)
+            if name_kind == SheetKind.SUMMARY and name_score >= 0.75:
+                found.append((ws.title, min(0.98, name_score + 0.1), rows))
+                continue
             kind, confidence, *_ = classify_sheet(ws.title, rows)
             if kind == SheetKind.SUMMARY:
                 found.append((ws.title, confidence, rows))
@@ -485,16 +489,18 @@ def load_summary_from_workbook(
     candidates = find_summary_sheets(path, max_rows=max_rows)
 
     if sheet_name:
-        match = next((c for c in candidates if c[0] == sheet_name), None)
+        wanted = _norm_sheet_name(sheet_name)
+        match = next((c for c in candidates if _norm_sheet_name(c[0]) == wanted), None)
         if match is None:
             wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
             try:
-                ws = wb[sheet_name]
+                real_name = _resolve_sheet_name(wb.sheetnames, sheet_name)
+                ws = wb[real_name]
                 rows = read_worksheet_rows(ws, max_rows=max_rows)
             finally:
                 wb.close()
             return parse_summary_rows(
-                rows, source_file=str(path), source_sheet=sheet_name
+                rows, source_file=str(path), source_sheet=real_name
             )
         name, _, rows = match
         return parse_summary_rows(rows, source_file=str(path), source_sheet=name)
@@ -511,3 +517,17 @@ def load_summary_from_workbook(
         notes=["未识别到名称或内容像「汇总」的工作表。"],
         layout=None,
     )
+
+
+def _norm_sheet_name(name: str) -> str:
+    return re.sub(r"\s+", "", str(name).strip().lower())
+
+
+def _resolve_sheet_name(sheet_names: list[str], requested: str) -> str:
+    if requested in sheet_names:
+        return requested
+    wanted = _norm_sheet_name(requested)
+    for name in sheet_names:
+        if _norm_sheet_name(name) == wanted:
+            return name
+    raise KeyError(f"Worksheet {requested} does not exist.")

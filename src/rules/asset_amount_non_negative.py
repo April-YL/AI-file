@@ -8,7 +8,6 @@ RULE_ID = "asset_amount_non_negative"
 
 _AMOUNT_FIELDS = (
     ("original_value", "原值"),
-    ("accumulated_depreciation", "累计折旧"),
     ("impairment_provision", "减值准备"),
     ("net_value", "净值"),
 )

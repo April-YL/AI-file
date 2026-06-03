@@ -101,6 +101,83 @@ def test_fluctuation_threshold_triggers_when_amount_and_percent_exceed():
     assert any(i.field == "movement_notes" and i.severity == Severity.FAIL for i in issues)
 
 
+def test_fluctuation_investigation_columns_control_note_requirement():
+    lead = LeadSheetDataset(
+        source_file="t.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        volatility=VolatilityThreshold(amount="100", percent="10%"),
+        movement_bindings=[
+            LeadMovementColumnBinding(
+                role="investigate_quantitative",
+                source_header="基于波动幅度判断，是否进一步调查？",
+                column_index=12,
+            ),
+            LeadMovementColumnBinding(
+                role="investigate_qualitative",
+                source_header="基于定性考虑判断，是否进一步调查？",
+                column_index=13,
+            ),
+            LeadMovementColumnBinding(role="notes", source_header="Notes", column_index=14),
+        ],
+        movement_rows=[
+            LeadMovementRow(
+                account_label="原值",
+                sheet_ref="K.01",
+                values={
+                    "movement_amount": "500",
+                    "movement_pct": "20%",
+                    "investigate_quantitative": "否",
+                    "investigate_qualitative": "否",
+                    "notes": "",
+                },
+                source_row=49,
+            )
+        ],
+    )
+    assert check_lead_fluctuation_notes_refs(lead) == []
+
+    lead.movement_rows[0].values["investigate_qualitative"] = "是"
+    issues = check_lead_fluctuation_notes_refs(lead)
+    assert any(i.field == "movement_notes" and i.severity == Severity.FAIL for i in issues)
+
+
+def test_fluctuation_investigation_blank_cells_fall_back_to_threshold():
+    lead = LeadSheetDataset(
+        source_file="t.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        volatility=VolatilityThreshold(amount="100", percent="10%"),
+        movement_bindings=[
+            LeadMovementColumnBinding(
+                role="investigate_quantitative",
+                source_header="基于波动幅度判断，是否进一步调查？",
+                column_index=12,
+            ),
+            LeadMovementColumnBinding(
+                role="investigate_qualitative",
+                source_header="基于定性考虑判断，是否进一步调查？",
+                column_index=13,
+            ),
+            LeadMovementColumnBinding(role="notes", source_header="Notes", column_index=14),
+        ],
+        movement_rows=[
+            LeadMovementRow(
+                account_label="原值",
+                sheet_ref="K.01",
+                values={
+                    "movement_amount": "500",
+                    "movement_pct": "20%",
+                    "investigate_quantitative": "",
+                    "investigate_qualitative": "",
+                    "notes": "",
+                },
+                source_row=49,
+            )
+        ],
+    )
+    issues = check_lead_fluctuation_notes_refs(lead)
+    assert any(i.field == "movement_notes" and i.severity == Severity.FAIL for i in issues)
+
+
 def test_expectation_basis_warns_when_all_expectations_are_trivial():
     lead = LeadSheetDataset(
         source_file="t.xlsx",
@@ -112,6 +189,31 @@ def test_expectation_basis_warns_when_all_expectations_are_trivial():
     )
     issues = check_lead_expectation_basis_present(lead)
     assert any(i.rule_id == "lead_expectation_basis_present" and i.severity == Severity.WARN for i in issues)
+
+
+def test_expectation_basis_warns_when_disposal_direction_has_no_reason():
+    lead = LeadSheetDataset(
+        source_file="t.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        expectations=[
+            ExpectationRow(account_change="减少", expectation="预计本期存在处置变动。", source_row=29),
+            ExpectationRow(account_change="折旧方法", expectation="直线法，预计本年较上年无变化。", source_row=32),
+        ],
+    )
+    issues = check_lead_expectation_basis_present(lead)
+    assert any("减少" in i.message for i in issues)
+
+
+def test_expectation_basis_allows_depreciation_policy_no_change():
+    lead = LeadSheetDataset(
+        source_file="t.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        expectations=[
+            ExpectationRow(account_change="折旧方法", expectation="直线法，预计本年较上年无变化。", source_row=32),
+            ExpectationRow(account_change="使用寿命变化", expectation="折旧政策未发生变化，预计使用寿命不会发生变化。", source_row=34),
+        ],
+    )
+    assert check_lead_expectation_basis_present(lead) == []
 
 
 def test_expectation_vs_movement_marks_review_when_no_change_expectation_conflicts_with_threshold():
@@ -158,6 +260,30 @@ def test_expectation_vs_movement_does_not_trigger_on_amount_only():
     )
     issues = check_lead_expectation_vs_movement_review(lead)
     assert issues == []
+
+
+def test_expectation_vs_movement_ignores_no_major_disposal_context():
+    lead = LeadSheetDataset(
+        source_file="t.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        expectations=[
+            ExpectationRow(
+                account_change="折旧费用",
+                expectation="折旧方法和使用寿命未变化，本年新增设备投入使用，且无重大处置资产，预计累计折旧增加。",
+                source_row=33,
+            ),
+        ],
+        volatility=VolatilityThreshold(amount="100", percent="10%"),
+        movement_rows=[
+            LeadMovementRow(
+                account_label="累计折旧",
+                sheet_ref="K.01",
+                values={"movement_amount": "500", "movement_pct": "20%"},
+                source_row=50,
+            )
+        ],
+    )
+    assert check_lead_expectation_vs_movement_review(lead) == []
 
 
 def test_adjustment_internal_consistency_fails_when_main_adjustment_has_no_summary():

@@ -294,6 +294,40 @@ def test_waiver_semantic_reviewer_controls_severity():
     )
 
 
+def test_waiver_rule_flags_te_only_disposal_reason_without_llm():
+    rows = [
+        PspProgramRow(
+            procedure_name="K.02.2 处置测试",
+            sheet_ref="K.02.2",
+            execution_status="否",
+            waiver_reason="本期处置资产净值小于TE。",
+            notes=None,
+            source_row=16,
+            is_psp=False,
+        ),
+    ]
+    issues = check_psp_completion(_dataset(rows))
+    assert any(i.field == "waiver_reason" and i.severity == Severity.WARN for i in issues)
+    assert "TE" in issues[0].message
+
+
+def test_waiver_rule_flags_impairment_reason_without_process():
+    rows = [
+        PspProgramRow(
+            procedure_name="K.04 固定资产减值",
+            sheet_ref="K.04",
+            execution_status="否",
+            waiver_reason="无减值迹象",
+            notes=None,
+            source_row=22,
+            is_psp=False,
+        ),
+    ]
+    issues = check_psp_completion(_dataset(rows))
+    assert any(i.field == "waiver_reason" and i.severity == Severity.WARN for i in issues)
+    assert "减值迹象" in issues[0].message
+
+
 def test_template_completeness_allows_sap_or_tod():
     rows = [
         PspProgramRow(

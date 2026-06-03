@@ -32,7 +32,7 @@ st.set_page_config(
 )
 
 # 规则/ingest 变更时递增，避免 @st.cache_data 返回旧质检结果。
-_QC_CACHE_VERSION = "20260602-review-source-labels"
+_QC_CACHE_VERSION = "20260603-llm-rule-semantic-review"
 
 
 def _inject_style() -> None:
@@ -472,9 +472,9 @@ with st.sidebar:
     if st.button("清除质检缓存", help="规则更新后若结果未变，清缓存后重新运行。"):
         st.cache_data.clear()
         st.success("已清除缓存")
-    use_llm = st.checkbox("启用大模型增强", value=False)
+    use_llm = st.checkbox("启用大模型规则语义复核", value=False)
     if use_llm:
-        st.info("LLM 只辅助语义复核和摘要，不覆盖规则 severity。")
+        st.info("LLM 将参与汇总页/Lead 等语义类规则复核，并生成摘要；不覆盖确定性规则 severity。")
     with st.expander("高级：指定工作表名称"):
         fa_sheet = st.text_input("FA list 表名", "")
         summary_sheet = st.text_input("汇总表名", "")

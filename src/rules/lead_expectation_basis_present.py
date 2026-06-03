@@ -10,15 +10,40 @@ RULE_ID = "lead_expectation_basis_present"
 
 _TRIVIAL_EXPECTATION_PATTERNS = (
     "无异常",
-    "无重大",
+    "无重大变化",
+    "无重大波动",
     "无变化",
     "无波动",
     "合理",
-    "正常",
     "不适用",
     "n/a",
     "na",
 )
+
+_POLICY_ESTIMATE_LABELS = ("折旧方法", "使用寿命", "折旧政策", "会计估计")
+_DIRECTION_ONLY_LABELS = ("新增", "减少", "处置", "在建工程转入", "转让", "外汇", "其他调整")
+_REASON_HINTS = (
+    "因为",
+    "由于",
+    "为了",
+    "满足",
+    "客户需求",
+    "生产",
+    "经营",
+    "业务",
+    "替换",
+    "取代",
+    "报废",
+    "出售",
+    "搬迁",
+    "更新",
+    "达到使用状态",
+    "转固",
+    "政策",
+    "合同",
+    "计划",
+)
+_DIRECTION_HINTS = ("预计", "存在", "增加", "减少", "处置", "新增", "转入", "转固")
 
 
 def _compact(text: str | None) -> str:
@@ -34,12 +59,33 @@ def _looks_trivial(text: str | None) -> bool:
     return any(pattern in compact for pattern in _TRIVIAL_EXPECTATION_PATTERNS)
 
 
+def _is_policy_no_change_row(label: str | None, text: str | None) -> bool:
+    blob = _compact(f"{label or ''}{text or ''}")
+    return any(x in blob for x in _POLICY_ESTIMATE_LABELS) and any(
+        x in blob for x in ("无变化", "未发生变化", "不会发生变化", "较上年无变化")
+    )
+
+
+def _direction_without_reason(label: str | None, text: str | None) -> bool:
+    blob = _compact(f"{label or ''}{text or ''}")
+    if not any(x in blob for x in _DIRECTION_ONLY_LABELS):
+        return False
+    if not any(x in blob for x in _DIRECTION_HINTS):
+        return False
+    return not any(x in blob for x in _REASON_HINTS)
+
+
 def check_lead_expectation_basis_present(lead: LeadSheetDataset | None) -> list[QcIssue]:
     """Weak check: expectation rows should include some basis, not only a bare conclusion."""
     if lead is None or not lead.source_sheet or not lead.expectations:
         return []
 
-    weak_rows = [row for row in lead.expectations if _looks_trivial(row.expectation)]
+    weak_rows = [
+        row
+        for row in lead.expectations
+        if not _is_policy_no_change_row(row.account_change, row.expectation)
+        and (_looks_trivial(row.expectation) or _direction_without_reason(row.account_change, row.expectation))
+    ]
     if not weak_rows:
         return []
 

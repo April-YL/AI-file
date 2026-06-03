@@ -118,6 +118,11 @@ def _check_detail_record(
     rollforward: RollforwardSheetDataset,
     record: AssetRecord,
 ) -> list[QcIssue]:
+    b1 = rollforward.section_regions.get("b1_bkd_main_table")
+    if b1 and b1.start_row and b1.end_row and record.source_row:
+        if record.source_row < b1.start_row or record.source_row > b1.end_row:
+            return []
+
     mapped = {m.standard_field for m in rollforward.mapped_fields}
     if not mapped:
         mapped = {"original_value", "accumulated_depreciation", "net_value"}
