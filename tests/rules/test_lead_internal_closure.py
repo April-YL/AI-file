@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from ingest.lead_sheet import (
     AdjustmentSummaryRow,
+    CraAssertionRow,
     ExpectationRow,
+    LeadBasicInfoField,
     LeadMovementColumnBinding,
     LeadMovementRow,
     LeadSheetDataset,
+    MaterialityCapture,
     VolatilityThreshold,
 )
 from rules.lead_adjustment_internal_consistency import (
@@ -16,8 +19,11 @@ from rules.lead_expectation_vs_movement_review import (
     check_lead_expectation_vs_movement_review,
 )
 from rules.lead_fluctuation_notes_refs import check_lead_fluctuation_notes_refs
+from rules.lead_required_fields import check_lead_required_fields
 from rules.lead_runner import LEAD_RULE_IDS, run_lead_rules
+from rules.materiality_consistency import check_materiality_consistency
 from rules.models import Severity
+from rules.risk_threshold_consistency import check_risk_threshold_consistency
 from rules.registry import attach_rule_metadata
 
 
@@ -54,6 +60,50 @@ def _lead_with_notes() -> LeadSheetDataset:
 def test_fluctuation_notes_refs_warn_when_main_ref_missing_from_notes_block():
     issues = check_lead_fluctuation_notes_refs(_lead_with_notes())
     assert any(i.rule_id == "lead_fluctuation_notes_refs" and i.severity == Severity.WARN for i in issues)
+
+
+def test_lead_reference_rules_include_source_rows_for_comments():
+    lead = LeadSheetDataset(
+        source_file="t.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        basic_info_fields=[
+            # GAAP label exists at row 7 but value is blank; Comments should locate row 7.
+            LeadBasicInfoField(
+                field_key="gaap",
+                label="适用会计准则",
+                value=None,
+                source_row=7,
+                source_col=None,
+            ),
+            LeadBasicInfoField(
+                field_key="te",
+                label="TE",
+                value="4000000",
+                source_row=5,
+                source_col=3,
+            ),
+        ],
+        materiality=[
+            MaterialityCapture(
+                field_key="te",
+                label="TE",
+                workpaper_value="4000000",
+                source_row=5,
+            )
+        ],
+        cra_rows=[
+            CraAssertionRow(
+                assertion="存在",
+                cra="Minimal",
+                tt="100",
+                source_row=14,
+            )
+        ],
+    )
+    required = check_lead_required_fields(lead)
+    assert any(i.field == "gaap" and i.source_row == 7 for i in required)
+    assert check_materiality_consistency(lead)[0].source_row == 5
+    assert check_risk_threshold_consistency(lead)[0].source_row == 14
 
 
 def test_fluctuation_notes_refs_fail_when_triggered_row_has_no_note_ref():
@@ -325,6 +375,37 @@ def test_adjustment_internal_consistency_warns_when_summary_has_no_main_adjustme
         and i.severity == Severity.WARN
         for i in issues
     )
+
+
+def test_adjustment_internal_consistency_ignores_no_adjustment_conclusion():
+    lead = LeadSheetDataset(
+        source_file="t.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        adjustment_rows=[
+            AdjustmentSummaryRow(
+                adjustment_type="本年度不涉及审计调整。",
+                source_row=67,
+                raw_cells=[None, "本年度不涉及审计调整。", None],
+            )
+        ],
+    )
+    issues = check_lead_adjustment_internal_consistency(lead)
+    assert issues == []
+
+
+def test_adjustment_internal_consistency_ignores_te_sad_note():
+    lead = LeadSheetDataset(
+        source_file="t.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        adjustment_rows=[
+            AdjustmentSummaryRow(
+                adjustment_type="NB：执行阶段的TE和SAD采用执行阶段口径，结果未见异常。",
+                source_row=69,
+                raw_cells=[None, "NB：执行阶段的TE和SAD采用执行阶段口径，结果未见异常。", None],
+            )
+        ],
+    )
+    assert check_lead_adjustment_internal_consistency(lead) == []
 
 
 def test_new_lead_rules_registered_and_metadata_attached():

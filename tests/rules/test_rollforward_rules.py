@@ -254,6 +254,26 @@ def test_rollforward_ingest_extracts_tb_check_and_notes():
     assert "重分类影响" in (rf.tb_notes_text or "")
 
 
+def test_rollforward_ingest_does_not_use_distant_table4_notes_as_tb_notes():
+    rows = [()] * 90
+    rows[0] = ("表1", "固定资产类别", "原值", "累计折旧", "净值")
+    rows[1] = ("", "合计", 100, 10, 90)
+    rows[34] = (None, None, "累计折旧变动金额", "本年VS上年", 10)
+    rows[41] = (None, "TB-原值", None, None, 100)
+    rows[42] = (None, "差异", None, None, 3000000, None, None, 0, None, None, 0, None, None, 0, None, None, 0, None, None, 0, None, None, 0, None, None, 0, None, None, 3000000)
+    rows[76] = (None, "表4", "折旧费用与利润表科目核对")
+    rows[79] = (None, "K1", None, "TB", "累计折旧科目-本年计提", 65904751)
+    rows[80] = (None, None, None, None, "差异", -3001537)
+    rows[83] = (None, "Notes")
+    rows[84] = (None, "将固定资产本年折旧与利润表相关科目金额核对，差异小于SAD，不执行进一步程序")
+
+    rf = parse_rollforward_rows(rows, source_sheet="K.01 Agree SL to GL")
+    assert rf.tb_reconciliation_detected is True
+    assert rf.tb_notes_text_present is False
+    cells = {d["cell"] for d in rf.tb_difference_details if d["value"].startswith("3000000")}
+    assert {"E43", "AC43"}.issubset(cells)
+
+
 def test_rollforward_ingest_does_not_treat_movement_only_as_reliable_tb_check():
     rows = [
         ("表1", "固定资产类别", "原值", "累计折旧", "净值"),
@@ -555,6 +575,30 @@ def test_rollforward_difference_over_sad_fails_when_no_note():
     assert issue.source_row == 8
     assert "超过 SAD" in issue.message
     assert "未读取到 Notes" in issue.message
+
+
+def test_rollforward_difference_over_sad_fails_when_material_cells_have_no_note_marker():
+    rf = _minimal_rf(
+        section_presence={"b2_movement_tb_reconciliation": True},
+        tb_reconciliation_detected=True,
+        tb_difference_values=[Decimal("6"), Decimal("7")],
+        tb_difference_details=[
+            {"row": 43, "column": 5, "cell": "E43", "value": "6", "note_marker": None},
+            {"row": 43, "column": 29, "cell": "AC43", "value": "7", "note_marker": ""},
+        ],
+        tb_difference_row=43,
+        tb_notes_text_present=True,
+        tb_notes_row=85,
+        tb_notes_text="表4折旧核对差异小于SAD",
+    )
+    issues = check_rollforward_difference_over_sad(rf, lead=_lead_with_sad("5"))
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.severity == Severity.FAIL
+    assert issue.source_row == 43
+    assert issue.field == "tb_difference_note_marker"
+    assert "E43=6" in issue.message
+    assert "AC43=7" in issue.message
 
 
 def test_rollforward_difference_over_sad_needs_review_when_note_exists():

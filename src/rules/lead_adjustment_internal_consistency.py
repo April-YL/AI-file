@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from ingest.lead_sheet import LeadSheetDataset
+from rules.lead_adjustment_gating import should_run_strict_total_check
 from rules.lead_common import amounts_close, parse_threshold_amount
 from rules.models import QcIssue, Severity
 
@@ -33,13 +34,29 @@ def _summary_amounts(lead: LeadSheetDataset) -> list[Decimal]:
 
 def check_lead_adjustment_internal_consistency(
     lead: LeadSheetDataset | None,
+    *,
+    strict_total: bool | None = None,
+    layout_result: dict | None = None,
+    extracted_rows: list[dict] | None = None,
 ) -> list[QcIssue]:
     """Compare Lead movement-table adjustment columns with the Lead adjustment summary only."""
     if lead is None or not lead.source_sheet:
         return []
 
+    if strict_total is None:
+        strict_total = should_run_strict_total_check(
+            lead,
+            layout_result=layout_result,
+            extracted_rows=extracted_rows,
+        )
+
     main_amounts = _main_adjustment_amounts(lead)
-    summary_rows = lead.adjustment_rows
+    summary_rows = [
+        r
+        for r in lead.adjustment_rows
+        if not _is_no_adjustment_conclusion(r.raw_cells)
+        and not _is_non_adjustment_note(r.raw_cells)
+    ]
     summary_amounts = _summary_amounts(lead)
     issues: list[QcIssue] = []
 
@@ -76,7 +93,7 @@ def check_lead_adjustment_internal_consistency(
         )
         return issues
 
-    if not main_amounts or not summary_amounts:
+    if not strict_total or not main_amounts or not summary_amounts:
         return issues
 
     main_total = sum((amt for _, amt, _ in main_amounts), Decimal("0"))
@@ -99,3 +116,42 @@ def check_lead_adjustment_internal_consistency(
             )
         )
     return issues
+
+
+def _is_no_adjustment_conclusion(cells: list[str | None]) -> bool:
+    text = "".join(str(c) for c in cells if c)
+    compact = (
+        text.replace(" ", "")
+        .replace("　", "")
+        .replace("。", "")
+        .replace(".", "")
+        .lower()
+    )
+    markers = (
+        "本年度不涉及审计调整",
+        "本年不涉及审计调整",
+        "本期不涉及审计调整",
+        "不涉及审计调整",
+        "无审计调整",
+        "无调整事项",
+        "不涉及调整事项",
+    )
+    return any(m.lower() in compact for m in markers)
+
+
+def _is_non_adjustment_note(cells: list[str | None]) -> bool:
+    text_cells = [str(c) for c in cells if c]
+    if len(text_cells) != 1:
+        return False
+    text = text_cells[0]
+    compact = (
+        text.replace(" ", "")
+        .replace("　", "")
+        .replace("。", "")
+        .replace(".", "")
+        .lower()
+    )
+    return (
+        compact.startswith("nb")
+        and ("te" in compact or "sad" in compact)
+    ) or ("执行阶段" in text and "审定阶段" in text and ("TE" in text or "SAD" in text))

@@ -950,6 +950,8 @@ def _extract_adjustment_summary(
                 break
             continue
         adj_type = cells[1] or cells[0]
+        if _is_no_adjustment_conclusion(cells) or _is_non_adjustment_note(cells):
+            continue
         results.append(
             AdjustmentSummaryRow(
                 adjustment_type=adj_type,
@@ -958,6 +960,36 @@ def _extract_adjustment_summary(
             )
         )
     return results
+
+
+def _is_no_adjustment_conclusion(cells: list[str | None]) -> bool:
+    text = " ".join(c for c in cells if c)
+    compact = _norm(text)
+    if not compact:
+        return False
+    no_adjustment_markers = (
+        "本年度不涉及审计调整",
+        "本年不涉及审计调整",
+        "本期不涉及审计调整",
+        "不涉及审计调整",
+        "无审计调整",
+        "无调整事项",
+        "不涉及调整事项",
+    )
+    return any(_norm(marker) in compact for marker in no_adjustment_markers)
+
+
+def _is_non_adjustment_note(cells: list[str | None]) -> bool:
+    text_cells = [c for c in cells if c]
+    if len(text_cells) != 1:
+        return False
+    text = text_cells[0]
+    compact = _norm(text)
+    if compact.startswith("nb") and ("te" in compact or "sad" in compact):
+        return True
+    if "执行阶段" in text and "审定阶段" in text and ("TE" in text or "SAD" in text):
+        return True
+    return False
 
 
 def _normalize_amount_key(value: str | None) -> str | None:

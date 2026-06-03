@@ -23,6 +23,12 @@ def check_materiality_consistency(lead: LeadSheetDataset | None) -> list[QcIssue
         ]
 
     issues: list[QcIssue] = []
+    source_row = next((m.source_row for m in lead.materiality if m.source_row), None)
+    if source_row is None:
+        source_row = next(
+            (f.source_row for f in lead.basic_info_fields if f.field_key in {"pm", "te", "sad"} and f.source_row),
+            None,
+        )
     # TE/SAD 缺项由 lead_required_fields 判定 FAIL；此处仅摘录 + Canvas 人工核对
     issues.append(
         QcIssue(
@@ -34,6 +40,7 @@ def check_materiality_consistency(lead: LeadSheetDataset | None) -> list[QcIssue
             suggestion="对照报告 manual_review_sections 中 AE-001 底稿值与 Canvas 列完成人工核对",
             procedure_code="K.00",
             source_sheet=lead.source_sheet,
+            source_row=source_row,
         )
     )
     return issues

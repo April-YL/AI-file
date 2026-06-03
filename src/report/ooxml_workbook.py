@@ -326,7 +326,9 @@ def _insert_legacy_drawing(sheet_xml: bytes, rid: str) -> bytes:
     text = sheet_xml.decode("utf-8")
     if "legacyDrawing" in text:
         return sheet_xml
-    if "xmlns:r=" not in text.split(">", 1)[0]:
+    root_match = re.search(r"<worksheet\b[^>]*>", text)
+    root_tag = root_match.group(0) if root_match else ""
+    if "xmlns:r=" not in root_tag:
         text = text.replace(
             "<worksheet ",
             f'<worksheet xmlns:r="{_NS_REL_DOC}" ',

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import openpyxl
+from openpyxl.utils import get_column_letter
 
 from ingest.field_mapping import map_headers
 from ingest.header_detection import scan_rows_for_headers
@@ -80,6 +81,7 @@ class RollforwardSheetDataset:
     tb_reconciliation_detected: bool = False
     tb_reconciliation_confidence: float = 0.0
     tb_difference_values: list[Decimal] = field(default_factory=list)
+    tb_difference_details: list[dict[str, Any]] = field(default_factory=list)
     tb_difference_row: int | None = None
     tb_notes_text_present: bool = False
     tb_notes_row: int | None = None
@@ -686,7 +688,7 @@ def _extract_tb_check(
     *,
     tb_region: K01SectionRegion | None,
     notes_region: K01SectionRegion | None,
-) -> tuple[bool, float, list[Decimal], int | None, bool, int | None, str | None]:
+) -> tuple[bool, float, list[Decimal], list[dict[str, Any]], int | None, bool, int | None, str | None]:
     """读取 K.01 区块2的 TB 核对信息。
 
     可靠识别必须看到 TB 相关字样和差异字段；仅有“变动金额”不视为已完成 TB check。
@@ -701,7 +703,8 @@ def _extract_tb_check(
     diff_cols = {c for _, c, t in diff_cells if len(t) <= 20}
     diff_rows = {r for r, _, _ in diff_cells}
 
-    diff_values: list[tuple[int, Decimal]] = []
+    diff_values: list[tuple[int, int, Decimal]] = []
+    diff_details: list[dict[str, Any]] = []
     if tb_region and tb_region.start_row and tb_region.end_row:
         for r_idx in range(tb_region.start_row - 1, min(tb_region.end_row, len(rows))):
             row = rows[r_idx]
@@ -715,7 +718,17 @@ def _extract_tb_check(
                     continue
                 amt = parse_amount(_cell_str(val))
                 if amt is not None:
-                    diff_values.append((row_no, amt))
+                    diff_values.append((row_no, col_no, amt))
+                    marker = _adjacent_note_marker(row, c_idx)
+                    diff_details.append(
+                        {
+                            "row": row_no,
+                            "column": col_no,
+                            "cell": f"{get_column_letter(col_no)}{row_no}",
+                            "value": str(amt),
+                            "note_marker": marker,
+                        }
+                    )
 
     confidence = 0.0
     if tb_region is not None:
@@ -729,7 +742,14 @@ def _extract_tb_check(
     confidence = round(min(confidence, 1.0), 3)
     detected = bool(tb_hits and diff_cells and confidence >= 0.65)
 
-    notes_cells = _text_cells_in_region(rows, notes_region)
+    use_notes_region = (
+        notes_region is not None
+        and tb_region is not None
+        and notes_region.start_row is not None
+        and tb_region.end_row is not None
+        and notes_region.start_row <= tb_region.end_row + 5
+    )
+    notes_cells = _text_cells_in_region(rows, notes_region) if use_notes_region else []
     note_parts: list[str] = []
     notes_row: int | None = None
     for row_no, _, text in notes_cells:
@@ -747,12 +767,32 @@ def _extract_tb_check(
     return (
         detected,
         confidence,
-        [v for _, v in diff_values],
+        [v for _, _, v in diff_values],
+        diff_details,
         diff_values[0][0] if diff_values else None,
         bool(notes_text),
         notes_row,
         notes_text,
     )
+
+
+def _adjacent_note_marker(row: tuple[Any, ...], value_idx: int) -> str | None:
+    """读取差异单元格左右相邻的 Notes/NB 标识，不把金额或差异标签当作标识。"""
+    candidates: list[str] = []
+    for idx in (value_idx - 1, value_idx + 1):
+        if idx < 0 or idx >= len(row):
+            continue
+        text = _cell_str(row[idx])
+        if not text:
+            continue
+        norm = re.sub(r"\s+", "", text).lower()
+        if "差异" in norm or parse_amount(text) is not None:
+            continue
+        if re.fullmatch(r"(note|notes|nb|n)[\w\-\.]*", norm) or re.search(r"(note|nb)\s*\d*", norm, re.I):
+            candidates.append(text)
+        elif len(text) <= 12 and re.search(r"[A-Za-z]", text):
+            candidates.append(text)
+    return candidates[0] if candidates else None
 
 
 def _extract_note_text(
@@ -1171,6 +1211,7 @@ def parse_rollforward_rows(
         tb_reconciliation_detected,
         tb_reconciliation_confidence,
         tb_difference_values,
+        tb_difference_details,
         tb_difference_row,
         tb_notes_text_present,
         tb_notes_row,
@@ -1321,6 +1362,7 @@ def parse_rollforward_rows(
         tb_reconciliation_detected=tb_reconciliation_detected,
         tb_reconciliation_confidence=tb_reconciliation_confidence,
         tb_difference_values=tb_difference_values,
+        tb_difference_details=tb_difference_details,
         tb_difference_row=tb_difference_row,
         tb_notes_text_present=tb_notes_text_present,
         tb_notes_row=tb_notes_row,

@@ -97,6 +97,11 @@
   - LLM：UI 文案改为“启用大模型规则语义复核”；汇总页 PSP 不执行理由的 LLM 输入新增 `workbook_context`，包含 Lead TE/SAD/CRA/TT/预期/波动表、K.01 后推摘要、TB/表4差异、新增/处置清单、跨表勾稽和工作表列表。
   - 实测：真实底稿只读验证 `summary_source='汇总 '`、`program_count=12`；行15 处置测试“本期处置资产净值小于TE”输出 WARN；行22 减值测试“本期无减值迹象”输出 WARN。
   - 验证：`tests/ingest/test_summary_sheet.py -q --basetemp .pytest_tmp_summary` 7 通过；`tests/ingest/test_summary_sheet.py tests/report/test_workbook_pipeline.py tests/llm/test_summary_psp_review.py -q --basetemp .pytest_tmp_summary_regression` 13 通过；`tests/llm -q --basetemp .pytest_tmp_llm_all` 24 通过。
+- **Lead 调整汇总表 LLM 设计（M3c-a，2026-06-03）**：
+  - 设计：`docs/planning/lead-adjustment-llm-design.md`（版式/借贷方向、direct vs indirect 跨科目、LEAD-017 门控）。
+  - 代码：`src/ingest/lead_adjustment_grid.py`、`src/llm/lead_adjustment_review.py`、`src/rules/lead_adjustment_gating.py`；流水线先 LLM 再 `run_lead_rules`（门控合计）。
+  - 规则：LEAD-018/019 注册；`FA_QC_LLM_ADJUSTMENT_PASSES=1|3`（默认合并 1 pass）。
+  - 待做：脱敏 fixture（英文双列、跨科目 AA#）、`pytest tests/llm/test_lead_adjustment_payload.py` 回归、案例库实测。
 - **Lead LLM 语义复核上下文增强（2026-06-03）**：
   - 根因：Lead LLM 原先主要读取 Lead 单页的预期分析、引导表和波动说明；对“预期方向是否与 K.01 实际后推一致”“异常波动说明是否有程序/清单支持”等问题，上下文不足。
   - LLM：新增 `build_lead_semantic_context()`；`lead_expectation_semantic` 与 `lead_fluctuation_notes_semantic` 的输入新增 `workbook_context`。
@@ -176,6 +181,30 @@
 - PDF 程序指引未抽取正文，可能需 OCR。
 - A 公司底稿约 42MB 已跳过，需读取性能优化。
 - 处置清单等场景：`单据编号` 不得误映射为 `asset_id`。
+
+## 2026-06-03 输出结果优化 0603-02 修复沉淀
+
+本轮聚焦 UI 复测与 `E:\FAQC\输出结果优化0603-02` 中的 5 类误报/漏报：
+
+- **Comments Cell Ref. 为空**：Lead 必填项、重要性、CRA/TT 等规则已补充 `source_row`，Comments 表应能定位到对应行。
+- **Lead 预期分析误要求“减值准备”**：Lead LLM 语义复核提示已明确，标准 Lead 不要求单独对“减值准备”逐行建立预期；不得仅因缺少该项预期分析判异常。
+- **LEAD-017 调整事项误判**：Lead 调整事项汇总表读取与规则层均过滤“本年度不涉及审计调整”等结论性文字，以及 TE/SAD 说明类 note；避免把非调整明细当作调整事项。
+- **K.01 TB 与后推明细表差异漏报**：TB check 已读取差异单元格明细（如 `E43`、`AC43`），并检查相邻位置是否有 Note/NB 标识；超过 SAD 且无 Note 标识时输出 `GL-008 FAIL`。
+- **K.01 Notes 错配**：TB check 不再使用远处表4折旧费用核对 Notes 作为 TB 差异说明；`B85` 应保留给折旧费用与利润表核对差异。
+- **标注副本 XML 稳定性**：修复 OOXML 写入批注时可能重复插入 `xmlns:r` 导致 xlsx 解析失败的问题。
+
+已验证：
+
+- `.\.venv\Scripts\pytest.exe tests\rules\test_rollforward_rules.py -q --basetemp .pytest_tmp_rollforward_fix`：42 passed
+- `.\.venv\Scripts\pytest.exe tests\rules\test_lead_internal_closure.py tests\ingest\test_lead_sheet.py -q --basetemp .pytest_tmp_lead_fix`：25 passed, 1 skipped
+- `.\.venv\Scripts\pytest.exe tests\llm\test_lead_review.py -q --basetemp .pytest_tmp_lead_llm_fix`：6 passed
+- `.\.venv\Scripts\pytest.exe tests\report\test_ooxml_workbook.py tests\report\test_export_annotated_workbook.py -q --basetemp .pytest_tmp_ooxml_fix`：15 passed
+
+待 UI 复测重点：
+
+- 汇总页 PSP 选否理由仍需确认大模型语义复核是否在 UI 参数中实际启用。
+- Lead 调整事项汇总表若出现真实复杂借贷/跨科目调整，后续继续接入 `lead_adjustment_review` 的 LLM 判断。
+- K.01 TB 差异若同时存在多行超过 SAD，当前会列示全部无 Note 标识的差异单元格，复测时重点看是否符合审计口径。
 
 ## 相关文件
 

@@ -102,6 +102,30 @@ def check_rollforward_difference_over_sad(
         return []
 
     max_diff = max(material_diffs, key=lambda d: abs(d))
+    material_details = _material_difference_details(rollforward, sad)
+    details_without_note = [d for d in material_details if not d.get("note_marker")]
+    if details_without_note:
+        cells = "、".join(
+            f"{d.get('cell')}={d.get('value')}" for d in details_without_note[:8]
+        )
+        first_row = _detail_row(details_without_note[0]) or rollforward.tb_difference_row
+        return [
+            _issue(
+                rollforward=rollforward,
+                severity=Severity.FAIL,
+                field="tb_difference_note_marker",
+                source_row=first_row,
+                message=(
+                    "K.01 TB check 存在超过 SAD 的差异，但差异单元格旁未见 Note 标识："
+                    f"{cells}；SAD={sad}"
+                ),
+                suggestion=(
+                    "请在差异单元格相邻位置添加 Note/NB 标识，并在 TB check 区域或对应 Notes "
+                    "中说明差异原因、处理结论及是否需要进一步审计程序。"
+                ),
+            )
+        ]
+
     if rollforward.tb_notes_text_present:
         return [
             _issue(
@@ -130,3 +154,20 @@ def check_rollforward_difference_over_sad(
             suggestion="请在 K.01 补充差异调查说明，至少说明差异原因、处理结论，以及是否需要进一步审计程序。",
         )
     ]
+
+
+def _material_difference_details(
+    rollforward: RollforwardSheetDataset,
+    sad: Decimal,
+) -> list[dict]:
+    details: list[dict] = []
+    for item in rollforward.tb_difference_details:
+        amount = parse_amount(item.get("value"))
+        if amount is not None and abs(amount) > sad:
+            details.append(item)
+    return details
+
+
+def _detail_row(item: dict) -> int | None:
+    row = item.get("row")
+    return row if isinstance(row, int) and row > 0 else None

@@ -46,10 +46,12 @@ def check_lead_required_fields(lead: LeadSheetDataset | None) -> list[QcIssue]:
         ]
 
     values = field_values(lead)
+    fields_by_key = {f.field_key: f for f in lead.basic_info_fields}
     issues: list[QcIssue] = []
     for key in LEAD_REQUIRED_FIELD_KEYS:
         label = _FIELD_LABELS.get(key, key)
         raw = values.get(key)
+        field = fields_by_key.get(key)
         if is_blank(raw):
             issues.append(
                 QcIssue(
@@ -61,6 +63,7 @@ def check_lead_required_fields(lead: LeadSheetDataset | None) -> list[QcIssue]:
                     suggestion=f"在 Lead 表补充{label}并更新至本审计期间",
                     procedure_code="K.00",
                     source_sheet=lead.source_sheet,
+                    source_row=field.source_row if field else None,
                 )
             )
     return issues

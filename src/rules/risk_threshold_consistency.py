@@ -26,6 +26,7 @@ def check_risk_threshold_consistency(lead: LeadSheetDataset | None) -> list[QcIs
         return []
 
     issues: list[QcIssue] = []
+    source_row = lead.cra_rows[0].source_row if lead.cra_rows else None
     if not lead.cra_rows:
         issues.append(
             QcIssue(
@@ -37,6 +38,7 @@ def check_risk_threshold_consistency(lead: LeadSheetDataset | None) -> list[QcIs
                 suggestion="在 Lead 表维护认定、CRA、TT 列，或见报告 AE-002 手工填写",
                 procedure_code="K.00",
                 source_sheet=lead.source_sheet,
+                source_row=source_row,
             )
         )
 
@@ -47,9 +49,10 @@ def check_risk_threshold_consistency(lead: LeadSheetDataset | None) -> list[QcIs
             field="cra|tt",
             severity=Severity.NEED_REVIEW,
             message=f"各认定 CRA、TT 须人工核对（已摘录 {len(lead.cra_rows)} 行，见报告 AE-002）",
-            suggestion="对照 Canvas/风险底稿完成认定级 CRA、TT 复核",
-            procedure_code="K.00",
-            source_sheet=lead.source_sheet,
-        )
+        suggestion="对照 Canvas/风险底稿完成认定级 CRA、TT 复核",
+        procedure_code="K.00",
+        source_sheet=lead.source_sheet,
+        source_row=source_row,
+    )
     )
     return issues

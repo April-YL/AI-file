@@ -14,10 +14,26 @@ from report.export_annotated_workbook import (
     FA_LIST_COMMENTS_SHEET_NAME,
     export_annotated_workbook,
 )
-from report.ooxml_workbook import workbook_has_external_links
+from report.ooxml_workbook import _insert_legacy_drawing, workbook_has_external_links
 from report.pipeline import run_workbook_qc_from_path
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+
+
+def test_insert_legacy_drawing_does_not_duplicate_r_namespace():
+    xml = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        b'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        b"<sheetData /></worksheet>"
+    )
+
+    out = _insert_legacy_drawing(xml, "rId9").decode("utf-8")
+
+    root_tag = out[out.index("<worksheet") : out.index(">", out.index("<worksheet"))]
+    assert root_tag.count("xmlns:r=") == 1
+    assert "<legacyDrawing" in out
+    assert 'r:id="rId9"' in out
 
 
 def _b_medical_path() -> Path | None:

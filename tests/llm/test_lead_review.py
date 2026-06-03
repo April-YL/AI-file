@@ -91,6 +91,8 @@ def test_lead_expectation_prompt_uses_rollforward_direction_criteria():
     assert "购置及在建工程转入金额为 0" in system
     assert "折旧方法、使用寿命" in system
     assert "不要因为没有使用标准审计术语而判不足" in system
+    assert "不要求单独对“减值准备”科目逐行建立预期" in system
+    assert "不得仅因未写“减值准备预期分析”而判 insufficient" in system
     assert payload["movement_rows"][0]["movement"] == "500000"
     assert "证据不足时返回 unclear" in payload["review_hint"]
 
