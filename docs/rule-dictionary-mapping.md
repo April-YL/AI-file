@@ -55,9 +55,9 @@
 | MT-002 | special_movement_identification | 特殊性质变动识别 | K.02 | P4 | REVIEW | manual_only |
 | MT-003 | adjustment_testing | 调整事项测试恰当性 | K.00 | MANUAL | MANUAL_ONLY | manual_only |
 | GL-001 | lead_tb_reconciliation | 期末账面数与TB核对 | K.00 | P4 | REVIEW | manual_only |
-| GL-002 | rollforward_fa_list_reconciliation | 期末账面数与FA list核对 | K.01 | **P1** | REVIEW | **implemented（主检查：K.01 表3 check；表2 SUMIF 辅助；自算合计仅兜底）** |
+| GL-002 | rollforward_fa_list_reconciliation | 期末账面数与FA list核对 | K.01 | **P1** | REVIEW | **implemented（主检查：K.01 表3 check；差异=0或≤SAD通过，>SAD 无 Notes → FAIL；表2 SUMIF 辅助；自算合计仅兜底）** |
 | GL-003 | lead_prior_year_reconciliation | 期初期末审定数与Lead核对 | K.00 | P4 | REVIEW | manual_only |
-| GL-004 | depreciation_pl_reconciliation | 折旧费用与利润表核对 | K.00 | MANUAL | MANUAL_ONLY | manual_only |
+| GL-004 | rollforward_depreciation_pl_reconciliation | 折旧费用与利润表/TB核对 | K.01 | **P1** | REVIEW | **implemented**（主检查：K.01 表4差异；差异=0或≤SAD通过，>SAD 无 Notes → FAIL；表4读不到差异或SAD读不到 → NEED_REVIEW） |
 | GL-005 | rollforward_abnormal_amounts | 后推表异常金额（累折>原值、负净值、处置转出） | **K.01** | **P1** | AUTO_FAIL/WARN | **implemented**（procedure 以 K.01 为准，见 [planning/k01-qc-rules.md](planning/k01-qc-rules.md)） |
 | GL-006 | rollforward_exists | 后推明细表存在 | K.01 | **P1** | AUTO_FAIL | **implemented**（qc-checklist §三；字典主表待增行） |
 | GL-007 | rollforward_columns_complete | 后推金额列完整（M2a=L1） | K.01 | **P1** | AUTO_FAIL | **implemented**（L2 矩阵见 [planning/k01-workpaper-layouts.md](planning/k01-workpaper-layouts.md)） |

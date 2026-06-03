@@ -15,6 +15,7 @@ _DICT_CODES: dict[str, str | None] = {
     "rollforward_abnormal_amounts": "GL-005",
     "rollforward_fa_list_reconciliation": "GL-002",
     "rollforward_difference_over_sad": "GL-008",
+    "rollforward_depreciation_pl_reconciliation": "GL-004",
 }
 
 _MAX_BINDINGS = 24
@@ -102,6 +103,24 @@ def build_rollforward_sheet_section(
             "notes_text_present": rollforward.tb_notes_text_present,
             "notes_row": rollforward.tb_notes_row,
             "notes_text": rollforward.tb_notes_text,
+        },
+        "table4_depreciation_pl": {
+            "pl_amounts": [str(v) for v in rollforward.table4_pl_amounts[:20]],
+            "pl_total": str(rollforward.table4_pl_total)
+            if rollforward.table4_pl_total is not None
+            else None,
+            "pl_total_row": rollforward.table4_pl_total_row,
+            "rollforward_depreciation": str(rollforward.table4_rollforward_depreciation)
+            if rollforward.table4_rollforward_depreciation is not None
+            else None,
+            "rollforward_depreciation_row": rollforward.table4_rollforward_depreciation_row,
+            "difference": str(rollforward.table4_difference)
+            if rollforward.table4_difference is not None
+            else None,
+            "difference_row": rollforward.table4_difference_row,
+            "notes_text_present": rollforward.table4_notes_text_present,
+            "notes_row": rollforward.table4_notes_row,
+            "notes_text": rollforward.table4_notes_text,
         },
         "ingest_notes": list(rollforward.notes or [])[:40],
         "rollforward_qc": {

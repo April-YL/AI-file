@@ -31,7 +31,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | **汇总** | `汇总` | [summary-sheet-qc-matrix.md](./summary-sheet-qc-matrix.md) | AE-003 等 | ✅ 主表 + 列绑定 | ✅ AE-003 | ✅ `summary_sheet_section` |
 | **K.00 Lead** | `K.00 Lead Sheet` | [lead-qc-rules.md](./lead-qc-rules.md)（6 模块） | 模块 1–6 | ✅ 6 块锚点 | ✅ 13 条 Lead + AE-001/002/004 | ✅ `lead_sheet_section` |
-| **K.01 后推** | `K.01 Agree SL to GL` | [k01-six-block-qc-matrix.md](./k01-six-block-qc-matrix.md) | [k01-qc-rules.md](./k01-qc-rules.md) | ✅ 六区块 + L1 + 表2/表3 + TB check 摘录 | ✅ GL-005/006/007 + GL-002 表3 check + GL-008 >SAD | ✅ `rollforward_sheet_section` |
+| **K.01 后推** | `K.01 Agree SL to GL` | [k01-six-block-qc-matrix.md](./k01-six-block-qc-matrix.md) | [k01-qc-rules.md](./k01-qc-rules.md) | ✅ 六区块 + L1 + 表2/表3 + TB check 摘录 + 表4折旧核对 | ✅ GL-005/006/007 + GL-002 表3 check/SAD/Notes + GL-004 表4折旧/SAD/Notes + GL-008 >SAD | ✅ `rollforward_sheet_section` |
 | **FA list** | `FA list` 等 | （见 checklist §四） | `fa_list_*` | ✅ | ✅ M1 三条 + 扩展规划 | findings + 标注 |
 | **K.02 新增/处置** | 新增清单、处置清单、测试表 | [k02-k03-qc-matrix.md](./k02-k03-qc-matrix.md) § K.02 | 待建 | ⏳ 清单 ingest | ❌ | ❌ |
 | **K.03 折旧** | SAP、TOD、政策复核 | [k02-k03-qc-matrix.md](./k02-k03-qc-matrix.md) § K.03 | 待建 | ⏳ 部分 | ❌ | ❌ |
@@ -41,7 +41,8 @@
 | 规则 ID | 说明 | 状态 |
 | --- | --- | --- |
 | `lead_rollforward_tb_reconciliation` | Lead 期末 ↔ K.01 合计（LEAD-010） | ✅ |
-| `rollforward_fa_list_reconciliation` | K.01 表3 check（表2 SUMIF 辅助；自算合计兜底） | ✅ |
+| `rollforward_fa_list_reconciliation` | K.01 表3 check（≤SAD 通过，>SAD 需 Notes；表2 SUMIF 辅助；自算合计兜底） | ✅ |
+| `rollforward_depreciation_pl_reconciliation` | K.01 表4折旧费用与利润表/TB核对（≤SAD 通过，>SAD 需 Notes） | ✅ |
 | `rollforward_difference_over_sad` | K.01 TB check 差异 > SAD 时检查 Notes | ✅ |
 | AE-003 × Lead 预期 | 汇总 PSP 与 Lead 波动/预期 | ⏳ 摘录为主 |
 
@@ -57,7 +58,7 @@
     → K.02 / K.03（>TE 路由后的详细程序）
 ```
 
-当前 **已通链路**：汇总 AE-003 + Lead 规则集 + K.01 识别与 P0 + LEAD-010 + GL-002 表3 check + TB check 摘录 + GL-008 >SAD Notes；**未通**：K.01 TE 路由、K.02/K.03 规则、Notes 充分性/TE 闭环。
+当前 **已通链路**：汇总 AE-003 + Lead 规则集 + K.01 识别与 P0 + LEAD-010 + GL-002 表3 check + TB check 摘录 + GL-004 表4折旧核对 + GL-008 >SAD Notes；**未通**：K.01 TE 路由、K.02/K.03 规则、Notes 充分性/TE 闭环。
 
 ---
 

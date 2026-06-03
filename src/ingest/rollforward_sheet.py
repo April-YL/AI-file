@@ -84,6 +84,16 @@ class RollforwardSheetDataset:
     tb_notes_text_present: bool = False
     tb_notes_row: int | None = None
     tb_notes_text: str | None = None
+    table4_pl_amounts: list[Decimal] = field(default_factory=list)
+    table4_pl_total: Decimal | None = None
+    table4_pl_total_row: int | None = None
+    table4_rollforward_depreciation: Decimal | None = None
+    table4_rollforward_depreciation_row: int | None = None
+    table4_difference: Decimal | None = None
+    table4_difference_row: int | None = None
+    table4_notes_text_present: bool = False
+    table4_notes_row: int | None = None
+    table4_notes_text: str | None = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -683,6 +693,167 @@ def _extract_tb_check(
     )
 
 
+def _extract_note_text(
+    rows: list[tuple[Any, ...]],
+    region: K01SectionRegion | None,
+    *,
+    max_cols: int = 30,
+) -> tuple[bool, int | None, str | None]:
+    notes_cells = _text_cells_in_region(rows, region, max_cols=max_cols)
+    note_parts: list[str] = []
+    notes_row: int | None = None
+    for row_no, _, text in notes_cells:
+        norm = re.sub(r"\s+", "", text).lower()
+        if norm in ("notes", "sad", "te") or text in ("Notes", "SAD", "TE"):
+            continue
+        if "超过SAD差异调查" in text or "超过TE" in text or "拒绝执行原因" in text:
+            continue
+        if parse_amount(text) is not None:
+            continue
+        if len(text) >= 4:
+            note_parts.append(text)
+            notes_row = notes_row or row_no
+    notes_text = "\n".join(note_parts).strip() if note_parts else None
+    return bool(notes_text), notes_row, notes_text
+
+
+def _extract_table4_depreciation_check(
+    rows: list[tuple[Any, ...]],
+    *,
+    table4_region: K01SectionRegion | None,
+    notes_region: K01SectionRegion | None,
+) -> tuple[
+    list[Decimal],
+    Decimal | None,
+    int | None,
+    Decimal | None,
+    int | None,
+    Decimal | None,
+    int | None,
+    bool,
+    int | None,
+    str | None,
+]:
+    if table4_region is None or not table4_region.start_row or not table4_region.end_row:
+        table4_region = _infer_table4_region(rows, notes_region=notes_region)
+    if table4_region is None or not table4_region.start_row or not table4_region.end_row:
+        return [], None, None, None, None, None, None, False, None, None
+
+    table4_end_row = table4_region.end_row
+    if notes_region and notes_region.start_row and notes_region.start_row > table4_region.start_row:
+        table4_end_row = max(table4_end_row, notes_region.start_row - 1)
+
+    amount_col: int | None = None
+    header_row: int | None = None
+    for r_idx in range(table4_region.start_row - 1, min(table4_end_row, len(rows))):
+        row = rows[r_idx]
+        for c_idx, val in enumerate(row[:30]):
+            text = _cell_str(val)
+            if text == "金额":
+                amount_col = c_idx + 1
+                header_row = r_idx + 1
+                break
+        if amount_col:
+            break
+
+    def row_texts(row: tuple[Any, ...]) -> list[str]:
+        return [_cell_str(v) or "" for v in row[:30]]
+
+    def amount_in_row(row: tuple[Any, ...]) -> Decimal | None:
+        if amount_col is not None:
+            return _amount_at_col(row, amount_col)
+        values = [parse_amount(_cell_str(v)) for v in row[:30]]
+        parsed = [v for v in values if v is not None]
+        return parsed[-1] if parsed else None
+
+    pl_amounts: list[Decimal] = []
+    pl_total: Decimal | None = None
+    pl_total_row: int | None = None
+    depreciation_amount: Decimal | None = None
+    depreciation_row: int | None = None
+    difference: Decimal | None = None
+    difference_row: int | None = None
+
+    for r_idx in range(table4_region.start_row - 1, min(table4_end_row, len(rows))):
+        row = rows[r_idx]
+        row_no = r_idx + 1
+        texts = row_texts(row)
+        joined = " ".join(t for t in texts if t)
+        amt = amount_in_row(row)
+        if "差异" in texts:
+            difference = amt
+            difference_row = row_no
+            continue
+        if "合计" in texts:
+            pl_total = amt
+            pl_total_row = row_no
+            continue
+        if "累计折旧科目-本年计提" in joined or ("TB" in texts and "累计折旧" in joined):
+            depreciation_amount = amt
+            depreciation_row = row_no
+            continue
+        if header_row is not None and row_no > header_row and pl_total_row is None and amt is not None:
+            pl_amounts.append(amt)
+
+    notes_present, notes_row, notes_text = _extract_note_text(rows, notes_region)
+    return (
+        pl_amounts,
+        pl_total,
+        pl_total_row,
+        depreciation_amount,
+        depreciation_row,
+        difference,
+        difference_row,
+        notes_present,
+        notes_row,
+        notes_text,
+    )
+
+
+def _infer_table4_region(
+    rows: list[tuple[Any, ...]],
+    *,
+    notes_region: K01SectionRegion | None,
+) -> K01SectionRegion | None:
+    start_row: int | None = None
+    evidence: list[str] = []
+    for r_idx, row in enumerate(rows):
+        texts = [_cell_str(v) or "" for v in row[:30]]
+        joined = " ".join(t for t in texts if t)
+        if "折旧费用与利润表科目核对" in joined:
+            start_row = r_idx + 1
+            evidence.append("折旧费用与利润表科目核对")
+            break
+        if "科目名称" in texts and "金额" in texts:
+            start_row = r_idx + 1
+            evidence.append("科目名称/金额")
+            break
+        if "累计折旧科目-本年计提" in joined:
+            start_row = max(1, r_idx - 6)
+            evidence.append("累计折旧科目-本年计提")
+            break
+    if start_row is None:
+        return None
+
+    end_row = len(rows)
+    if notes_region and notes_region.start_row and notes_region.start_row > start_row:
+        end_row = notes_region.start_row - 1
+    else:
+        for r_idx in range(start_row, len(rows)):
+            texts = [_cell_str(v) or "" for v in rows[r_idx][:8]]
+            if any(t == "Notes" or t.startswith("Notes") for t in texts if t):
+                end_row = r_idx
+                break
+
+    return K01SectionRegion(
+        section_id="b5_table4_depreciation_pl",
+        anchor_row=start_row,
+        start_row=start_row,
+        end_row=max(start_row, end_row),
+        evidence=evidence,
+    )
+
+
 def _presence_from_regions(regions: dict[str, K01SectionRegion]) -> dict[str, bool]:
     return {sid: sid in regions for sid in K01_SECTION_IDS}
 
@@ -938,6 +1109,24 @@ def parse_rollforward_rows(
         notes.append(f"k01_tb_check_confidence:{tb_reconciliation_confidence}")
     elif section_presence.get("b2_movement_tb_reconciliation"):
         notes.append(f"k01_tb_check_needs_review:{tb_reconciliation_confidence}")
+    (
+        table4_pl_amounts,
+        table4_pl_total,
+        table4_pl_total_row,
+        table4_rollforward_depreciation,
+        table4_rollforward_depreciation_row,
+        table4_difference,
+        table4_difference_row,
+        table4_notes_text_present,
+        table4_notes_row,
+        table4_notes_text,
+    ) = _extract_table4_depreciation_check(
+        rows,
+        table4_region=section_regions.get("b5_table4_depreciation_pl"),
+        notes_region=section_regions.get("b6_notes_investigation_routing"),
+    )
+    if table4_pl_total is not None or table4_difference is not None:
+        notes.append("k01_table4_depreciation_check_values")
     if any(
         b.period_role in (RollforwardPeriodRole.OPENING, RollforwardPeriodRole.ENDING)
         for b in bindings
@@ -1052,6 +1241,16 @@ def parse_rollforward_rows(
         tb_notes_text_present=tb_notes_text_present,
         tb_notes_row=tb_notes_row,
         tb_notes_text=tb_notes_text,
+        table4_pl_amounts=table4_pl_amounts,
+        table4_pl_total=table4_pl_total,
+        table4_pl_total_row=table4_pl_total_row,
+        table4_rollforward_depreciation=table4_rollforward_depreciation,
+        table4_rollforward_depreciation_row=table4_rollforward_depreciation_row,
+        table4_difference=table4_difference,
+        table4_difference_row=table4_difference_row,
+        table4_notes_text_present=table4_notes_text_present,
+        table4_notes_row=table4_notes_row,
+        table4_notes_text=table4_notes_text,
         notes=notes,
     )
 

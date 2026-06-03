@@ -66,8 +66,8 @@
   - 回归：`scripts/run_case_rollforward_regression.py`、`tests/ingest/test_case_rollforward_regression.py`
 - **K.01 GL-002 首版（2026-06-02）**：
   - 规则：`rollforward_fa_list_reconciliation` 已接入 K.01 runner；主检查读取 K.01 表3（FA list 汇总表与后推明细表 check）结果。
-  - 口径：表3 check 非零差异输出 `WARN`；表3不可读时，检查表2是否存在/是否有 SUMIF 汇总金额，并把 Agent 自算 FA list 合计仅作为 `NEED_REVIEW` 兜底提示。
-  - 验证：`tests/rules` 106 通过；`tests/ingest/test_workbook_ingest.py --basetemp .pytest_tmp` 12 通过；`tests/report/test_workbook_pipeline.py --basetemp .pytest_tmp_report` 1 通过。
+  - 口径：表3 check 为 0 或差异金额不超过 SAD 时通过；超过 SAD 且无 Notes 时输出 `FAIL`；超过 SAD 但有 Notes 时通过（Notes 符号/格式不限制）。表3不可读时，检查表2是否存在/是否有 SUMIF 汇总金额，并把 Agent 自算 FA list 合计仅作为 `NEED_REVIEW` 兜底提示。
+  - 验证：2026-06-03 更新口径后，`tests/rules` 123 通过；`tests/ingest/test_workbook_ingest.py --basetemp .pytest_tmp` 12 通过；`tests/report/test_workbook_pipeline.py --basetemp .pytest_tmp_report` 1 通过。
 - **K.01 TB check 读取层（2026-06-02）**：
   - ingest：新增 `tb_reconciliation_detected`、`tb_reconciliation_confidence`、`tb_difference_values`、`tb_difference_row`、`tb_notes_text_present`、`tb_notes_row`、`tb_notes_text`。
   - 口径：只有 TB/试算表口径和“差异”同时出现，才视为可靠 TB check；仅有“变动金额”时不强判，后续规则应给 `NEED_REVIEW` 或人工复核提示。
@@ -78,6 +78,12 @@
   - 口径：TB check 差异未超过 SAD 不报；超过 SAD 且无 Notes 输出 `FAIL`；超过 SAD 且有 Notes 输出 `NEED_REVIEW`，由质检人员判断说明是否充分。
   - 兜底：TB check 或 SAD 读不可靠时输出 `NEED_REVIEW`，不直接判 PASS/FAIL。
   - 验证：`tests/rules/test_rollforward_rules.py` 27 通过；`tests/rules` 115 通过；`tests/ingest/test_workbook_ingest.py --basetemp .pytest_tmp` 12 通过；`tests/report/test_workbook_pipeline.py --basetemp .pytest_tmp_report` 1 通过。
+- **K.01 GL-004 表4折旧费用与利润表/TB核对（2026-06-03）**：
+  - ingest：新增 `table4_pl_amounts`、`table4_pl_total`、`table4_rollforward_depreciation`、`table4_difference`、`table4_notes_text` 等表4读取字段；表4区域定位不到时，会按“折旧费用与利润表科目核对 / 金额 / 累计折旧科目-本年计提 / 差异 / Notes”兜底定位。
+  - 规则：`rollforward_depreciation_pl_reconciliation` 已接入 K.01 runner，并从 K.00 Lead 读取 SAD。
+  - 口径：表4差异为 0 或差异金额不超过 SAD 时通过；超过 SAD 且无 Notes 输出 `FAIL`；超过 SAD 但有 Notes 时通过（Notes 符号/格式不限制）；表4差异或 SAD 读不到时输出 `NEED_REVIEW`。
+  - 报告：`rollforward_sheet_section` 已输出表4 PL/TB 核对摘录字段。
+  - 验证：`tests/rules/test_rollforward_rules.py` 38 通过；`tests/rules` 131 通过；`tests/ingest/test_workbook_ingest.py --basetemp .pytest_tmp` 12 通过；`tests/report/test_workbook_pipeline.py --basetemp .pytest_tmp_report` 1 通过。
 - **外链底稿单元格批注 + Comments 跳转（2026-06-02）**：
   - report：`export_annotated_workbook` 不再因 A3/外部链接跳过业务表批注；改用 OOXML 原位注入传统 Excel 批注，避免 `openpyxl.save()` 重写外链。
   - Comments：`Comments【归档前删除】`、`Comments【FA list】`、`QC_Locator` 的 Cell Ref./Navigate 可作为内部跳转索引，点击定位到对应业务表单元格（当前默认 B 列）。
@@ -94,11 +100,11 @@
   - **Lead 回归表**：`artifacts/case_lead_regression.md`（B–G 共 6 份；A 42MB 永久跳过）
   - **待做**：对案例库 6 份底稿重跑 `fa-qc-diagnose` 更新 `case-workpaper-diagnostic.md`
 - **Lead 质检规则（模块 1–5 P0）**：含 `lead_check_with_a3_row`（ingest 摘录 Check with A3/Diff/Notes + Diff≠0/缺说明 FAIL）；其余 `lead_*`、AE-004、`lead_rollforward_tb_reconciliation`；`lead_runner` + `lead_sheet_section`
-- **K.01 M2b（区块 2–6 勾稽）**：TB check 读取层与 `rollforward_difference_over_sad` 已加；下一步做 GL-002 表3模板变体增强、TE 路由、PL（见 `k01-six-block-qc-matrix.md`）
+- **K.01 M2b（区块 2–6 勾稽）**：TB check 读取层、`rollforward_difference_over_sad`、GL-004 表4折旧核对已加；下一步做 GL-002 表3模板变体增强、TE 路由、Notes 充分性/折旧分摊合理性（见 `k01-six-block-qc-matrix.md`）
 
 ## 下一步（M2a 验收导向）
 
-1. **K.01 M2b**：GL-002 表3模板变体增强、>TE 路由；识别置信度/锚点去重优化
+1. **K.01 M2b**：GL-002 表3模板变体增强、>TE 路由、Notes 充分性/折旧分摊合理性；识别置信度/锚点去重优化
 2. **rules（Lead 余量）**：`lead_fluctuation_notes_refs`、`lead_arp_three_triggers`；Streamlit K.01 页签（可选）
 2. **M3c（P1）**：`--llm-rules`、`--llm-checklist`（见 roadmap）；**非**优先扩展 `--llm` 报告叙述
 3. **ingest**：案例库字段映射回归

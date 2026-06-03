@@ -64,7 +64,7 @@
 | 风险点 | 应如何检查 | 实现状态 | 规则 / 方式 |
 | --- | --- | --- | --- |
 | 表3 / check-with 缺失 | 识别 `b4` | ✅ 识别 | 缺失 → WARN（规划） |
-| 表2 与表1 不一致 | 表3 差异 / check 结果 | ✅ | `rollforward_fa_list_reconciliation`（GL-002 主检查） |
+| 表2 与表1 不一致 | 表3差异 vs Lead SAD + Notes | ✅ | `rollforward_fa_list_reconciliation`（GL-002 主检查；≤SAD 通过，>SAD 需 Notes） |
 | 与 b2、Notes 矛盾 | 报告层交叉 | ❌ | 冲突清单（规划） |
 
 ---
@@ -74,8 +74,8 @@
 | 风险点 | 应如何检查 | 实现状态 | 规则 / 方式 |
 | --- | --- | --- | --- |
 | 表4 缺失 | 识别 `b5` | ✅ 识别 | 缺失 → WARN（规划） |
-| 表1 折旧 vs 表4 vs PL | 三边金额 | ❌ 无 PL | `rollforward_depreciation_pl_reconciliation` |
-| 差异 >SAD | 同区块2 | ❌ | 同 SAD 规则 |
+| 表1 折旧 vs 表4 vs PL | 读取表4合计、后推表折旧金额、差异 | ✅ 已实现 | `rollforward_depreciation_pl_reconciliation`（GL-004） |
+| 差异 >SAD | 读取 Lead SAD + 表4 Notes | ✅ 已实现 | 差异=0或≤SAD通过；>SAD 无 Notes → FAIL |
 | 分摊/首年计提等 | 职业判断 | ❌ | LLM / 人工 |
 
 ---
@@ -100,7 +100,7 @@
 | 2 变动/TB | ✅ 识别 + TB check 摘录 | ✅ SAD + Notes | GL-008 |
 | 3 表2 | ✅ 识别 | ✅ SUMIF 汇总辅助 | 分类说明 |
 | 4 表3 | ✅ 识别 | ✅ 表2↔表1 check | GL-002 主检查 |
-| 5 表4 | ✅ 识别 | ❌ PL/TB | 分摊 LLM |
+| 5 表4 | ✅ 识别 | ✅ 表4差异/SAD/Notes | GL-004；分摊合理性仍需 LLM/人工 |
 | 6 Notes | ✅ 识别 | — | TE、AE-003、LLM |
 
 ---
@@ -109,10 +109,10 @@
 
 - **识别层**：`RollforwardSheetDataset.section_*`；案例库 B–G：`hybrid`，六区块 **6/6**（`scripts/run_case_rollforward_regression.py`）。  
 - **P0 规则**：`run_rollforward_rules` → exists + columns_complete + abnormal_amounts。  
-- **M2b 首版**：`rollforward_fa_list_reconciliation`（GL-002）主读 K.01 表3 check 结果；表3非零差异为 `WARN`，表3不可读时结合表2识别和 Agent 自算合计给 `NEED_REVIEW` 兜底提示。  
+- **M2b 首版**：`rollforward_fa_list_reconciliation`（GL-002）主读 K.01 表3 check 结果；表3差异为 0 或不超过 SAD 时通过，超过 SAD 且无 Notes 时输出 `FAIL`，表3不可读时结合表2识别和 Agent 自算合计给 `NEED_REVIEW` 兜底提示。  
 - **TB check 读取层**：已新增 `tb_reconciliation_detected`、`tb_reconciliation_confidence`、`tb_difference_values`、`tb_notes_text` 等字段；只有 TB/试算表口径和“差异”同时出现，才视为可靠 TB check，单纯“变动金额”不直接当作 TB 核对结论。
 - **GL-008**：`rollforward_difference_over_sad` 已接入 K.01 runner；TB check 差异未超过 SAD 不报，超过 SAD 且无 Notes 输出 `FAIL`，超过 SAD 且已有 Notes 输出 `NEED_REVIEW`。
 - **报告**：`rollforward_sheet_section`；CLI `fa-qc-run` 打印 K.01 QC 一行。  
 - **交叉**：`lead_rollforward_tb_reconciliation`（LEAD-010）在 Lead 规则中执行，非 K.01 表内。
 
-**下一步建议（M2b）**：GL-002 表3模板变体增强 → `rollforward_te_program_routing` → 表4/PL 勾稽。
+**下一步建议（M2b）**：GL-002 表3模板变体增强 → `rollforward_te_program_routing` → 表4 Notes 充分性/折旧分摊合理性复核。

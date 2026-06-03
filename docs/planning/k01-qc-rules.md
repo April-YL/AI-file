@@ -87,9 +87,9 @@
 | --- | --- | --- | --- | --- |
 | `lead_rollforward_tb_reconciliation` | B.2/B.4 部分：Lead 引导表期末 vs K.01 合计 | Lead + K.01 ending | M2b | **implemented** |
 | `rollforward_opening_lead_reconciliation` | B.1 期初 vs Lead | Lead opening | M2b | planned |
-| `rollforward_fa_list_reconciliation` | B.3 表2/3 vs FA list | K.01 表2/表3 + 兜底 FA list 自算 | M2b | **implemented**（GL-002：主读表3 check；表2 SUMIF 辅助；自算合计仅兜底） |
+| `rollforward_fa_list_reconciliation` | B.3 表2/3 vs FA list | K.01 表2/表3 + Lead SAD + Notes + 兜底 FA list 自算 | M2b | **implemented**（GL-002：主读表3 check；≤SAD 通过，>SAD 无 Notes → FAIL；表2 SUMIF 辅助；自算合计仅兜底） |
 | `rollforward_ending_reconciliation` | B.2 期末 vs TB | K.01 TB check 摘录 / 外部 TB | 摘录 | planned（当前先摘录，不直接判 FAIL） |
-| `rollforward_depreciation_pl_reconciliation` | B.5 表4 | PL/TB | P1 | planned |
+| `rollforward_depreciation_pl_reconciliation` | B.5 表4 | K.01 表4 + Lead SAD + Notes | M2b | **implemented**（GL-004：主读表4差异；差异=0或≤SAD通过，>SAD 无 Notes → FAIL；表4差异或 SAD 读不到 → NEED_REVIEW） |
 | `rollforward_difference_over_sad` | B.6 差异>SAD 须调查 | Lead SAD + `tb_difference_values` + Notes | M2b | **implemented**（GL-008：无 Notes → FAIL；有 Notes → NEED_REVIEW） |
 | `rollforward_notes_on_material_diff` | B.6 Notes 是否填写 | Notes 区文本 | P1 | planned |
 | GL-001 `lead_tb_reconciliation` | Lead vs 外部 TB | TB | 摘录 | manual_only |
@@ -132,7 +132,7 @@
 | 差异调查 | `rollforward_difference_over_sad` | 【02】⑤ | GL-008 | all | **implemented** |
 | 异常金额 | `rollforward_abnormal_amounts` | 【01】易错 | GL-005 | all | **implemented** |
 | （交叉） | `lead_rollforward_tb_reconciliation` | 【02】④ | LEAD-010 | hybrid+ | **implemented** |
-| （交叉） | `rollforward_fa_list_reconciliation` | 【02】③ | GL-002 | dual/hybrid | **implemented**（主读表3 check） |
+| （交叉） | `rollforward_fa_list_reconciliation` | 【02】③ | GL-002 | dual/hybrid | **implemented**（主读表3 check + SAD/Notes） |
 
 ---
 

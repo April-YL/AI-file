@@ -11,6 +11,9 @@ from ingest.rollforward_sheet import RollforwardSheetDataset, parse_rollforward_
 from rules.registry import attach_rule_metadata, get_by_dict_code
 from rules.rollforward_abnormal_amounts import check_rollforward_abnormal_amounts
 from rules.rollforward_columns_complete import check_rollforward_columns_complete
+from rules.rollforward_depreciation_pl_reconciliation import (
+    check_rollforward_depreciation_pl_reconciliation,
+)
 from rules.rollforward_difference_over_sad import check_rollforward_difference_over_sad
 from rules.rollforward_exists import check_rollforward_exists
 from rules.rollforward_fa_list_reconciliation import check_rollforward_fa_list_reconciliation
@@ -245,6 +248,32 @@ def test_rollforward_ingest_does_not_treat_movement_only_as_reliable_tb_check():
     assert "k01_tb_check_needs_review" in " ".join(rf.notes)
 
 
+def test_rollforward_ingest_extracts_table4_depreciation_pl_check():
+    rows = [
+        ("表1", "固定资产类别", "原值", "累计折旧", "净值"),
+        ("", "合计", 100, 10, 90),
+        ("表4",),
+        ("折旧费用与利润表科目核对",),
+        ("账套名称/账套编码", "科目编码", "交叉索引", "科目名称", "金额"),
+        ("测试公司", "6602", "U-001", "管理费用", 100),
+        ("测试公司", "6604", "U-002", "研发费用", 40),
+        ("", "", "", "合计", 140),
+        ("K1", "", "TB", "累计折旧科目-本年计提", 130),
+        ("", "", "", "差异", 10),
+        ("Notes",),
+        ("说明", "折旧费用差异为分类口径影响"),
+    ]
+    rf = parse_rollforward_rows(rows, source_sheet="K.01 Agree SL to GL")
+    assert rf.section_presence["b5_table4_depreciation_pl"] is True
+    assert rf.table4_pl_amounts == [Decimal("100"), Decimal("40")]
+    assert rf.table4_pl_total == Decimal("140")
+    assert rf.table4_rollforward_depreciation == Decimal("130")
+    assert rf.table4_difference == Decimal("10")
+    assert rf.table4_difference_row == 10
+    assert rf.table4_notes_text_present is True
+    assert "分类口径" in (rf.table4_notes_text or "")
+
+
 def test_rollforward_abnormal_amounts_fail_accum_exceeds_original():
     rf = _minimal_rf(
         section_presence={"b1_bkd_main_table": True},
@@ -328,7 +357,26 @@ def test_rollforward_fa_list_reconciliation_table3_zero_passes():
     assert issues == []
 
 
-def test_rollforward_fa_list_reconciliation_table3_difference_warns():
+def test_rollforward_fa_list_reconciliation_table3_difference_within_sad_passes():
+    rf = _minimal_rf(
+        section_presence={
+            "b3_table2_fa_summary": True,
+            "b4_table3_check_with_table1": True,
+        },
+        table2_amount_count=4,
+        table3_check_values=[Decimal("0"), Decimal("4.99")],
+        table3_check_row=30,
+        total_row=10,
+    )
+    issues = check_rollforward_fa_list_reconciliation(
+        [_reconciliation_check(status=ReconciliationStatus.MATCH)],
+        rollforward=rf,
+        lead=_lead_with_sad("5"),
+    )
+    assert issues == []
+
+
+def test_rollforward_fa_list_reconciliation_table3_material_difference_without_note_fails():
     rf = _minimal_rf(
         section_presence={
             "b3_table2_fa_summary": True,
@@ -338,22 +386,69 @@ def test_rollforward_fa_list_reconciliation_table3_difference_warns():
         table3_check_values=[Decimal("0"), Decimal("12.34")],
         table3_check_row=30,
         total_row=10,
+        tb_notes_text_present=False,
     )
     issues = check_rollforward_fa_list_reconciliation(
         [_reconciliation_check(status=ReconciliationStatus.MATCH)],
         rollforward=rf,
+        lead=_lead_with_sad("5"),
     )
     assert len(issues) == 1
     issue = issues[0]
     assert issue.rule_id == "rollforward_fa_list_reconciliation"
-    assert issue.severity == Severity.WARN
+    assert issue.severity == Severity.FAIL
     assert issue.procedure_code == "K.01"
     assert issue.source_sheet == "K.01 Agree SL to GL"
     assert issue.source_row == 30
     assert issue.field == "table3_check_with_table1"
     assert "表3" in issue.message
     assert "12.34" in issue.message
-    assert "SAD" in issue.suggestion
+    assert "超过 SAD" in issue.message
+    assert "Notes" in issue.suggestion
+
+
+def test_rollforward_fa_list_reconciliation_table3_material_difference_with_note_passes():
+    rf = _minimal_rf(
+        section_presence={
+            "b3_table2_fa_summary": True,
+            "b4_table3_check_with_table1": True,
+        },
+        table2_amount_count=4,
+        table3_check_values=[Decimal("0"), Decimal("12.34")],
+        table3_check_row=30,
+        total_row=10,
+        tb_notes_text_present=True,
+        tb_notes_text="差异为取数口径导致，已说明",
+        tb_notes_row=35,
+    )
+    issues = check_rollforward_fa_list_reconciliation(
+        [_reconciliation_check(status=ReconciliationStatus.MATCH)],
+        rollforward=rf,
+        lead=_lead_with_sad("5"),
+    )
+    assert issues == []
+
+
+def test_rollforward_fa_list_reconciliation_table3_difference_needs_review_without_sad():
+    rf = _minimal_rf(
+        section_presence={
+            "b3_table2_fa_summary": True,
+            "b4_table3_check_with_table1": True,
+        },
+        table2_amount_count=4,
+        table3_check_values=[Decimal("12.34")],
+        table3_check_row=30,
+        total_row=10,
+    )
+    issues = check_rollforward_fa_list_reconciliation(
+        [_reconciliation_check(status=ReconciliationStatus.MATCH)],
+        rollforward=rf,
+        lead=_lead_with_sad(None),
+    )
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.NEED_REVIEW
+    assert issues[0].field == "table3_check_with_table1"
+    assert "SAD" in issues[0].message
 
 
 def test_rollforward_fa_list_reconciliation_unreadable_table3_uses_fallback_as_review():
@@ -483,6 +578,90 @@ def test_rollforward_runner_includes_difference_over_sad():
     assert any(i.rule_id == "rollforward_difference_over_sad" for i in issues)
 
 
+def test_rollforward_depreciation_pl_reconciliation_pass_when_difference_within_sad():
+    rf = _minimal_rf(
+        section_presence={"b5_table4_depreciation_pl": True},
+        table4_difference=Decimal("5"),
+        table4_difference_row=80,
+    )
+    issues = check_rollforward_depreciation_pl_reconciliation(
+        rf, lead=_lead_with_sad("5")
+    )
+    assert issues == []
+
+
+def test_rollforward_depreciation_pl_reconciliation_fails_without_note():
+    rf = _minimal_rf(
+        section_presence={"b5_table4_depreciation_pl": True},
+        table4_difference=Decimal("6"),
+        table4_difference_row=80,
+        table4_notes_text_present=False,
+    )
+    issues = check_rollforward_depreciation_pl_reconciliation(
+        rf, lead=_lead_with_sad("5")
+    )
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.rule_id == "rollforward_depreciation_pl_reconciliation"
+    assert issue.severity == Severity.FAIL
+    assert issue.source_row == 80
+    assert "超过 SAD" in issue.message
+
+
+def test_rollforward_depreciation_pl_reconciliation_passes_with_note():
+    rf = _minimal_rf(
+        section_presence={"b5_table4_depreciation_pl": True},
+        table4_difference=Decimal("6"),
+        table4_difference_row=80,
+        table4_notes_text_present=True,
+        table4_notes_text="差异为分摊口径影响",
+        table4_notes_row=85,
+    )
+    issues = check_rollforward_depreciation_pl_reconciliation(
+        rf, lead=_lead_with_sad("5")
+    )
+    assert issues == []
+
+
+def test_rollforward_depreciation_pl_reconciliation_needs_review_without_sad():
+    rf = _minimal_rf(
+        section_presence={"b5_table4_depreciation_pl": True},
+        table4_difference=Decimal("6"),
+        table4_difference_row=80,
+    )
+    issues = check_rollforward_depreciation_pl_reconciliation(
+        rf, lead=_lead_with_sad(None)
+    )
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.NEED_REVIEW
+    assert issues[0].field == "sad"
+
+
+def test_rollforward_depreciation_pl_reconciliation_needs_review_without_difference():
+    rf = _minimal_rf(section_presence={"b5_table4_depreciation_pl": True})
+    issues = check_rollforward_depreciation_pl_reconciliation(
+        rf, lead=_lead_with_sad("5")
+    )
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.NEED_REVIEW
+    assert issues[0].field == "table4_difference"
+
+
+def test_rollforward_runner_includes_depreciation_pl_reconciliation():
+    rf = _minimal_rf(
+        section_presence={
+            "b1_bkd_main_table": True,
+            "b5_table4_depreciation_pl": True,
+        },
+        table4_difference=Decimal("6"),
+        table4_difference_row=80,
+    )
+    issues = run_rollforward_rules(rf, lead=_lead_with_sad("5"))
+    assert any(
+        i.rule_id == "rollforward_depreciation_pl_reconciliation" for i in issues
+    )
+
+
 def test_registry_gl005_implemented():
     spec = get_by_dict_code("GL-005")
     assert spec is not None
@@ -514,6 +693,15 @@ def test_registry_gl008_implemented():
     spec = get_by_dict_code("GL-008")
     assert spec is not None
     assert spec.rule_id == "rollforward_difference_over_sad"
+    from rules.registry import ImplementationStatus
+
+    assert spec.implementation == ImplementationStatus.IMPLEMENTED
+
+
+def test_registry_gl004_implemented():
+    spec = get_by_dict_code("GL-004")
+    assert spec is not None
+    assert spec.rule_id == "rollforward_depreciation_pl_reconciliation"
     from rules.registry import ImplementationStatus
 
     assert spec.implementation == ImplementationStatus.IMPLEMENTED
@@ -554,9 +742,12 @@ def test_rollforward_sheet_report_section():
         section_presence={
             "b1_bkd_main_table": True,
             "b4_table3_check_with_table1": True,
+            "b5_table4_depreciation_pl": True,
         },
         table3_check_values=[Decimal("0")],
         table3_check_row=30,
+        table4_difference=Decimal("0"),
+        table4_difference_row=80,
         ending_totals={
             "impairment_provision": Decimal("0"),
             "original_value": Decimal("100"),
