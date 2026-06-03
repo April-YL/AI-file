@@ -36,6 +36,16 @@ def run_workbook_qc(
     records = []
     rule_ids: list[str] = []
     source_sheet = ""
+    sheet_titles: list[str] | None = None
+    wb_for_semantic: str | None = None
+
+    if Path(ctx.source_file).suffix.lower() in (".xlsx", ".xlsm", ".xlsb"):
+        wb_for_semantic = ctx.source_file
+        try:
+            sheet_titles = list_workbook_sheet_titles(ctx.source_file)
+        except Exception:
+            sheet_titles = None
+            wb_for_semantic = None
 
     if ctx.fa_list:
         fa_ctx = ColumnContext(
@@ -49,15 +59,7 @@ def run_workbook_qc(
         source_sheet = ctx.fa_list.source_sheet
 
     if ctx.summary:
-        sheet_titles: list[str] | None = None
-        wb_for_psp: str | None = None
-        if Path(ctx.source_file).suffix.lower() in (".xlsx", ".xlsm", ".xlsb"):
-            wb_for_psp = ctx.source_file
-            try:
-                sheet_titles = list_workbook_sheet_titles(ctx.source_file)
-            except Exception:
-                sheet_titles = None
-                wb_for_psp = None
+        wb_for_psp: str | None = wb_for_semantic
         waiver_reason_reviewer = None
         if config.enabled:
             from llm.summary_psp_review import (
@@ -115,10 +117,23 @@ def run_workbook_qc(
             from llm.lead_review import (
                 RULE_EXPECTATION,
                 RULE_FLUCTUATION,
+                build_lead_semantic_context,
                 build_lead_semantic_issues,
             )
 
-            llm_lead_issues = build_lead_semantic_issues(ctx.lead, config)
+            lead_semantic_context = build_lead_semantic_context(
+                summary=ctx.summary,
+                rollforward=ctx.rollforward,
+                addition_list=ctx.addition_list,
+                disposal_list=ctx.disposal_list,
+                reconciliations=ctx.reconciliations,
+                workbook_sheet_titles=sheet_titles,
+            )
+            llm_lead_issues = build_lead_semantic_issues(
+                ctx.lead,
+                config,
+                semantic_context=lead_semantic_context,
+            )
             lead_raw_issues.extend(llm_lead_issues)
             if llm_lead_issues:
                 for rid in (RULE_EXPECTATION, RULE_FLUCTUATION):

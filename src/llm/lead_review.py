@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from ingest.lead_sheet import LeadSheetDataset
+from ingest.records import FaListDataset
+from ingest.reconciliation import ReconciliationCheck
+from ingest.rollforward_sheet import RollforwardSheetDataset
+from ingest.summary_sheet import SummarySheetDataset
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
+from rules.parsing import parse_amount
 from rules.models import QcIssue, Severity
 
 RULE_EXPECTATION = "lead_expectation_semantic"
@@ -27,7 +33,7 @@ _EXPECTATION_SYSTEM = """你是固定资产审计 K.00 Lead 底稿复核助手�
 
 不确定表达：
 1) 会计政策及会计估计类，如折旧方法、使用寿命，默认无重大变化；如果预期分析中存在变化，需要对应的合理原因说明，否则返回 unclear；
-2) 输入未提供后推明细表方向或证据不足时，不得编造，返回 unclear；
+2) 输入未提供后推明细表方向、汇总页 PSP 状态、清单金额或其他证据不足时，不得编造，返回 unclear；
 3) 其他未涵盖情况。
 只输出 JSON。"""
 
@@ -48,23 +54,53 @@ _FLUCTUATION_SYSTEM = """你是固定资产审计 K.00 Lead 底稿复核助手�
 1) 若引导表变动超过阈值，异常波动说明中的金额与 Lead 引导表一致，且包含业务原因，并提到已检查的支持资料或对应程序，可以判断 sufficient。
 2) 若引导表变动未超过阈值，存在“无金额变动超过 TT”“无变动大于 10%”之类描述，可放宽；若存在变动金额及业务说明，检查其是否相符及合理。
 
-其他未涵盖情况返回 unclear；不得编造输入中没有的金额、Note 编号、支持资料或程序。
+其他未涵盖情况返回 unclear；不得编造输入中没有的金额、Note 编号、支持资料、程序页或汇总页执行状态。
 只输出 JSON。"""
 
 
 def build_lead_semantic_issues(
     lead: LeadSheetDataset,
     config: LlmConfig,
+    *,
+    semantic_context: dict[str, Any] | None = None,
 ) -> list[QcIssue]:
     issues: list[QcIssue] = []
-    issues.extend(_review_expectation_semantic(lead, config))
-    issues.extend(_review_fluctuation_notes_semantic(lead, config))
+    issues.extend(_review_expectation_semantic(lead, config, semantic_context=semantic_context))
+    issues.extend(_review_fluctuation_notes_semantic(lead, config, semantic_context=semantic_context))
     return issues
+
+
+def build_lead_semantic_context(
+    *,
+    summary: SummarySheetDataset | None = None,
+    rollforward: RollforwardSheetDataset | None = None,
+    addition_list: FaListDataset | None = None,
+    disposal_list: FaListDataset | None = None,
+    reconciliations: list[ReconciliationCheck] | None = None,
+    workbook_sheet_titles: list[str] | None = None,
+) -> dict[str, Any]:
+    """构造 Lead 语义复核的整本底稿上下文。"""
+    context: dict[str, Any] = {}
+    if summary is not None:
+        context["summary_psp"] = _summary_context(summary)
+    if rollforward is not None:
+        context["k01_rollforward"] = _rollforward_context(rollforward)
+    if addition_list is not None:
+        context["addition_list"] = _asset_list_context(addition_list)
+    if disposal_list is not None:
+        context["disposal_list"] = _asset_list_context(disposal_list)
+    if reconciliations:
+        context["reconciliations"] = [c.to_dict() for c in reconciliations[:8]]
+    if workbook_sheet_titles:
+        context["workbook_sheets"] = workbook_sheet_titles[:80]
+    return context
 
 
 def _review_expectation_semantic(
     lead: LeadSheetDataset,
     config: LlmConfig,
+    *,
+    semantic_context: dict[str, Any] | None = None,
 ) -> list[QcIssue]:
     # 无预期行时由确定性规则 lead_expectation_analysis 处理，不在此重复报错。
     if not lead.expectations:
@@ -92,9 +128,10 @@ def _review_expectation_semantic(
             for r in lead.movement_rows[:12]
         ],
         "review_hint": (
-            "如需判断预期方向与 K.01 后推明细表方向是否一致，只能使用输入中可见的 "
-            "movement_rows/volatility 或其他摘录；证据不足时返回 unclear。"
+            "判断预期方向与 K.01 后推明细表、汇总页 PSP、清单或勾稽结果是否一致时，"
+            "只能使用输入中可见的 movement_rows/volatility/workbook_context；证据不足时返回 unclear。"
         ),
+        "workbook_context": semantic_context or {},
     }
     out = _call_semantic_review(
         config=config,
@@ -127,6 +164,8 @@ def _review_expectation_semantic(
 def _review_fluctuation_notes_semantic(
     lead: LeadSheetDataset,
     config: LlmConfig,
+    *,
+    semantic_context: dict[str, Any] | None = None,
 ) -> list[QcIssue]:
     notes = (lead.fluctuation_notes or "").strip()
     # 空值由确定性规则 unexpected_movement_investigation 处理；这里仅评估“已填写但是否充分”。
@@ -148,8 +187,10 @@ def _review_fluctuation_notes_semantic(
         "volatility": lead.volatility.to_dict() if lead.volatility else None,
         "review_hint": (
             "若 movement_rows 中存在超过阈值的变动，应关注 notes/索引编号与下方波动说明是否对应；"
+            "并结合 workbook_context 中的 K.01、清单、汇总页 PSP 和勾稽结果判断说明是否有支持。"
             "比较金额时注意 k=千、m=百万等单位换算。"
         ),
+        "workbook_context": semantic_context or {},
     }
     out = _call_semantic_review(
         config=config,
@@ -203,3 +244,86 @@ def _call_semantic_review(
         "rationale": str(out.get("rationale", "")).strip(),
         "suggestion": str(out.get("suggested_action", "")).strip(),
     }
+
+
+def _summary_context(summary: SummarySheetDataset) -> dict[str, Any]:
+    return {
+        "source_sheet": summary.source_sheet,
+        "programs": [
+            {
+                "procedure_name": p.procedure_name,
+                "sheet_ref": p.sheet_ref,
+                "execution_status": p.execution_status,
+                "waiver_reason": p.waiver_reason,
+                "notes": p.notes,
+                "source_row": p.source_row,
+                "is_psp": p.is_psp,
+            }
+            for p in summary.programs[:20]
+        ],
+        "notes": summary.notes[:8],
+    }
+
+
+def _rollforward_context(rollforward: RollforwardSheetDataset) -> dict[str, Any]:
+    return {
+        "source_sheet": rollforward.source_sheet,
+        "has_movement_rows": rollforward.has_movement_rows,
+        "opening_totals": _value_dict(rollforward.opening_totals),
+        "ending_totals": _value_dict(rollforward.ending_totals),
+        "section_presence": rollforward.section_presence,
+        "section_evidence": rollforward.section_evidence,
+        "tb_reconciliation_detected": rollforward.tb_reconciliation_detected,
+        "tb_difference_values": [str(v) for v in rollforward.tb_difference_values[:8]],
+        "tb_notes_text": rollforward.tb_notes_text,
+        "table4_difference": (
+            str(rollforward.table4_difference)
+            if rollforward.table4_difference is not None
+            else None
+        ),
+        "table4_notes_text": rollforward.table4_notes_text,
+        "notes": rollforward.notes[:12],
+    }
+
+
+def _asset_list_context(dataset: FaListDataset) -> dict[str, Any]:
+    return {
+        "source_sheet": dataset.source_sheet,
+        "record_count": len(dataset.records),
+        "mapped_fields": [m.standard_field for m in dataset.mapped_fields],
+        "totals": {
+            field: total
+            for field in (
+                "original_value",
+                "accumulated_depreciation",
+                "impairment_provision",
+                "net_value",
+            )
+            if (total := _record_total(dataset, field)) is not None
+        },
+        "sample_rows": [
+            {
+                "source_row": r.source_row,
+                "asset_id": r.asset_id,
+                "asset_name": r.asset_name,
+                "original_value": r.original_value,
+                "accumulated_depreciation": r.accumulated_depreciation,
+                "net_value": r.net_value,
+            }
+            for r in dataset.records[:5]
+        ],
+    }
+
+
+def _record_total(dataset: FaListDataset, field: str) -> str | None:
+    total = None
+    for rec in dataset.records:
+        val = parse_amount(getattr(rec, field, None))
+        if val is None:
+            continue
+        total = val if total is None else total + val
+    return str(total) if total is not None else None
+
+
+def _value_dict(values: dict[str, Any]) -> dict[str, str]:
+    return {k: str(v) for k, v in values.items() if v is not None}

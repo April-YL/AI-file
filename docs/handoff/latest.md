@@ -97,6 +97,12 @@
   - LLM：UI 文案改为“启用大模型规则语义复核”；汇总页 PSP 不执行理由的 LLM 输入新增 `workbook_context`，包含 Lead TE/SAD/CRA/TT/预期/波动表、K.01 后推摘要、TB/表4差异、新增/处置清单、跨表勾稽和工作表列表。
   - 实测：真实底稿只读验证 `summary_source='汇总 '`、`program_count=12`；行15 处置测试“本期处置资产净值小于TE”输出 WARN；行22 减值测试“本期无减值迹象”输出 WARN。
   - 验证：`tests/ingest/test_summary_sheet.py -q --basetemp .pytest_tmp_summary` 7 通过；`tests/ingest/test_summary_sheet.py tests/report/test_workbook_pipeline.py tests/llm/test_summary_psp_review.py -q --basetemp .pytest_tmp_summary_regression` 13 通过；`tests/llm -q --basetemp .pytest_tmp_llm_all` 24 通过。
+- **Lead LLM 语义复核上下文增强（2026-06-03）**：
+  - 根因：Lead LLM 原先主要读取 Lead 单页的预期分析、引导表和波动说明；对“预期方向是否与 K.01 实际后推一致”“异常波动说明是否有程序/清单支持”等问题，上下文不足。
+  - LLM：新增 `build_lead_semantic_context()`；`lead_expectation_semantic` 与 `lead_fluctuation_notes_semantic` 的输入新增 `workbook_context`。
+  - 上下文包括：汇总页 PSP 执行/选否情况、K.01 后推期初/期末/区块/TB 差异/表4折旧差异、新增/处置清单记录数和金额、跨表勾稽结果、工作簿 sheet 列表。
+  - 口径：上下文不足时 prompt 要求返回 `unclear`，由规则输出 `NEED_REVIEW`；LLM 仍只辅助语义复核，不覆盖确定性规则的 `FAIL/PASS`。
+  - 验证：`tests/llm/test_lead_review.py -q --basetemp .pytest_tmp_lead_llm` 6 通过；`tests/llm -q --basetemp .pytest_tmp_llm_all_lead_context` 25 通过；`tests/report/test_workbook_pipeline.py -q --basetemp .pytest_tmp_report_lead_llm` 1 通过。
 - **外链底稿单元格批注 + Comments 跳转（2026-06-02）**：
   - report：`export_annotated_workbook` 不再因 A3/外部链接跳过业务表批注；改用 OOXML 原位注入传统 Excel 批注，避免 `openpyxl.save()` 重写外链。
   - Comments：`Comments【归档前删除】`、`Comments【FA list】`、`QC_Locator` 的 Cell Ref./Navigate 可作为内部跳转索引，点击定位到对应业务表单元格（当前默认 B 列）。

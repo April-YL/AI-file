@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+from ingest.models import AssetRecord, FieldMapping
 from ingest.lead_sheet import ExpectationRow, LeadMovementRow, LeadSheetDataset
+from ingest.records import FaListDataset
+from ingest.rollforward_sheet import RollforwardSheetDataset
+from ingest.summary_sheet import PspProgramRow, SummarySheetDataset
 from llm.config import LlmConfig
-from llm.lead_review import build_lead_semantic_issues
+from llm.lead_review import build_lead_semantic_context, build_lead_semantic_issues
 from rules.models import Severity
 
 
@@ -89,6 +93,83 @@ def test_lead_expectation_prompt_uses_rollforward_direction_criteria():
     assert "不要因为没有使用标准审计术语而判不足" in system
     assert payload["movement_rows"][0]["movement"] == "500000"
     assert "证据不足时返回 unclear" in payload["review_hint"]
+
+
+def test_lead_expectation_prompt_includes_workbook_context():
+    lead = LeadSheetDataset(
+        source_file="wb.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        expectations=[
+            ExpectationRow(
+                account_change="固定资产减少",
+                expectation="预计本期存在处置导致减少。",
+                source_row=31,
+            )
+        ],
+    )
+    summary = SummarySheetDataset(
+        source_file="wb.xlsx",
+        source_sheet="汇总 ",
+        header_row=1,
+        programs=[
+            PspProgramRow(
+                procedure_name="K.02.2 处置测试",
+                sheet_ref="K.02.2",
+                execution_status="否",
+                waiver_reason="本期处置资产净值小于TE。",
+                notes=None,
+                source_row=15,
+                is_psp=True,
+            )
+        ],
+    )
+    rollforward = RollforwardSheetDataset(
+        source_file="wb.xlsx",
+        source_sheet="K.01 Agree SL to GL",
+        header_row=None,
+        mapped_fields=[],
+        has_movement_rows=True,
+        tb_difference_values=[],
+        table4_difference=None,
+    )
+    disposal = FaListDataset(
+        source_file="wb.xlsx",
+        source_sheet="处置清单",
+        mapped_fields=[FieldMapping("net_value", "净值", 1)],
+        records=[
+            AssetRecord(
+                source_row=3,
+                asset_id="FA-TEST-001",
+                asset_name="处置设备",
+                net_value="120000",
+            )
+        ],
+    )
+    context = build_lead_semantic_context(
+        summary=summary,
+        rollforward=rollforward,
+        disposal_list=disposal,
+        workbook_sheet_titles=["汇总 ", "K.00 Lead Sheet", "K.01 Agree SL to GL", "处置清单"],
+    )
+
+    with patch(
+        "llm.lead_review.chat_completion_json",
+        side_effect=[{"assessment": "sufficient"}, {"assessment": "sufficient"}],
+    ) as mock_call:
+        issues = build_lead_semantic_issues(
+            lead,
+            _config(),
+            semantic_context=context,
+        )
+
+    assert issues == []
+    user = mock_call.call_args_list[0].kwargs["user"]
+    payload = json.loads(user.split("输入：", 1)[1])
+    assert "workbook_context" in payload
+    assert payload["workbook_context"]["summary_psp"]["programs"][0]["execution_status"] == "否"
+    assert payload["workbook_context"]["k01_rollforward"]["has_movement_rows"] is True
+    assert payload["workbook_context"]["disposal_list"]["record_count"] == 1
+    assert "处置清单" in payload["workbook_context"]["workbook_sheets"]
 
 
 def test_lead_fluctuation_semantic_need_review_when_unclear():
