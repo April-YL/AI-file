@@ -38,6 +38,9 @@ def main() -> int:
     print(f"BASE_URL: {config.base_url}")
     print(f"MODEL:    {config.model}")
     print(f"URL:      {config.chat_completions_url}")
+    print(f"TIMEOUT:  {config.timeout}s")
+    print(f"RETRIES:  {config.max_retries} (backoff={config.retry_backoff}s)")
+    print(f"PROXY:    {'set' if config.proxy else 'system/env' if config.trust_env else 'off'}")
     print("正在发送探测请求…")
 
     try:

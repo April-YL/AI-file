@@ -56,6 +56,9 @@ def run_lead_rules(
     lead: LeadSheetDataset,
     *,
     rollforward: RollforwardSheetDataset | None = None,
+    strict_adjustment_total: bool | None = None,
+    adjustment_layout_result: dict | None = None,
+    adjustment_extracted_rows: list[dict] | None = None,
 ) -> list[QcIssue]:
     """执行全部 Lead 相关规则（不含 attach_rule_metadata）。"""
     issues: list[QcIssue] = []
@@ -75,6 +78,13 @@ def run_lead_rules(
     issues.extend(check_lead_check_with_a3_row(lead))
     issues.extend(check_unexpected_movement_investigation(lead))
     issues.extend(check_lead_fluctuation_notes_refs(lead))
-    issues.extend(check_lead_adjustment_internal_consistency(lead))
+    issues.extend(
+        check_lead_adjustment_internal_consistency(
+            lead,
+            strict_total=strict_adjustment_total,
+            layout_result=adjustment_layout_result,
+            extracted_rows=adjustment_extracted_rows,
+        )
+    )
     issues.extend(check_lead_rollforward_tb_reconciliation(lead, rollforward))
     return issues

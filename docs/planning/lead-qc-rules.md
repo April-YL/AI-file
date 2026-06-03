@@ -195,7 +195,9 @@ checklist 的 `lead_exception_investigation` 与 AE-004 **合并为一个 rule_i
 
 ## 模块 6：调整汇总表
 
-**Ingest**：`adjustment_rows`。
+**Ingest**：`adjustment_rows` + **`lead_adjustment_grid`**（块内 grid，供 LLM）。
+
+**LLM 设计（M3c）**：见 [lead-adjustment-llm-design.md](lead-adjustment-llm-design.md)（版式/借贷方向、direct vs indirect 跨科目、LEAD-017 门控）。
 
 ### 业务检查点
 
@@ -208,7 +210,10 @@ checklist 的 `lead_exception_investigation` 与 AE-004 **合并为一个 rule_i
 
 | 规则 ID | 检查内容 | M2 / M3 |
 | --- | --- | --- |
-| MT-003 `adjustment_testing` | 6.1 恰当性 | M2：有调整行时摘录；M3/人工 |
+| LEAD-017 `lead_adjustment_internal_consistency` | 主表调整列 vs 汇总表（**合计仅在高置信 direct 场景**） | M2 已实现 + LLM 门控 |
+| LEAD-018 `lead_adjustment_layout_review` | 版式/金额列不可识别 | M3c LLM → `NEED_REVIEW` |
+| LEAD-019 `lead_adjustment_semantic` | MT-003 恰当性、跨科目闭环、direct 金额 | M3c LLM → `WARN`/`NEED_REVIEW` |
+| MT-003 `adjustment_testing` | 6.1 恰当性 | 字典 MANUAL；由 LEAD-019 辅助 |
 | `lead_adjustment_presence`（待建） | 6.2 | 无调整且无说明 → `INFO`/`PASS`，不 FAIL |
 
 ---

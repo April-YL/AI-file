@@ -29,7 +29,10 @@ $lines = @(
     "FA_QC_LLM_MODEL=$model",
     "FA_QC_LLM_API_KEY=$key",
     "FA_QC_LLM_TIMEOUT=120",
-    "FA_QC_LLM_MAX_TOKENS=4096"
+    "FA_QC_LLM_MAX_TOKENS=4096",
+    "FA_QC_LLM_MAX_RETRIES=2",
+    "FA_QC_LLM_RETRY_BACKOFF=1.5",
+    "FA_QC_LLM_TRUST_ENV=true"
 )
 Set-Content -Path $EnvFile -Value ($lines -join "`n") -Encoding UTF8
 Write-Host "`n已写入 .env。正在测试连通性…" -ForegroundColor Green

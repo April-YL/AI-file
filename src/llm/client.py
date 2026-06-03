@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import httpx
@@ -10,6 +11,9 @@ from llm.config import LlmConfig
 
 class LlmClientError(RuntimeError):
     """调用大模型 API 失败。"""
+
+
+_RETRY_STATUS_CODES = {429, 502, 503, 504}
 
 
 def chat_completion_json(
@@ -40,12 +44,18 @@ def chat_completion_json(
 
     try:
         if http_client is not None:
-            resp = _post(http_client)
+            resp = _post_with_retries(_post, http_client, config=config)
         else:
-            with httpx.Client(timeout=config.timeout) as client:
-                resp = _post(client)
-    except httpx.HTTPError as e:
-        raise LlmClientError(f"无法连接 LLM API: {e}") from e
+            with httpx.Client(
+                timeout=config.timeout,
+                proxy=config.proxy,
+                trust_env=config.trust_env,
+            ) as client:
+                resp = _post_with_retries(_post, client, config=config)
+    except httpx.TransportError as e:
+        raise LlmClientError(
+            f"无法连接 LLM API（已尝试 {config.max_retries + 1} 次）: {e}"
+        ) from e
 
     if resp.status_code >= 400:
         raise LlmClientError(
@@ -59,6 +69,39 @@ def chat_completion_json(
         raise LlmClientError(f"LLM 响应格式异常: {resp.text[:500]}") from e
 
     return _parse_json_content(content)
+
+
+def _post_with_retries(
+    post_func,
+    client: httpx.Client,
+    *,
+    config: LlmConfig,
+) -> httpx.Response:
+    attempts = config.max_retries + 1
+    last_error: httpx.TransportError | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = post_func(client)
+        except httpx.TransportError as e:
+            last_error = e
+            if attempt >= attempts:
+                raise
+            _sleep_before_retry(config.retry_backoff, attempt)
+            continue
+
+        if resp.status_code not in _RETRY_STATUS_CODES or attempt >= attempts:
+            return resp
+        _sleep_before_retry(config.retry_backoff, attempt)
+
+    if last_error is not None:
+        raise last_error
+    raise LlmClientError("LLM API request failed without a response.")
+
+
+def _sleep_before_retry(backoff: float, attempt: int) -> None:
+    if backoff <= 0:
+        return
+    time.sleep(backoff * attempt)
 
 
 def _parse_json_content(content: str) -> dict[str, Any]:

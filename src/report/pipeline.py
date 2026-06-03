@@ -112,14 +112,27 @@ def run_workbook_qc(
 
     lead_sheet_section = None
     if ctx.lead:
-        lead_raw_issues = run_lead_rules(ctx.lead, rollforward=ctx.rollforward)
+        adjustment_layout_result = None
+        adjustment_extracted_rows = None
+        strict_adjustment_total = None
+        lead_adj_issues: list = []
+        lead_semantic_context = None
+
         if config.enabled:
+            from llm.lead_adjustment_review import (
+                RULE_LAYOUT,
+                RULE_SEMANTIC,
+                extract_layout_and_rows_for_gating,
+                run_lead_adjustment_llm_review,
+                should_review_adjustments,
+            )
             from llm.lead_review import (
                 RULE_EXPECTATION,
                 RULE_FLUCTUATION,
                 build_lead_semantic_context,
                 build_lead_semantic_issues,
             )
+            from rules.lead_adjustment_gating import should_run_strict_total_check
 
             lead_semantic_context = build_lead_semantic_context(
                 summary=ctx.summary,
@@ -129,14 +142,45 @@ def run_workbook_qc(
                 reconciliations=ctx.reconciliations,
                 workbook_sheet_titles=sheet_titles,
             )
+
+            if should_review_adjustments(ctx.lead):
+                lead_adj_issues, adj_review = run_lead_adjustment_llm_review(
+                    ctx.lead,
+                    config,
+                    workbook_path=ctx.source_file,
+                    workbook_context=lead_semantic_context,
+                )
+                if adj_review:
+                    adjustment_layout_result, adjustment_extracted_rows = (
+                        extract_layout_and_rows_for_gating(adj_review)
+                    )
+                    strict_adjustment_total = should_run_strict_total_check(
+                        ctx.lead,
+                        layout_result=adjustment_layout_result,
+                        extracted_rows=adjustment_extracted_rows,
+                    )
+
+        lead_raw_issues = run_lead_rules(
+            ctx.lead,
+            rollforward=ctx.rollforward,
+            strict_adjustment_total=strict_adjustment_total,
+            adjustment_layout_result=adjustment_layout_result,
+            adjustment_extracted_rows=adjustment_extracted_rows,
+        )
+        if config.enabled:
             llm_lead_issues = build_lead_semantic_issues(
                 ctx.lead,
                 config,
-                semantic_context=lead_semantic_context,
+                semantic_context=lead_semantic_context or {},
             )
             lead_raw_issues.extend(llm_lead_issues)
+            lead_raw_issues.extend(lead_adj_issues)
             if llm_lead_issues:
                 for rid in (RULE_EXPECTATION, RULE_FLUCTUATION):
+                    if rid not in rule_ids:
+                        rule_ids.append(rid)
+            if lead_adj_issues:
+                for rid in (RULE_LAYOUT, RULE_SEMANTIC):
                     if rid not in rule_ids:
                         rule_ids.append(rid)
         lead_issues = attach_rule_metadata(lead_raw_issues)
