@@ -303,6 +303,7 @@
 - `src/ingest/`、`src/rules/`、`src/report/`
 - `tests/rules/`、`tests/ingest/`、`tests/fixtures/`
 - `docs/ONBOARDING.md`
+- `docs/workpaper-ingest-and-rule-methodology.md` — **底稿识别与质检规则开发方法论**（模板定结构、SOP 定口径、ingest 先读对、rules 再判对）
 - `docs/llm-agent-roadmap.md` — 三层 LLM 分工与 M3c 任务（C1–C9）
 - `docs/planning/lead-qc-rules.md` — K.00 分模块质检点、SOP 对照遗漏、M2 实现顺序
 - `docs/planning/program-qc-coverage-index.md` — **程序质检覆盖总索引**（汇总 / Lead / K.01 / K.02 / K.03 开发进度）
