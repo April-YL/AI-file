@@ -87,6 +87,71 @@ def review_waiver_reason_with_llm(
     )
 
 
+def review_waiver_reasons_batch_with_llm(
+    rows: list[PspProgramRow],
+    config: LlmConfig,
+    *,
+    semantic_context: dict[str, Any] | None = None,
+) -> dict[int, WaiverSemanticReview]:
+    targets = [
+        (idx, row)
+        for idx, row in enumerate(rows)
+        if (row.waiver_reason or "").strip()
+    ]
+    if not targets:
+        return {}
+    payload = {
+        "programs": [
+            {
+                "row_id": idx,
+                "procedure_name": row.procedure_name,
+                "sheet_ref": row.sheet_ref,
+                "execution_status": row.execution_status,
+                "waiver_reason": row.waiver_reason,
+                "notes": row.notes,
+                "source_row": row.source_row,
+            }
+            for idx, row in targets
+        ],
+        "workbook_context": semantic_context or {},
+    }
+    user = (
+        "请逐条判断以下汇总页程序的不执行理由是否充分。返回 JSON：\n"
+        '{ "reviews": ['
+        '{ "row_id": 0, "adequacy":"sufficient|insufficient|unclear", '
+        '"rationale":"", "suggested_action":"" }'
+        "] }\n"
+        f"输入：{json.dumps(payload, ensure_ascii=False)}"
+    )
+    try:
+        out = chat_completion_json(config, system=_WAIVER_SYSTEM, user=user)
+    except LlmClientError:
+        return {}
+    raw_reviews = out.get("reviews")
+    if not isinstance(raw_reviews, list):
+        return {}
+    reviews: dict[int, WaiverSemanticReview] = {}
+    valid_ids = {idx for idx, _ in targets}
+    for item in raw_reviews:
+        if not isinstance(item, dict):
+            continue
+        try:
+            row_id = int(item.get("row_id"))
+        except (TypeError, ValueError):
+            continue
+        if row_id not in valid_ids:
+            continue
+        adequacy = str(item.get("adequacy", "")).strip().lower()
+        if adequacy not in {"sufficient", "insufficient", "unclear"}:
+            continue
+        reviews[row_id] = WaiverSemanticReview(
+            adequacy=adequacy,  # type: ignore[arg-type]
+            rationale=str(item.get("rationale", "")).strip(),
+            suggested_action=str(item.get("suggested_action", "")).strip(),
+        )
+    return reviews
+
+
 def build_waiver_semantic_context(
     *,
     lead: LeadSheetDataset | None = None,

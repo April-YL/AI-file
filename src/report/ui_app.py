@@ -341,6 +341,26 @@ def _render_runtime_timings(data: dict) -> None:
         ),
         unsafe_allow_html=True,
     )
+    llm_details = timings.get("llm_details") or []
+    detail_parts = []
+    for item in llm_details:
+        if not isinstance(item, dict):
+            continue
+        label = item.get("label") or item.get("key") or "LLM"
+        calls = item.get("calls", 0)
+        detail_parts.append(
+            f"{label}: {_format_seconds(item.get('seconds'))} ({calls}次)"
+        )
+    if detail_parts:
+        st.markdown(
+            (
+                '<div style="font-size: 0.74rem; color: #777777; '
+                'margin-top: 0.15rem;">LLM 分项：'
+                + " · ".join(detail_parts)
+                + "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
 
 
 def _render_procedure_summary(data: dict) -> None:

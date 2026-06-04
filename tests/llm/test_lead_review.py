@@ -200,7 +200,8 @@ def test_lead_expectation_prompt_includes_workbook_context():
     assert payload["workbook_context"]["summary_psp"]["programs"][0]["execution_status"] == "否"
     assert payload["workbook_context"]["k01_rollforward"]["has_movement_rows"] is True
     assert payload["workbook_context"]["disposal_list"]["record_count"] == 1
-    assert "处置清单" in payload["workbook_context"]["workbook_sheets"]
+    assert "sample_rows" not in payload["workbook_context"]["disposal_list"]
+    assert "workbook_sheets" not in payload["workbook_context"]
 
 
 def test_lead_fluctuation_semantic_need_review_when_unclear():

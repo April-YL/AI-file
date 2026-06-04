@@ -135,7 +135,11 @@ def _review_expectation_semantic(
             "判断预期方向与 K.01 后推明细表、汇总页 PSP、清单或勾稽结果是否一致时，"
             "只能使用输入中可见的 movement_rows/volatility/workbook_context；证据不足时返回 unclear。"
         ),
-        "workbook_context": semantic_context or {},
+        "workbook_context": _compact_lead_semantic_context(
+            semantic_context or {},
+            lead=lead,
+            purpose="expectation",
+        ),
     }
     out = _call_semantic_review(
         config=config,
@@ -186,7 +190,11 @@ def _review_fluctuation_notes_semantic(
             "并结合 workbook_context 中的 K.01、清单、汇总页 PSP 和勾稽结果判断说明是否有支持。"
             "比较金额时注意 k=千、m=百万等单位换算。"
         ),
-        "workbook_context": semantic_context or {},
+        "workbook_context": _compact_lead_semantic_context(
+            semantic_context or {},
+            lead=lead,
+            purpose="fluctuation",
+        ),
     }
     out = _call_semantic_review(
         config=config,
@@ -314,6 +322,111 @@ def _call_semantic_review(
         "rationale": str(out.get("rationale", "")).strip(),
         "suggestion": str(out.get("suggested_action", "")).strip(),
     }
+
+
+def _compact_lead_semantic_context(
+    context: dict[str, Any],
+    *,
+    lead: LeadSheetDataset,
+    purpose: str,
+) -> dict[str, Any]:
+    """保留 Lead 判断依据，裁掉与本质检点无关的大块样本数据。"""
+    if not context:
+        return {}
+    out: dict[str, Any] = {}
+    summary = context.get("summary_psp")
+    if isinstance(summary, dict):
+        out["summary_psp"] = _compact_summary_context(summary)
+    rollforward = context.get("k01_rollforward")
+    if isinstance(rollforward, dict):
+        out["k01_rollforward"] = _compact_rollforward_context(rollforward)
+    reconciliations = context.get("reconciliations")
+    if isinstance(reconciliations, list) and reconciliations:
+        out["reconciliations"] = reconciliations[:6]
+
+    need_addition = _lead_text_contains(lead, ("新增", "购置", "addition", "purchase"))
+    need_disposal = _lead_text_contains(lead, ("处置", "减少", "disposal", "retirement"))
+    if purpose == "fluctuation":
+        # 波动说明经常会引用新增/处置清单作为支持证据；仅保留汇总级信息。
+        need_addition = need_addition or bool(context.get("addition_list"))
+        need_disposal = need_disposal or bool(context.get("disposal_list"))
+    if need_addition and isinstance(context.get("addition_list"), dict):
+        out["addition_list"] = _compact_asset_list_context(context["addition_list"])
+    if need_disposal and isinstance(context.get("disposal_list"), dict):
+        out["disposal_list"] = _compact_asset_list_context(context["disposal_list"])
+    return out
+
+
+def _lead_text_contains(lead: LeadSheetDataset, tokens: tuple[str, ...]) -> bool:
+    text_parts: list[str] = [lead.fluctuation_notes or ""]
+    text_parts.extend(str(e.account_change or "") for e in lead.expectations)
+    text_parts.extend(str(e.expectation or "") for e in lead.expectations)
+    text_parts.extend(str(r.account_label or "") for r in lead.movement_rows)
+    blob = " ".join(text_parts).lower()
+    return any(token.lower() in blob for token in tokens)
+
+
+def _compact_summary_context(summary: dict[str, Any]) -> dict[str, Any]:
+    programs = summary.get("programs") if isinstance(summary.get("programs"), list) else []
+    focused = []
+    for row in programs:
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get("execution_status") or "").strip()
+        waiver = str(row.get("waiver_reason") or "").strip()
+        if status or waiver:
+            focused.append(
+                {
+                    "procedure_name": row.get("procedure_name"),
+                    "sheet_ref": row.get("sheet_ref"),
+                    "execution_status": row.get("execution_status"),
+                    "waiver_reason": row.get("waiver_reason"),
+                    "source_row": row.get("source_row"),
+                    "is_psp": row.get("is_psp"),
+                }
+            )
+        if len(focused) >= 12:
+            break
+    return {
+        "source_sheet": summary.get("source_sheet"),
+        "programs": focused,
+    }
+
+
+def _compact_rollforward_context(rollforward: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source_sheet": rollforward.get("source_sheet"),
+        "has_movement_rows": rollforward.get("has_movement_rows"),
+        "opening_totals": rollforward.get("opening_totals"),
+        "ending_totals": rollforward.get("ending_totals"),
+        "section_presence": rollforward.get("section_presence"),
+        "tb_reconciliation_detected": rollforward.get("tb_reconciliation_detected"),
+        "tb_difference_values": rollforward.get("tb_difference_values"),
+        "table3_check_values": rollforward.get("table3_check_values"),
+        "table4_difference": rollforward.get("table4_difference"),
+        "notes": (rollforward.get("notes") or [])[:6],
+        "tb_notes_text": _truncate_text(rollforward.get("tb_notes_text"), 800),
+        "table3_notes_text": _truncate_text(rollforward.get("table3_notes_text"), 800),
+        "table4_notes_text": _truncate_text(rollforward.get("table4_notes_text"), 800),
+    }
+
+
+def _compact_asset_list_context(asset_list: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source_sheet": asset_list.get("source_sheet"),
+        "record_count": asset_list.get("record_count"),
+        "mapped_fields": asset_list.get("mapped_fields"),
+        "totals": asset_list.get("totals"),
+    }
+
+
+def _truncate_text(value: Any, limit: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...[truncated]"
 
 
 def _summary_context(summary: SummarySheetDataset) -> dict[str, Any]:

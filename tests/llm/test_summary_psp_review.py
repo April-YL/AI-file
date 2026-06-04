@@ -11,6 +11,7 @@ from llm.config import LlmConfig
 from llm.summary_psp_review import (
     build_sheet_semantic_issues,
     build_waiver_semantic_context,
+    review_waiver_reasons_batch_with_llm,
     review_waiver_reason_with_llm,
 )
 
@@ -45,6 +46,56 @@ def test_review_waiver_reason_with_llm_parses_result():
         res = review_waiver_reason_with_llm(row, _config())
     assert res is not None
     assert res.adequacy == "insufficient"
+
+
+def test_review_waiver_reasons_batch_with_llm_parses_results():
+    rows = [
+        PspProgramRow(
+            procedure_name="K.02.1 addition test",
+            sheet_ref="K.02.1 addition test",
+            execution_status="No",
+            waiver_reason="amount is small",
+            notes=None,
+            source_row=12,
+            is_psp=False,
+        ),
+        PspProgramRow(
+            procedure_name="K.03.2 depreciation TOD",
+            sheet_ref="K.03.2 depreciation TOD",
+            execution_status="No",
+            waiver_reason="not applicable",
+            notes=None,
+            source_row=19,
+            is_psp=False,
+        ),
+    ]
+    with patch(
+        "llm.summary_psp_review.chat_completion_json",
+        return_value={
+            "reviews": [
+                {
+                    "row_id": 0,
+                    "adequacy": "insufficient",
+                    "rationale": "missing threshold basis",
+                    "suggested_action": "add TE/TT/SAD basis",
+                },
+                {
+                    "row_id": 1,
+                    "adequacy": "unclear",
+                    "rationale": "manual review needed",
+                    "suggested_action": "check impairment indicator procedure",
+                },
+            ]
+        },
+    ) as mock_call:
+        reviews = review_waiver_reasons_batch_with_llm(rows, _config())
+
+    assert reviews[0].adequacy == "insufficient"
+    assert reviews[1].adequacy == "unclear"
+    user = mock_call.call_args.kwargs["user"]
+    assert '"programs"' in user
+    assert '"row_id": 0' in user
+    assert '"row_id": 1' in user
 
 
 def test_review_waiver_reason_prompt_uses_calibrated_psp_criteria():

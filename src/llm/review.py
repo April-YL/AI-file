@@ -6,8 +6,8 @@ from typing import Any
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
 from llm.prompts import SYSTEM_PROMPT, build_review_user_prompt
-from llm.redact import redact_issues_for_llm, redact_programs_for_llm
-from llm.workbook_payload import build_workbook_llm_payload, payload_section_names
+from llm.redact import redact_issues_for_llm, redact_programs_for_llm, redact_value_tree
+from llm.workbook_payload import payload_section_names
 from ingest.summary_sheet import SummarySheetDataset
 from ingest.workbook_context import WorkbookQcContext
 from report.summary import QcReport
@@ -72,7 +72,7 @@ def enrich_report_with_llm(
     workbook_excerpt = None
     section_names: list[str] = []
     if workbook is not None:
-        workbook_excerpt = build_workbook_llm_payload(
+        workbook_excerpt = _build_compact_workbook_payload(
             workbook,
             procedure_code=report.procedure_code,
             summary_sheet_section=report.summary_sheet_section,
@@ -115,6 +115,85 @@ def enrich_report_with_llm(
         )
 
     return _attach_enrichment(report, enrichment)
+
+
+def _build_compact_workbook_payload(
+    workbook: WorkbookQcContext,
+    *,
+    procedure_code: str,
+    summary_sheet_section: dict[str, Any] | None,
+    manual_review_sections: list[dict[str, Any]],
+) -> dict[str, Any]:
+    lead = workbook.lead
+    rollforward = workbook.rollforward
+    summary = workbook.summary
+    payload: dict[str, Any] = {
+        "source_file": workbook.source_file,
+        "procedure_code": procedure_code,
+        "summary": None,
+        "lead": None,
+        "rollforward": None,
+        "reconciliations": [c.to_dict() for c in workbook.reconciliations[:6]],
+        "summary_sheet_section": summary_sheet_section,
+        "manual_review_sections": manual_review_sections[:3],
+    }
+    if summary is not None:
+        payload["summary"] = {
+            "source_sheet": summary.source_sheet,
+            "layout": summary.layout,
+            "program_count": len(summary.programs),
+            "programs": [
+                {
+                    "procedure_name": p.procedure_name,
+                    "sheet_ref": p.sheet_ref,
+                    "execution_status": p.execution_status,
+                    "waiver_reason": p.waiver_reason,
+                    "source_row": p.source_row,
+                }
+                for p in summary.programs[:20]
+            ],
+        }
+    if lead is not None:
+        payload["lead"] = {
+            "source_sheet": lead.source_sheet,
+            "layout_variant": lead.layout_variant,
+            "basic_info_fields": [
+                f.to_dict(lead.source_sheet)
+                for f in lead.basic_info_fields
+                if f.field_key in {"pm", "te", "sad", "check_with_a3"}
+            ],
+            "materiality": [m.to_dict(lead.source_sheet) for m in lead.materiality],
+            "cra_rows": [r.to_dict(lead.source_sheet) for r in lead.cra_rows[:8]],
+            "expectations": [e.to_dict() for e in lead.expectations[:8]],
+            "movement_rows": [r.to_dict() for r in lead.movement_rows[:8]],
+            "fluctuation_notes": (lead.fluctuation_notes or "")[:1200],
+            "adjustment_row_count": len(lead.adjustment_rows),
+            "notes": lead.notes[:6],
+        }
+    if rollforward is not None:
+        payload["rollforward"] = {
+            "source_sheet": rollforward.source_sheet,
+            "has_movement_rows": rollforward.has_movement_rows,
+            "opening_totals": {
+                k: str(v) for k, v in rollforward.opening_totals.items() if v is not None
+            },
+            "ending_totals": {
+                k: str(v) for k, v in rollforward.ending_totals.items() if v is not None
+            },
+            "tb_difference_values": [
+                str(v) for v in rollforward.tb_difference_values[:6]
+            ],
+            "table3_check_values": [
+                str(v) for v in rollforward.table3_check_values[:6]
+            ],
+            "table4_difference": (
+                str(rollforward.table4_difference)
+                if rollforward.table4_difference is not None
+                else None
+            ),
+            "notes": rollforward.notes[:8],
+        }
+    return redact_value_tree(payload)
 
 
 def _normalize_notes(raw: Any) -> list[dict[str, Any]]:

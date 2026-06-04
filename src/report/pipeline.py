@@ -43,6 +43,16 @@ def run_workbook_qc(
     qc_start = perf_counter()
     config = load_llm_config(cli_enabled=llm)
     llm_seconds = 0.0
+    llm_details = {}
+
+    def record_llm_detail(key: str, label: str, seconds: float, calls: int = 1) -> None:
+        detail = llm_details.setdefault(
+            key,
+            {"label": label, "seconds": 0.0, "calls": 0},
+        )
+        detail["seconds"] = float(detail["seconds"]) + max(seconds, 0.0)
+        detail["calls"] = int(detail["calls"]) + max(calls, 0)
+
     issues = []
     records = []
     rule_ids: list[str] = []
@@ -76,7 +86,7 @@ def run_workbook_qc(
             llm_t0 = perf_counter()
             from llm.summary_psp_review import (
                 build_waiver_semantic_context,
-                review_waiver_reason_with_llm,
+                review_waiver_reasons_batch_with_llm,
             )
 
             waiver_semantic_context = build_waiver_semantic_context(
@@ -88,18 +98,30 @@ def run_workbook_qc(
                 workbook_sheet_titles=sheet_titles,
             )
 
+            waiver_target_count = sum(
+                1 for row in ctx.summary.programs if (row.waiver_reason or "").strip()
+            )
+            waiver_reviews = review_waiver_reasons_batch_with_llm(
+                ctx.summary.programs,
+                config,
+                semantic_context=waiver_semantic_context,
+            )
+            waiver_reviews_by_id = {
+                id(ctx.summary.programs[idx]): review
+                for idx, review in waiver_reviews.items()
+                if 0 <= idx < len(ctx.summary.programs)
+            }
+
             def waiver_reason_reviewer(row):
-                nonlocal llm_seconds
-                review_t0 = perf_counter()
-                try:
-                    return review_waiver_reason_with_llm(
-                        row,
-                        config,
-                        semantic_context=waiver_semantic_context,
-                    )
-                finally:
-                    llm_seconds += perf_counter() - review_t0
-            llm_seconds += perf_counter() - llm_t0
+                return waiver_reviews_by_id.get(id(row))
+            elapsed = perf_counter() - llm_t0
+            llm_seconds += elapsed
+            if waiver_target_count:
+                record_llm_detail(
+                    "summary_waiver_reason",
+                    "汇总页 PSP 拒绝理由",
+                    elapsed,
+                )
 
         psp_raw_issues = check_psp_completion(
             ctx.summary,
@@ -120,7 +142,13 @@ def run_workbook_qc(
                     workbook_sheet_titles=sheet_titles,
                 )
             )
-            llm_seconds += perf_counter() - llm_t0
+            elapsed = perf_counter() - llm_t0
+            llm_seconds += elapsed
+            record_llm_detail(
+                "summary_sheet_semantic",
+                "汇总页 sheet 语义匹配",
+                elapsed,
+            )
         psp_issues = attach_rule_metadata(psp_raw_issues)
         issues.extend(psp_issues)
         summary_sheet_section = build_summary_sheet_section(ctx.summary, psp_issues)
@@ -196,7 +224,13 @@ def run_workbook_qc(
                         layout_result=adjustment_layout_result,
                         extracted_rows=adjustment_extracted_rows,
                     )
-            llm_seconds += perf_counter() - llm_t0
+            elapsed = perf_counter() - llm_t0
+            llm_seconds += elapsed
+            record_llm_detail(
+                "lead_adjustment_semantic",
+                "Lead 调整分录 LLM",
+                elapsed,
+            )
 
         lead_raw_issues = run_lead_rules(
             ctx.lead,
@@ -222,7 +256,13 @@ def run_workbook_qc(
                 for rid in (RULE_LAYOUT, RULE_SEMANTIC):
                     if rid not in rule_ids:
                         rule_ids.append(rid)
-            llm_seconds += perf_counter() - llm_t0
+            elapsed = perf_counter() - llm_t0
+            llm_seconds += elapsed
+            record_llm_detail(
+                "lead_semantic",
+                "Lead 预期/波动说明",
+                elapsed,
+            )
         lead_issues = attach_rule_metadata(lead_raw_issues)
         issues.extend(lead_issues)
         lead_sheet_section = build_lead_sheet_section(ctx.lead, lead_issues)
@@ -276,7 +316,13 @@ def run_workbook_qc(
             rollforward_raw_issues.extend(rf_note_issues)
             if rf_note_issues and RF_NOTES_RULE not in rule_ids:
                 rule_ids.append(RF_NOTES_RULE)
-            llm_seconds += perf_counter() - llm_t0
+            elapsed = perf_counter() - llm_t0
+            llm_seconds += elapsed
+            record_llm_detail(
+                "rollforward_notes_semantic",
+                "K.01 后推说明",
+                elapsed,
+            )
         rollforward_issues = attach_rule_metadata(rollforward_raw_issues)
         issues.extend(rollforward_issues)
         rollforward_sheet_section = build_rollforward_sheet_section(
@@ -310,13 +356,28 @@ def run_workbook_qc(
             summary=ctx.summary,
             workbook=ctx,
         )
-        llm_seconds += perf_counter() - llm_t0
+        elapsed = perf_counter() - llm_t0
+        llm_seconds += elapsed
+        record_llm_detail(
+            "report_enrichment",
+            "最终报告摘要",
+            elapsed,
+        )
     qc_seconds = perf_counter() - qc_start
     report.runtime_timings.update(
         {
             "rules_seconds": round(max(qc_seconds - llm_seconds, 0.0), 3),
             "llm_seconds": round(llm_seconds, 3),
             "llm_enabled": bool(config.enabled),
+            "llm_details": [
+                {
+                    "key": key,
+                    "label": detail["label"],
+                    "seconds": round(float(detail["seconds"]), 3),
+                    "calls": int(detail["calls"]),
+                }
+                for key, detail in llm_details.items()
+            ],
         }
     )
     return report
