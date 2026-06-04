@@ -3,19 +3,47 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import openpyxl
 import pytest
 
-from ingest.lead_adjustment_grid import build_adjustment_grid
-from ingest.lead_sheet import AdjustmentSummaryRow, LeadMovementRow, LeadSheetDataset, parse_lead_sheet_rows
+from ingest.lead_adjustment_grid import build_adjustment_grid, load_adjustment_grid_for_lead
+from ingest.lead_sheet import (
+    AdjustmentSummaryRow,
+    LeadMovementRow,
+    LeadSheetDataset,
+    load_lead_from_workbook,
+    parse_lead_sheet_rows,
+)
 from ingest.lead_sheet_blocks import LeadBlock, LeadBlockKind
+from llm.config import LlmConfig
 from llm.lead_adjustment_review import (
+    RULE_LAYOUT,
+    RULE_SEMANTIC,
     build_adjustment_review_payload,
     build_guidance_adjustments,
+    build_lead_adjustment_issues,
+    extract_layout_and_rows_for_gating,
+    run_lead_adjustment_llm_review,
     should_review_adjustments,
 )
 from rules.lead_adjustment_gating import is_direct_ppe_account, should_run_strict_total_check
+from rules.lead_adjustment_internal_consistency import check_lead_adjustment_internal_consistency
+from rules.models import Severity
+
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+FIXTURE_EN = FIXTURES / "lead_adjustment_en_debit_credit.xlsx"
+FIXTURE_CROSS = FIXTURES / "lead_adjustment_cross_account_aa.xlsx"
+
+
+def _config(*, enabled: bool = True) -> LlmConfig:
+    return LlmConfig(
+        enabled=enabled,
+        base_url="https://api.example.com/v1",
+        api_key="sk-test",
+        model="gpt-4o-mini",
+    )
 
 
 def _minimal_lead_with_adjustment_block() -> LeadSheetDataset:
@@ -69,6 +97,22 @@ def test_should_review_when_main_has_adjustment_only():
     assert should_review_adjustments(lead) is True
 
 
+def test_should_review_false_without_adjustment_block():
+    lead = LeadSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        movement_rows=[
+            LeadMovementRow(
+                account_label="原值",
+                sheet_ref="K.01",
+                values={"audit_adjustment": "100"},
+                source_row=49,
+            ),
+        ],
+    )
+    assert should_review_adjustments(lead) is False
+
+
 def test_build_guidance_adjustments():
     lead = _minimal_lead_with_adjustment_block()
     guidance = build_guidance_adjustments(lead)
@@ -91,7 +135,9 @@ def test_build_adjustment_review_payload_includes_grid_and_policy():
 
 def test_is_direct_ppe_account():
     assert is_direct_ppe_account("固定资产-原值") is True
+    assert is_direct_ppe_account("PPE Cost") is True
     assert is_direct_ppe_account("管理费用") is False
+    assert is_direct_ppe_account("SG&A expense") is False
 
 
 def test_strict_total_gated_by_low_layout():
@@ -118,6 +164,108 @@ def test_strict_total_on_for_direct_rows():
         layout_result={"confidence": "high", "amount_layout": "single_signed_column"},
         extracted_rows=[{"ppe_impact": "direct", "account_label": "原值"}],
     ) is True
+
+
+def test_llm_review_disabled_returns_empty():
+    lead = _minimal_lead_with_adjustment_block()
+    issues, review = run_lead_adjustment_llm_review(lead, _config(enabled=False))
+    assert issues == []
+    assert review is None
+
+
+def test_llm_review_layout_low_produces_lead_018():
+    lead = _minimal_lead_with_adjustment_block()
+    mock_review = {
+        "layout": {
+            "amount_layout": "unknown",
+            "confidence": "low",
+            "layout_notes": "Dr/Cr 列未识别",
+        },
+        "rows": [],
+        "assessment": "unclear",
+    }
+    with patch("llm.lead_adjustment_review.chat_completion_json", return_value=mock_review):
+        issues, _ = run_lead_adjustment_llm_review(lead, _config())
+
+    assert any(
+        i.rule_id == RULE_LAYOUT
+        and i.severity == Severity.NEED_REVIEW
+        and "版式" in i.message
+        for i in issues
+    )
+
+
+def test_llm_review_insufficient_direct_mismatch_warns():
+    lead = _minimal_lead_with_adjustment_block()
+    mock_review = {
+        "layout": {"amount_layout": "single_signed_column", "confidence": "high"},
+        "rows": [{"ppe_impact": "direct", "account_label": "原值", "signed_amount": "200"}],
+        "assessment": "insufficient",
+        "direct_amount_checks": [
+            {
+                "account_label": "原值",
+                "match": False,
+                "guidance_signed": "100",
+                "summary_signed": "200",
+            }
+        ],
+        "rationale": "direct 行金额与引导表不一致",
+    }
+    with patch("llm.lead_adjustment_review.chat_completion_json", return_value=mock_review):
+        issues = build_lead_adjustment_issues(lead, _config())
+
+    assert any(
+        i.rule_id == RULE_SEMANTIC
+        and i.severity == Severity.WARN
+        and "语义上不足" in i.message
+        for i in issues
+    )
+
+
+def test_llm_review_indirect_insufficient_need_review():
+    lead = _minimal_lead_with_adjustment_block()
+    mock_review = {
+        "layout": {"amount_layout": "single_signed_column", "confidence": "high"},
+        "rows": [{"ppe_impact": "indirect", "account_label": "管理费用", "adjustment_ref": "AA3"}],
+        "assessment": "insufficient",
+        "direct_amount_checks": [],
+        "cross_account_flags": [{"adjustment_ref": "AA3", "issue": "indirect_adjustment_without_ppe_link_narrative"}],
+        "rationale": "跨科目调整缺少对 PPE 影响的说明",
+    }
+    with patch("llm.lead_adjustment_review.chat_completion_json", return_value=mock_review):
+        issues = build_lead_adjustment_issues(lead, _config())
+
+    assert any(
+        i.rule_id == RULE_SEMANTIC
+        and i.severity == Severity.NEED_REVIEW
+        and "跨科目提示" in i.message
+        for i in issues
+    )
+
+
+def test_llm_review_sufficient_no_semantic_issue():
+    lead = _minimal_lead_with_adjustment_block()
+    mock_review = {
+        "layout": {"amount_layout": "debit_credit_two_columns", "confidence": "high"},
+        "rows": [{"ppe_impact": "direct", "account_label": "原值", "signed_amount": "100"}],
+        "assessment": "sufficient",
+        "direct_amount_checks": [{"account_label": "原值", "match": True}],
+    }
+    with patch("llm.lead_adjustment_review.chat_completion_json", return_value=mock_review):
+        issues = build_lead_adjustment_issues(lead, _config())
+
+    assert not any(i.rule_id == RULE_SEMANTIC for i in issues)
+
+
+def test_extract_layout_and_rows_for_gating():
+    review = {
+        "layout": {"confidence": "high", "amount_layout": "debit_credit_two_columns"},
+        "rows": [{"ppe_impact": "indirect"}, "skip-me"],
+    }
+    layout, rows = extract_layout_and_rows_for_gating(review)
+    assert layout is not None
+    assert layout["amount_layout"] == "debit_credit_two_columns"
+    assert len(rows) == 1
 
 
 @pytest.fixture
@@ -152,3 +300,51 @@ def test_build_adjustment_grid_from_workbook(lead_grid_xlsx: Path):
     assert grid is not None
     assert grid["grid_row_count"] >= 2
     assert any("调整类型" in (c or "") for row in grid["grid"] for c in row if c)
+
+
+@pytest.mark.skipif(not FIXTURE_EN.is_file(), reason="run scripts/build_lead_adjustment_fixtures.py")
+def test_fixture_en_debit_credit_grid_and_guidance():
+    lead = load_lead_from_workbook(FIXTURE_EN)
+    assert lead.block(LeadBlockKind.ADJUSTMENT_SUMMARY) is not None
+    assert len(lead.adjustment_rows) >= 1
+
+    grid = load_adjustment_grid_for_lead(FIXTURE_EN, lead)
+    assert grid is not None
+    grid_text = " ".join(c or "" for row in grid["grid"] for c in row)
+    assert "Dr" in grid_text
+    assert "Cr" in grid_text
+
+    payload = build_adjustment_review_payload(lead, adjustment_grid=grid)
+    assert payload["adjustment_grid"] == grid["grid"]
+    guidance = payload["guidance_adjustments"]
+    orig = next((g for g in guidance if g["account_label"] == "原值"), None)
+    assert orig is not None
+    assert orig.get("audit_adjustment") in ("500000", "500000.0", 500000)
+
+
+@pytest.mark.skipif(not FIXTURE_CROSS.is_file(), reason="run scripts/build_lead_adjustment_fixtures.py")
+def test_fixture_cross_account_aa_indirect_gating():
+    lead = load_lead_from_workbook(FIXTURE_CROSS)
+    assert len(lead.adjustment_rows) >= 1
+    assert "AA3" in " ".join(str(c) for r in lead.adjustment_rows for c in r.raw_cells if c)
+
+    grid = load_adjustment_grid_for_lead(FIXTURE_CROSS, lead)
+    assert grid is not None
+    grid_text = " ".join(c or "" for row in grid["grid"] for c in row)
+    assert "AA3" in grid_text
+    assert "管理费用" in grid_text or "SG&A" in grid_text
+
+    extracted_rows = [{"ppe_impact": "indirect", "account_label": "SG&A expense / 管理费用"}]
+    layout = {"confidence": "high", "amount_layout": "single_signed_column"}
+    assert should_run_strict_total_check(
+        lead,
+        layout_result=layout,
+        extracted_rows=extracted_rows,
+    ) is False
+
+    issues = check_lead_adjustment_internal_consistency(
+        lead,
+        layout_result=layout,
+        extracted_rows=extracted_rows,
+    )
+    assert not any(i.field == "adjustment_amount" for i in issues)

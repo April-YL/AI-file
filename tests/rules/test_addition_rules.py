@@ -93,4 +93,9 @@ def test_addition_runner_uses_dataset_metadata():
         ],
     )
     issues = run_addition_rules(dataset)
-    assert {i.rule_id for i in issues} == {"addition_population_homogeneity"}
+    assert {i.rule_id for i in issues} == {
+        "addition_population_homogeneity",
+        "addition_rollforward_reconciliation",
+    }
+    recon = next(i for i in issues if i.rule_id == "addition_rollforward_reconciliation")
+    assert recon.severity == Severity.NEED_REVIEW

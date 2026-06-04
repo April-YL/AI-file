@@ -3,20 +3,11 @@ from __future__ import annotations
 from collections import defaultdict
 
 from ingest.models import AssetRecord
+from rules.addition_common import is_purchase_addition_method
 from rules.models import ColumnContext, QcIssue, Severity
 from rules.parsing import is_blank, record_is_empty_data_row
 
 RULE_ID = "addition_population_homogeneity"
-
-_PURCHASE_TERMS = (
-    "购置",
-    "采购",
-    "购买",
-    "新购",
-    "外购",
-    "purchase",
-    "acquisition",
-)
 _SPECIAL_TERMS = (
     "在建工程",
     "转固",
@@ -48,7 +39,7 @@ def check_addition_population_homogeneity(
         method = record.addition_method
         if is_blank(method):
             continue
-        if _is_purchase_method(method):
+        if is_purchase_addition_method(method):
             continue
         if _is_special_method(method):
             special_rows[str(method).strip()].append(record.source_row or 0)
@@ -80,11 +71,6 @@ def check_addition_population_homogeneity(
             source_sheet=ctx.source_sheet,
         )
     ]
-
-
-def _is_purchase_method(value: str) -> bool:
-    text = str(value).strip().lower()
-    return any(term in text for term in _PURCHASE_TERMS)
 
 
 def _is_special_method(value: str) -> bool:

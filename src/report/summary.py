@@ -81,6 +81,7 @@ class QcReport:
     summary_sheet_section: dict[str, Any] | None = None
     lead_sheet_section: dict[str, Any] | None = None
     rollforward_sheet_section: dict[str, Any] | None = None
+    runtime_timings: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -105,6 +106,8 @@ class QcReport:
                 s.to_dict() if hasattr(s, "to_dict") else s
                 for s in self.manual_review_sections
             ]
+        if self.runtime_timings:
+            data["runtime_timings"] = self.runtime_timings
         return data
 
 

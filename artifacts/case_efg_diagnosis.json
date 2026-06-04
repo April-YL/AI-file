@@ -1,0 +1,489 @@
+[
+  {
+    "label": "E",
+    "file": "K1 SWP 固定资产 20251231 E锂原 - 测试0603.xlsx",
+    "dup_issues": [
+      "rollforward 存在 6 个候选 sheet：汇总 , K.01 Agree SL to GL, K.02.1a  抽样输出结果, 新增清单, 处置清单, K.03.2 折旧测试TOD-by item测试",
+      "fa_list 存在 2 个候选 sheet：FA list, K.02.1 新增测试 "
+    ],
+    "addition_list_sheets": [],
+    "addition_mis_as_rollforward": [
+      [
+        "新增清单",
+        0.95
+      ],
+      [
+        "处置清单",
+        0.95
+      ]
+    ],
+    "addition_candidates": [],
+    "chosen_addition": null,
+    "addition_records": 0,
+    "list_purchase_total": null,
+    "list_purchase_rows": 0,
+    "chosen_k01": "K.01 Agree SL to GL",
+    "k01_purchase_rows": [
+      {
+        "row": 13,
+        "label": "购置",
+        "measure": "original_value",
+        "amount": "7916311.98"
+      }
+    ],
+    "rollforward_all": [
+      [
+        "汇总 ",
+        0.85
+      ],
+      [
+        "K.01 Agree SL to GL",
+        0.98
+      ],
+      [
+        "K.02.1a  抽样输出结果",
+        0.7
+      ],
+      [
+        "新增清单",
+        0.95
+      ],
+      [
+        "处置清单",
+        0.95
+      ],
+      [
+        "K.03.2 折旧测试TOD-by item测试",
+        0.95
+      ]
+    ],
+    "fa_list_all": [
+      [
+        "FA list",
+        0.95
+      ],
+      [
+        "K.02.1 新增测试 ",
+        0.6
+      ]
+    ],
+    "lead_all": [
+      [
+        "K.00 Lead Sheet",
+        0.75
+      ]
+    ],
+    "summary_all": []
+  },
+  {
+    "label": "E",
+    "file": "K1 SWP 固定资产 20251231 E锂原 - 测试0604.xlsx",
+    "dup_issues": [
+      "rollforward 存在 6 个候选 sheet：汇总 , K.01 Agree SL to GL, K.02.1a  抽样输出结果, 新增清单, 处置清单, K.03.2 折旧测试TOD-by item测试",
+      "fa_list 存在 2 个候选 sheet：FA list, K.02.1 新增测试 "
+    ],
+    "addition_list_sheets": [],
+    "addition_mis_as_rollforward": [
+      [
+        "新增清单",
+        0.95
+      ],
+      [
+        "处置清单",
+        0.95
+      ]
+    ],
+    "addition_candidates": [],
+    "chosen_addition": null,
+    "addition_records": 0,
+    "list_purchase_total": null,
+    "list_purchase_rows": 0,
+    "chosen_k01": "K.01 Agree SL to GL",
+    "k01_purchase_rows": [
+      {
+        "row": 13,
+        "label": "购置",
+        "measure": "original_value",
+        "amount": "7916311.98"
+      }
+    ],
+    "rollforward_all": [
+      [
+        "汇总 ",
+        0.85
+      ],
+      [
+        "K.01 Agree SL to GL",
+        0.98
+      ],
+      [
+        "K.02.1a  抽样输出结果",
+        0.7
+      ],
+      [
+        "新增清单",
+        0.95
+      ],
+      [
+        "处置清单",
+        0.95
+      ],
+      [
+        "K.03.2 折旧测试TOD-by item测试",
+        0.95
+      ]
+    ],
+    "fa_list_all": [
+      [
+        "FA list",
+        0.95
+      ],
+      [
+        "K.02.1 新增测试 ",
+        0.6
+      ]
+    ],
+    "lead_all": [
+      [
+        "K.00 Lead Sheet",
+        0.75
+      ]
+    ],
+    "summary_all": []
+  },
+  {
+    "label": "E",
+    "file": "K1 SWP 固定资产 20251231 E锂原 -测试0602.xlsx",
+    "dup_issues": [
+      "rollforward 存在 6 个候选 sheet：汇总 , K.01 Agree SL to GL, K.02.1a  抽样输出结果, 新增清单, 处置清单, K.03.2 折旧测试TOD-by item测试",
+      "fa_list 存在 2 个候选 sheet：FA list, K.02.1 新增测试 "
+    ],
+    "addition_list_sheets": [],
+    "addition_mis_as_rollforward": [
+      [
+        "新增清单",
+        0.95
+      ],
+      [
+        "处置清单",
+        0.95
+      ]
+    ],
+    "addition_candidates": [],
+    "chosen_addition": null,
+    "addition_records": 0,
+    "list_purchase_total": null,
+    "list_purchase_rows": 0,
+    "chosen_k01": "K.01 Agree SL to GL",
+    "k01_purchase_rows": [
+      {
+        "row": 13,
+        "label": "购置",
+        "measure": "original_value",
+        "amount": "7916311.98"
+      }
+    ],
+    "rollforward_all": [
+      [
+        "汇总 ",
+        0.85
+      ],
+      [
+        "K.01 Agree SL to GL",
+        0.98
+      ],
+      [
+        "K.02.1a  抽样输出结果",
+        0.7
+      ],
+      [
+        "新增清单",
+        0.95
+      ],
+      [
+        "处置清单",
+        0.95
+      ],
+      [
+        "K.03.2 折旧测试TOD-by item测试",
+        0.95
+      ]
+    ],
+    "fa_list_all": [
+      [
+        "FA list",
+        0.95
+      ],
+      [
+        "K.02.1 新增测试 ",
+        0.6
+      ]
+    ],
+    "lead_all": [
+      [
+        "K.00 Lead Sheet",
+        0.75
+      ]
+    ],
+    "summary_all": []
+  },
+  {
+    "label": "E",
+    "file": "K1 SWP 固定资产 20251231 E锂原.xlsx",
+    "dup_issues": [
+      "rollforward 存在 6 个候选 sheet：汇总 , K.01 Agree SL to GL, K.02.1a  抽样输出结果, 新增清单, 处置清单, K.03.2 折旧测试TOD-by item测试",
+      "fa_list 存在 2 个候选 sheet：FA list, K.02.1 新增测试 "
+    ],
+    "addition_list_sheets": [],
+    "addition_mis_as_rollforward": [
+      [
+        "新增清单",
+        0.95
+      ],
+      [
+        "处置清单",
+        0.95
+      ]
+    ],
+    "addition_candidates": [],
+    "chosen_addition": null,
+    "addition_records": 0,
+    "list_purchase_total": null,
+    "list_purchase_rows": 0,
+    "chosen_k01": "K.01 Agree SL to GL",
+    "k01_purchase_rows": [
+      {
+        "row": 13,
+        "label": "购置",
+        "measure": "original_value",
+        "amount": "7916311.98"
+      }
+    ],
+    "rollforward_all": [
+      [
+        "汇总 ",
+        0.85
+      ],
+      [
+        "K.01 Agree SL to GL",
+        0.98
+      ],
+      [
+        "K.02.1a  抽样输出结果",
+        0.7
+      ],
+      [
+        "新增清单",
+        0.95
+      ],
+      [
+        "处置清单",
+        0.95
+      ],
+      [
+        "K.03.2 折旧测试TOD-by item测试",
+        0.95
+      ]
+    ],
+    "fa_list_all": [
+      [
+        "FA list",
+        0.95
+      ],
+      [
+        "K.02.1 新增测试 ",
+        0.6
+      ]
+    ],
+    "lead_all": [
+      [
+        "K.00 Lead Sheet",
+        0.75
+      ]
+    ],
+    "summary_all": []
+  },
+  {
+    "label": "F",
+    "file": "K1 SWP 固定资产 20251231 F有限公司.xlsx",
+    "dup_issues": [
+      "rollforward 存在 6 个候选 sheet：K.00 Lead Sheet, K.01 Agree SL to GL, K.01 Agree SL to GL-24, K.01 Agree SL to GL-, K.02.2 处置测试, K.03.2 折旧测试TOD-by item测试",
+      "summary 存在 2 个候选 sheet：汇总-24, 汇总 ",
+      "lead 存在 2 个候选 sheet：K.00 Lead Sheet-24, K.00 Lead Sheet ",
+      "fa_list 存在 4 个候选 sheet：FA list-24, FA list-, FA list, K.02.1 新增测试 "
+    ],
+    "addition_list_sheets": [
+      [
+        "新增清单",
+        0.98
+      ]
+    ],
+    "addition_mis_as_rollforward": [],
+    "addition_candidates": [
+      [
+        "新增清单",
+        0.98
+      ]
+    ],
+    "chosen_addition": "新增清单",
+    "addition_records": 191,
+    "list_purchase_total": "0",
+    "list_purchase_rows": 0,
+    "chosen_k01": "K.01 Agree SL to GL",
+    "k01_purchase_rows": [
+      {
+        "row": 13,
+        "label": "购置",
+        "measure": "original_value",
+        "amount": "2791225.65"
+      }
+    ],
+    "rollforward_all": [
+      [
+        "K.00 Lead Sheet",
+        0.8
+      ],
+      [
+        "K.01 Agree SL to GL",
+        0.98
+      ],
+      [
+        "K.01 Agree SL to GL-24",
+        0.98
+      ],
+      [
+        "K.01 Agree SL to GL-",
+        0.98
+      ],
+      [
+        "K.02.2 处置测试",
+        0.7
+      ],
+      [
+        "K.03.2 折旧测试TOD-by item测试",
+        0.95
+      ]
+    ],
+    "fa_list_all": [
+      [
+        "FA list-24",
+        0.95
+      ],
+      [
+        "FA list-",
+        0.98
+      ],
+      [
+        "FA list",
+        0.98
+      ],
+      [
+        "K.02.1 新增测试 ",
+        0.5
+      ]
+    ],
+    "lead_all": [
+      [
+        "K.00 Lead Sheet-24",
+        0.75
+      ],
+      [
+        "K.00 Lead Sheet ",
+        0.75
+      ]
+    ],
+    "summary_all": [
+      [
+        "汇总-24",
+        0.68
+      ],
+      [
+        "汇总 ",
+        0.68
+      ]
+    ]
+  },
+  {
+    "label": "G",
+    "file": "K1 SWP 固定资产 20251231 G科技.xlsx",
+    "dup_issues": [
+      "rollforward 存在 3 个候选 sheet：K.01 Agree SL to GL, 处置清单, K.03.2 折旧测试TOD-by item测试",
+      "fa_list 存在 2 个候选 sheet：K.01.1a FA list, K.02.1 新增测试 "
+    ],
+    "addition_list_sheets": [
+      [
+        "K.02.1b 新增清单",
+        0.98
+      ],
+      [
+        "K.02.1a新增选样输出",
+        0.7
+      ]
+    ],
+    "addition_mis_as_rollforward": [
+      [
+        "处置清单",
+        0.95
+      ]
+    ],
+    "addition_candidates": [
+      [
+        "K.02.1b 新增清单",
+        0.98
+      ],
+      [
+        "K.02.1a新增选样输出",
+        0.7
+      ]
+    ],
+    "chosen_addition": "K.02.1b 新增清单",
+    "addition_records": 41,
+    "list_purchase_total": "41598444.50999999992",
+    "list_purchase_rows": 35,
+    "chosen_k01": "K.01 Agree SL to GL",
+    "k01_purchase_rows": [
+      {
+        "row": 13,
+        "label": "购置",
+        "measure": "original_value",
+        "amount": "31019.47"
+      }
+    ],
+    "rollforward_all": [
+      [
+        "K.01 Agree SL to GL",
+        0.98
+      ],
+      [
+        "处置清单",
+        0.95
+      ],
+      [
+        "K.03.2 折旧测试TOD-by item测试",
+        0.95
+      ]
+    ],
+    "fa_list_all": [
+      [
+        "K.01.1a FA list",
+        0.95
+      ],
+      [
+        "K.02.1 新增测试 ",
+        0.5
+      ]
+    ],
+    "lead_all": [
+      [
+        "K.00 Lead Sheet",
+        0.75
+      ]
+    ],
+    "summary_all": [
+      [
+        "汇总 ",
+        0.68
+      ]
+    ]
+  }
+]

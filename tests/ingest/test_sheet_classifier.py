@@ -42,6 +42,47 @@ def test_fa_list_name_wins_over_rollforward_content():
     assert confidence >= 0.85
 
 
+def test_addition_list_name_wins_over_rollforward_content():
+    rows = [
+        ("固定资产编号", "固定资产名称", "原值", "新增方式"),
+        ("FA-TEST-001", "设备A", 1000, "购置"),
+    ]
+    kind, confidence, *_ = classify_sheet("新增清单", rows)
+    assert kind == SheetKind.ADDITION_LIST
+    assert confidence >= 0.85
+
+
+def test_disposal_list_name_wins_over_rollforward_content():
+    rows = [
+        ("固定资产编号", "原值", "累计折旧", "净值", "处置日期", "处置方式"),
+        ("FA-TEST-001", 1000, 100, 900, "2025-01-01", "报废"),
+    ]
+    kind, confidence, *_ = classify_sheet("处置清单", rows)
+    assert kind == SheetKind.DISPOSAL_LIST
+    assert confidence >= 0.85
+
+
+def test_summary_name_wins_over_rollforward_content():
+    rows = [
+        ("程序", "工作表", "是否执行", "原值", "累计折旧", "净值"),
+        ("K.01", "K.01", "是", 100, 10, 90),
+    ]
+    kind, confidence, *_ = classify_sheet("汇总 ", rows)
+    assert kind == SheetKind.SUMMARY
+    assert confidence >= 0.75
+
+
+def test_lead_name_wins_over_rollforward_content():
+    rows = [
+        ("客户名称", "测试客户"),
+        ("名义金额 (SAD)", "5000"),
+        ("可容忍误差 (TE)", "100000"),
+    ]
+    kind, confidence, *_ = classify_sheet("K.00 Lead Sheet", rows)
+    assert kind == SheetKind.LEAD
+    assert confidence >= 0.7
+
+
 def test_name_rollforward_houtui():
     k, s, _ = score_by_name("固定资产后推表")
     assert k == SheetKind.ROLLFORWARD

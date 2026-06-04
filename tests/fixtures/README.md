@@ -37,6 +37,8 @@
 | `fa_list_mixed.xlsx` | 同上内容的 Excel（`FA list` sheet），供 `fa-qc-run` Demo |
 | `workbook_psp_demo.xlsx` | FA list + `汇总` 页（含 PSP 不执行缺理由样例），整本流水线 Demo |
 | `workbook_with_lead.xlsx` | 含 K.00 Lead（PM/TE/SAD + CRA/TT）+ 汇总 + FA list，人工核对摘录 Demo |
+| `lead_adjustment_en_debit_credit.xlsx` | Lead 调整汇总：英文 Dr/Cr 双列 + direct PPE 行（`tests/llm/test_lead_adjustment_payload.py`） |
+| `lead_adjustment_cross_account_aa.xlsx` | Lead 调整汇总：跨科目 AA3 间接调整（LEAD-017 门控回归） |
 | `fa_list_valid.csv` | 基本通过样例 |
 | `fa_list_no_asset_id.csv` | 无资产编号列，触发 NEED_REVIEW |
 

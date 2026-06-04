@@ -23,9 +23,9 @@
 
 | 模块 | 内容 | ingest 规划 | 规则规划 |
 | --- | --- | --- | --- |
-| **K2-A 新增清单** | 字段完整、与后推购置勾稽 | `addition_list` ingest ✅，已保留 `addition_method` | `addition_required_fields` ✅；后推勾稽待做 |
+| **K2-A 新增清单** | 字段完整、与后推购置勾稽 | `addition_list` ingest ✅，已保留 `addition_method` | `addition_required_fields` ✅；`addition_rollforward_reconciliation` ✅ |
 | **K2-B 处置清单** | 字段完整、与后推处置勾稽 | `disposal_list` ingest ✅ 部分 | `disposal_required_fields` 等 |
-| **K2-C 交叉 K.01** | 清单合计 vs 后推变动行 | ⏳ | `addition_rollforward_reconciliation`、`disposal_rollforward_reconciliation` |
+| **K2-C 交叉 K.01** | 清单合计 vs 后推变动行 | ✅ 购置行 ingest | `addition_rollforward_reconciliation` ✅、`disposal_rollforward_reconciliation` 待做 |
 | **K2-D 样本/TOD** | 程序包完整、同质性、截止、证据 | 三表程序包名称变体识别 ✅ | `addition_test_package_complete` ✅、`disposal_test_package_complete` ✅、`addition_population_homogeneity` ✅；样本一致性/证据充分性待做 |
 
 ### Checklist 对照（摘要）
@@ -35,8 +35,8 @@
 | 新增/处置三表程序包完整 | `addition_test_package_complete` / `disposal_test_package_complete` | AUTO_WARN | ✅ |
 | 新增清单字段完整 | `addition_required_fields` | AUTO_FAIL | ✅ |
 | 新增总体同质性提示 | `addition_population_homogeneity` | REVIEW | ✅ |
-| 新增 vs 后推购置 | `addition_rollforward_reconciliation` | AUTO_WARN | ❌ |
-| 差异 >SAD | `addition_difference_over_sad` | AUTO_WARN | ❌ |
+| 新增 vs 后推购置 | `addition_rollforward_reconciliation` | AUTO_WARN | ✅ |
+| 差异 >SAD | `addition_difference_over_sad` | AUTO_WARN | ⏳（暂由 reconciliation message 提示） |
 | 处置清单字段完整 | `disposal_required_fields` | AUTO_FAIL | ❌ |
 | 处置 vs 后推 | `disposal_rollforward_reconciliation` | AUTO_WARN | ❌ |
 | 同质性 / 证据 | `addition_*` / `disposal_*` REVIEW | REVIEW | ❌ |

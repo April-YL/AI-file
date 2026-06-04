@@ -1,0 +1,255 @@
+[
+  {
+    "label": "A",
+    "file": "K1 SWP 固定资产 20251231 A有限公司.xlsx",
+    "size_mb": 40.87,
+    "skipped": true,
+    "skip_reason": "name_contains:A有限公司"
+  },
+  {
+    "label": "B",
+    "file": "K1 SWP 固定资产 20251231 B医疗公司.xlsx",
+    "size_mb": 0.83,
+    "skipped": false,
+    "elapsed_s": 32.79,
+    "overall": "FAIL",
+    "issue_total": 72,
+    "addition_sheet": null,
+    "addition_records": 0,
+    "list_purchase_total": null,
+    "list_purchase_rows": 0,
+    "rollforward_sheet": "K.01 Agree SL to GL",
+    "rf_purchase_amount": "25746.67",
+    "rf_purchase_row": 13,
+    "movement_txn_count": 7,
+    "movement_labels": [
+      "在建工程转入",
+      "处置或报废",
+      "计提",
+      "购置"
+    ],
+    "recon_issue_count": 0,
+    "recon_severities": [],
+    "recon_messages": []
+  },
+  {
+    "label": "C",
+    "file": "K1 SWP 固定资产 20251231 C新材料有限公司.xlsx",
+    "size_mb": 0.57,
+    "skipped": false,
+    "elapsed_s": 50.9,
+    "overall": "FAIL",
+    "issue_total": 24,
+    "addition_sheet": "新增清单",
+    "addition_records": 1,
+    "list_purchase_total": "10336.28",
+    "list_purchase_rows": 1,
+    "rollforward_sheet": "K.01 Agree SL to GL",
+    "rf_purchase_amount": "10336.28",
+    "rf_purchase_row": 13,
+    "movement_txn_count": 7,
+    "movement_labels": [
+      "在建工程转入",
+      "处置或报废",
+      "计提",
+      "购置"
+    ],
+    "recon_issue_count": 0,
+    "recon_severities": [],
+    "recon_messages": []
+  },
+  {
+    "label": "D",
+    "file": "K1 SWP 固定资产 20251231 D锂电科技有限公司.xlsx",
+    "size_mb": 0.47,
+    "skipped": false,
+    "elapsed_s": 50.57,
+    "overall": "FAIL",
+    "issue_total": 437,
+    "addition_sheet": "新增清单",
+    "addition_records": 50,
+    "list_purchase_total": "1146059.23",
+    "list_purchase_rows": 11,
+    "rollforward_sheet": "K.01 Agree SL to GL",
+    "rf_purchase_amount": "542691.72",
+    "rf_purchase_row": 13,
+    "movement_txn_count": 7,
+    "movement_labels": [
+      "在建工程转入",
+      "处置或报废",
+      "计提",
+      "购置"
+    ],
+    "recon_issue_count": 1,
+    "recon_severities": [
+      "WARN"
+    ],
+    "recon_messages": [
+      "新增清单购置原值合计=1146059.23（11 行），K.01 后推购置金额=542691.72，差异=603367.51。 差异超过 SAD（194000），需调查。"
+    ]
+  },
+  {
+    "label": "E",
+    "file": "K1 SWP 固定资产 20251231 E锂原 - 测试0603.xlsx",
+    "size_mb": 0.5,
+    "skipped": false,
+    "elapsed_s": 44.71,
+    "overall": "FAIL",
+    "issue_total": 15,
+    "addition_sheet": null,
+    "addition_records": 0,
+    "list_purchase_total": null,
+    "list_purchase_rows": 0,
+    "rollforward_sheet": "K.01 Agree SL to GL",
+    "rf_purchase_amount": "7916311.98",
+    "rf_purchase_row": 13,
+    "movement_txn_count": 7,
+    "movement_labels": [
+      "在建工程转入",
+      "处置或报废",
+      "计提",
+      "购置"
+    ],
+    "recon_issue_count": 0,
+    "recon_severities": [],
+    "recon_messages": []
+  },
+  {
+    "label": "E",
+    "file": "K1 SWP 固定资产 20251231 E锂原 - 测试0604.xlsx",
+    "size_mb": 0.5,
+    "skipped": false,
+    "elapsed_s": 43.54,
+    "overall": "FAIL",
+    "issue_total": 18,
+    "addition_sheet": null,
+    "addition_records": 0,
+    "list_purchase_total": null,
+    "list_purchase_rows": 0,
+    "rollforward_sheet": "K.01 Agree SL to GL",
+    "rf_purchase_amount": "7916311.98",
+    "rf_purchase_row": 13,
+    "movement_txn_count": 7,
+    "movement_labels": [
+      "在建工程转入",
+      "处置或报废",
+      "计提",
+      "购置"
+    ],
+    "recon_issue_count": 0,
+    "recon_severities": [],
+    "recon_messages": []
+  },
+  {
+    "label": "E",
+    "file": "K1 SWP 固定资产 20251231 E锂原 -测试0602.xlsx",
+    "size_mb": 0.5,
+    "skipped": false,
+    "elapsed_s": 43.49,
+    "overall": "FAIL",
+    "issue_total": 11,
+    "addition_sheet": null,
+    "addition_records": 0,
+    "list_purchase_total": null,
+    "list_purchase_rows": 0,
+    "rollforward_sheet": "K.01 Agree SL to GL",
+    "rf_purchase_amount": "7916311.98",
+    "rf_purchase_row": 13,
+    "movement_txn_count": 7,
+    "movement_labels": [
+      "在建工程转入",
+      "处置或报废",
+      "计提",
+      "购置"
+    ],
+    "recon_issue_count": 0,
+    "recon_severities": [],
+    "recon_messages": []
+  },
+  {
+    "label": "E",
+    "file": "K1 SWP 固定资产 20251231 E锂原.xlsx",
+    "size_mb": 0.66,
+    "skipped": false,
+    "elapsed_s": 44.94,
+    "overall": "FAIL",
+    "issue_total": 11,
+    "addition_sheet": null,
+    "addition_records": 0,
+    "list_purchase_total": null,
+    "list_purchase_rows": 0,
+    "rollforward_sheet": "K.01 Agree SL to GL",
+    "rf_purchase_amount": "7916311.98",
+    "rf_purchase_row": 13,
+    "movement_txn_count": 7,
+    "movement_labels": [
+      "在建工程转入",
+      "处置或报废",
+      "计提",
+      "购置"
+    ],
+    "recon_issue_count": 0,
+    "recon_severities": [],
+    "recon_messages": []
+  },
+  {
+    "label": "F",
+    "file": "K1 SWP 固定资产 20251231 F有限公司.xlsx",
+    "size_mb": 0.7,
+    "skipped": false,
+    "elapsed_s": 58.08,
+    "overall": "FAIL",
+    "issue_total": 243,
+    "addition_sheet": "新增清单",
+    "addition_records": 191,
+    "list_purchase_total": "0",
+    "list_purchase_rows": 0,
+    "rollforward_sheet": "K.01 Agree SL to GL",
+    "rf_purchase_amount": "2791225.65",
+    "rf_purchase_row": 13,
+    "movement_txn_count": 7,
+    "movement_labels": [
+      "在建工程转入",
+      "处置或报废",
+      "计提",
+      "购置"
+    ],
+    "recon_issue_count": 1,
+    "recon_severities": [
+      "WARN"
+    ],
+    "recon_messages": [
+      "新增清单购置原值合计=0（0 行），K.01 后推购置金额=2791225.65，差异=2791225.65。 差异超过 SAD（290030.351925），需调查。"
+    ]
+  },
+  {
+    "label": "G",
+    "file": "K1 SWP 固定资产 20251231 G科技.xlsx",
+    "size_mb": 1.36,
+    "skipped": false,
+    "elapsed_s": 41.86,
+    "overall": "FAIL",
+    "issue_total": 112,
+    "addition_sheet": "K.02.1b 新增清单",
+    "addition_records": 41,
+    "list_purchase_total": "41598444.50999999992",
+    "list_purchase_rows": 35,
+    "rollforward_sheet": "K.01 Agree SL to GL",
+    "rf_purchase_amount": "31019.47",
+    "rf_purchase_row": 13,
+    "movement_txn_count": 7,
+    "movement_labels": [
+      "在建工程转入",
+      "处置或报废",
+      "计提",
+      "购置"
+    ],
+    "recon_issue_count": 1,
+    "recon_severities": [
+      "WARN"
+    ],
+    "recon_messages": [
+      "新增清单购置原值合计=41598444.50999999992（35 行），K.01 后推购置金额=31019.47，差异=41567425.03999999992。 差异超过 SAD（165000），需调查。"
+    ]
+  }
+]

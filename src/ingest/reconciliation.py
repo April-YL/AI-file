@@ -9,7 +9,8 @@ from typing import Any
 
 from ingest.models import AssetRecord, SheetKind
 from ingest.records import FaListDataset
-from ingest.rollforward_sheet import RollforwardSheetDataset
+from ingest.rollforward_sheet import RollforwardSheetDataset, get_movement_transaction_amount
+from rules.addition_common import sum_purchase_original_value
 from rules.parsing import amount_tolerance, parse_amount
 
 # 模块内聚合，避免 ingest → rules 循环（仅使用 parsing 工具函数）
@@ -251,10 +252,23 @@ def run_list_rollforward_reconciliations(
     spec = next(s for s in RECONCILIATION_LINKS if s.link_id == link_id)
     left_ref = dataset.source_sheet if dataset and dataset.source_sheet else None
 
-    # 本期增加/减少列尚未结构化解析，右侧暂缺
     left_val = _sum_dataset(dataset.records, spec.amount_field) if dataset and dataset.records else None
+    if link_id == "addition_list_rollforward" and dataset is not None:
+        mapped = {m.standard_field for m in dataset.mapped_fields}
+        purchase_total, _ = sum_purchase_original_value(dataset.records, mapped)
+        if purchase_total is not None:
+            left_val = purchase_total
     right_val: Decimal | None = None
     right_ref = rollforward.source_sheet if rollforward and rollforward.source_sheet else None
+
+    if link_id == "addition_list_rollforward" and rollforward is not None:
+        rf_amount, _ = get_movement_transaction_amount(
+            rollforward,
+            transaction_key="purchase",
+            measure="original_value",
+        )
+        if rf_amount is not None:
+            right_val = rf_amount
 
     if left_val is None:
         return ReconciliationCheck(
@@ -270,20 +284,53 @@ def run_list_rollforward_reconciliations(
             message=f"无 {spec.left_label} 数据",
         )
 
+    if right_val is None:
+        return ReconciliationCheck(
+            link_id=spec.link_id,
+            dict_rule_code=spec.dict_rule_code,
+            name=spec.name,
+            status=ReconciliationStatus.NEED_REVIEW,
+            left_ref=left_ref,
+            right_ref=right_ref,
+            left_value=_fmt_amount(left_val),
+            right_value=None,
+            difference=None,
+            message=(
+                f"{spec.left_label}={left_val}；{spec.right_label} 待从 K.01 变动行解析（当前仅支持期末合计勾稽）"
+            ),
+            suggestion="人工核对后推本期增加/减少与清单合计；后续版本将解析 K.01 变动列",
+        )
+
+    diff = left_val - right_val
+    tol = amount_tolerance(max(abs(left_val), abs(right_val)))
+    if abs(diff) <= tol:
+        return ReconciliationCheck(
+            link_id=spec.link_id,
+            dict_rule_code=spec.dict_rule_code,
+            name=spec.name,
+            status=ReconciliationStatus.MATCH,
+            left_ref=left_ref,
+            right_ref=right_ref,
+            left_value=_fmt_amount(left_val),
+            right_value=_fmt_amount(right_val),
+            difference=_fmt_amount(diff),
+            message=f"{spec.left_label} 与 {spec.right_label} 一致",
+        )
+
     return ReconciliationCheck(
         link_id=spec.link_id,
         dict_rule_code=spec.dict_rule_code,
         name=spec.name,
-        status=ReconciliationStatus.NEED_REVIEW,
+        status=ReconciliationStatus.MISMATCH,
         left_ref=left_ref,
         right_ref=right_ref,
         left_value=_fmt_amount(left_val),
-        right_value=None,
-        difference=None,
+        right_value=_fmt_amount(right_val),
+        difference=_fmt_amount(diff),
         message=(
-            f"{spec.left_label}={left_val}；{spec.right_label} 待从 K.01 变动列解析（当前仅支持期末合计勾稽）"
+            f"{spec.left_label}={left_val}，{spec.right_label}={right_val}，差异={diff}"
         ),
-        suggestion="人工核对后推本期增加/减少与清单合计；后续版本将解析 K.01 变动列",
+        suggestion="核对新增/处置清单与 K.01 后推对应交易行金额是否口径一致。",
     )
 
 

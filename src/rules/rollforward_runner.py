@@ -20,6 +20,7 @@ ROLLFORWARD_RULE_IDS: tuple[str, ...] = (
     "rollforward_fa_list_reconciliation",
     "rollforward_difference_over_sad",
     "rollforward_depreciation_pl_reconciliation",
+    "rollforward_notes_semantic",
 )
 
 

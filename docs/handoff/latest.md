@@ -124,7 +124,8 @@
   - **Lead 回归表**：`artifacts/case_lead_regression.md`（B–G 共 6 份；A 42MB 永久跳过）
   - **待做**：对案例库 6 份底稿重跑 `fa-qc-diagnose` 更新 `case-workpaper-diagnostic.md`
 - **Lead 质检规则（模块 1–5 P0）**：含 `lead_check_with_a3_row`（ingest 摘录 Check with A3/Diff/Notes + Diff≠0/缺说明 FAIL）；其余 `lead_*`、AE-004、`lead_rollforward_tb_reconciliation`；`lead_runner` + `lead_sheet_section`
-- **K.01 M2b（区块 2–6 勾稽）**：TB check 读取层、`rollforward_difference_over_sad`、GL-004 表4折旧核对已加；下一步做 GL-002 表3模板变体增强、TE 路由、Notes 充分性/折旧分摊合理性（见 `k01-six-block-qc-matrix.md`）
+- **K.01 M2b（区块 2–6 勾稽）**：TB check 读取层、`rollforward_difference_over_sad`、GL-004 表4折旧核对已加；**ingest 稳定优先**后再扩 GL-002 变体、TE 路由等（见 `k01-six-block-qc-matrix.md`）
+- **ingest 优先（2026-06-04）**：P1 多期 sheet 路由、K.01 购置合计口径、新增清单字段映射；案例库回归见 `artifacts/case_addition_reconciliation.md`
 
 ## 下一步（M2a 验收导向）
 
@@ -227,9 +228,41 @@
 
 下一步建议：
 
-- 继续做 `addition_rollforward_reconciliation`：新增清单购置新增合计 vs K.01 后推购置新增金额，差异超过 SAD 时提示调查。
 - 读取 `K.02.1 新增测试` 与 `K.02.1a 新增选样输出` 的总体金额/样本列表，为 `addition_sample_match` 做准备。
-- 后续再补处置清单字段完整性、处置总体同质性与处置清单 vs K.01 后推勾稽。
+- 后续再补处置清单字段完整性、处置总体同质性与 `disposal_rollforward_reconciliation`。
+
+## 2026-06-04 addition_rollforward_reconciliation（方案 A）
+
+- **ingest**：`RollforwardSheetDataset.movement_transactions`；从 K.01 表1/变动区识别「购置」等交易行金额。
+- **规则**：`addition_rollforward_reconciliation` — 购置类新增清单原值合计 vs K.01 购置行；不一致 `WARN`，超过 SAD 时在 message 提示调查；读不到任一侧 `NEED_REVIEW`。
+- **接入**：`run_addition_rules(..., rollforward, lead)`；`reconciliation.py` 的 `addition_list_rollforward` 链接同步使用购置口径。
+- **验证**：`pytest tests/rules/test_addition_rollforward_reconciliation.py tests/ingest/test_sheet_classifier.py -q --basetemp .pytest_tmp_p0`
+- **案例库复测**：`python scripts/run_case_addition_reconciliation.py`（B 购置合计约 173 万非单类 2.5 万；E 应能识别新增清单）
+
+## 2026-06-04 P0 分类与 K.01 购置合计修复
+
+- **P0-1 / P0-1b**（`sheet_classifier.py`）：名称明确的「新增清单」「处置清单」「汇总」「Lead」「FA list」不再被后推表头内容覆盖为 `rollforward`。
+- **P0-2**（`rollforward_sheet.py`）：K.01 表1 矩阵购置行按各类别 **审定列（每 3 列一组取末列）** 汇总，不再只取首个类别金额。
+- **单测**：`test_sheet_classifier.py` 新增清单/处置/汇总/Lead 用例；`test_addition_rollforward_reconciliation.py` 矩阵购置汇总用例。
+
+## 2026-06-04 案例库购置勾稽诊断与研发顺序（B–G）
+
+**案例库路径**：`固定资产质检agent/案例库`（不入 Git）。回归产物：`artifacts/case_addition_reconciliation.md`、`artifacts/case_efg_diagnosis.json`。
+
+| 案例 | 新增清单识别 | 典型问题（修复 P0 后快照） |
+| --- | --- | --- |
+| B | ✅「新增清单」 | K.01 购置为表1各类别审定合计（非单类 2.5 万）；清单侧购置行仍可能为 0，需查 `addition_method` |
+| C | ✅ | 双套 24/25 底稿；K.01 购置合计与清单是否一致需业务确认 |
+| D | ✅ | 同 C；原误读生产设备单列 |
+| E（4 份） | ✅（P0-1 后） | 曾误标 rollforward；清单与 K.01 购置金额可一致 |
+| F | ✅ | 多期 -24；清单购置 0 行 vs K.01 有购置 |
+| G | ✅ `K.02.1b 新增清单` | 处置清单仍易误标 rollforward；K.01 与清单差异大需核对口径 |
+
+**研发顺序共识（2026-06-04）**：先 **ingest 稳定**（sheet 路由、多期选当期、K.01 矩阵口径、清单字段），再扩 **勾稽 rules**；`addition_rollforward_reconciliation` 保留，案例库以 ingest 门禁为主。
+
+**下一步（ingest 优先）**：P1 多期 `-24` 路由；B/F `addition_method` 映射；暂缓铺更多清单↔K.01 勾稽直至两侧口径稳定。
+
+**复跑**：`python scripts/run_case_addition_reconciliation.py`、`python scripts/diagnose_case_efg.py`
 
 ## 2026-06-04 K.01 与 Lead LLM 复测修复沉淀
 

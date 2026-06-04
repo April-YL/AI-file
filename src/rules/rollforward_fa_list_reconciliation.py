@@ -103,8 +103,21 @@ def _check_table3(
     if not material_diffs:
         return []
 
-    if rollforward.tb_notes_text_present:
-        return []
+    max_diff = max(material_diffs, key=lambda d: abs(d))
+    if rollforward.table3_notes_text_present:
+        return [
+            _issue(
+                rollforward=rollforward,
+                field="table3_notes_text",
+                severity=Severity.NEED_REVIEW,
+                message=(
+                    "K.01 表3（FA list 汇总表与后推明细表 check）存在超过 SAD 的差异，"
+                    f"底稿已有表3 专题 Notes：最大差异={max_diff}，SAD={sad}"
+                ),
+                suggestion="请质检人员复核 Notes 是否说明差异原因、调查过程、处理结论及是否需要进一步审计程序。",
+                source_row=rollforward.table3_notes_row or rollforward.table3_check_row,
+            )
+        ]
 
     return [
         _issue(
@@ -113,11 +126,14 @@ def _check_table3(
             severity=Severity.FAIL,
             message=(
                 "K.01 表3（FA list 汇总表与后推明细表 check）存在超过 SAD 的差异，"
-                "但未读取到 Notes 解释："
+                "但未读取到表3 专题 Notes 解释："
                 + "、".join(str(v) for v in material_diffs[:6])
                 + f"；SAD={sad}"
             ),
-            suggestion="请在表3后方或 Notes 区补充差异说明；Notes 的具体符号/格式不限制，但应能说明差异原因或处理结论。",
+            suggestion=(
+                "请在表3 区域或表3 与表4 之间的 Notes 区补充差异说明；"
+                "勿仅依赖 TB 或表4 折旧 Notes 代替表3 差异说明。"
+            ),
             source_row=rollforward.table3_check_row,
         )
     ]

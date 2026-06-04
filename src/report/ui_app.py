@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
+from time import perf_counter
 
 _SRC_ROOT = Path(__file__).resolve().parents[1]
 if str(_SRC_ROOT) not in sys.path:
@@ -300,6 +301,48 @@ def _render_downloads(name: str, bundle: dict) -> None:
         )
 
 
+def _format_seconds(value: object) -> str:
+    try:
+        seconds = float(value or 0)
+    except (TypeError, ValueError):
+        seconds = 0.0
+    if seconds >= 60:
+        return f"{seconds / 60:.1f} min"
+    return f"{seconds:.1f} s"
+
+
+def _render_runtime_timings(data: dict) -> None:
+    timings = data.get("runtime_timings") or {}
+    if not timings:
+        return
+    labels = [
+        ("读取底稿", "ingest_seconds"),
+        ("规则检查", "rules_seconds"),
+        ("LLM", "llm_seconds"),
+        ("JSON+HTML", "json_html_seconds"),
+        ("标注副本", "annotated_seconds"),
+        ("总耗时", "total_seconds"),
+    ]
+    parts = [
+        f"{label}: {_format_seconds(timings.get(key))}"
+        for label, key in labels
+        if key in timings
+    ]
+    if not parts:
+        return
+    llm_note = "启用" if timings.get("llm_enabled") else "未启用"
+    st.markdown(
+        (
+            '<div style="font-size: 0.78rem; color: #666666; '
+            'margin-top: 0.35rem;">'
+            f"耗时诊断（LLM {llm_note}）："
+            + " · ".join(parts)
+            + "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
 def _render_procedure_summary(data: dict) -> None:
     st.subheader("程序分组概览")
     groups = _group_issues(data.get("issues", []))
@@ -442,6 +485,7 @@ def _run_qc_cached(
     lead_sheet: str | None,
     cache_version: str,
 ) -> tuple[dict, bytes, bytes, bytes | None]:
+    total_t0 = perf_counter()
     with tempfile.TemporaryDirectory() as tmp:
         inp = Path(tmp) / filename
         inp.write_bytes(file_bytes)
@@ -452,16 +496,31 @@ def _run_qc_cached(
             lead_sheet=lead_sheet or None,
             llm=use_llm,
         )
+        json_html_t0 = perf_counter()
         json_path = Path(tmp) / "report.json"
         html_path = Path(tmp) / "report.html"
         export_report_json(report, json_path)
         export_review_html(report, html_path)
+        json_html_seconds = perf_counter() - json_html_t0
         annotated_bytes: bytes | None = None
+        annotated_seconds = 0.0
         if inp.suffix.lower() in (".xlsx", ".xlsm"):
+            annotated_t0 = perf_counter()
             ann_path = Path(tmp) / f"{inp.stem}_qc_annotated.xlsx"
             export_annotated_workbook(report, inp, ann_path)
             annotated_bytes = ann_path.read_bytes()
-        return report.to_dict(), json_path.read_bytes(), html_path.read_bytes(), annotated_bytes
+            annotated_seconds = perf_counter() - annotated_t0
+        data = report.to_dict()
+        timings = dict(data.get("runtime_timings") or {})
+        timings.update(
+            {
+                "json_html_seconds": round(json_html_seconds, 3),
+                "annotated_seconds": round(annotated_seconds, 3),
+                "total_seconds": round(perf_counter() - total_t0, 3),
+            }
+        )
+        data["runtime_timings"] = timings
+        return data, json_path.read_bytes(), html_path.read_bytes(), annotated_bytes
 
 
 _inject_style()
@@ -547,6 +606,7 @@ for name, bundle in results.items():
         _render_overview(name, data)
         st.divider()
         _render_downloads(name, bundle)
+        _render_runtime_timings(data)
         st.divider()
         _render_procedure_summary(data)
 

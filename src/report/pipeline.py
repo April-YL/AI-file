@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import perf_counter
 
 from ingest.workbook_context import WorkbookQcContext, load_workbook_context
 from ingest.workbook_reader import list_workbook_sheet_titles
@@ -39,7 +40,9 @@ def run_workbook_qc(
     *,
     llm: bool | None = None,
 ) -> QcReport:
+    qc_start = perf_counter()
     config = load_llm_config(cli_enabled=llm)
+    llm_seconds = 0.0
     issues = []
     records = []
     rule_ids: list[str] = []
@@ -70,6 +73,7 @@ def run_workbook_qc(
         wb_for_psp: str | None = wb_for_semantic
         waiver_reason_reviewer = None
         if config.enabled:
+            llm_t0 = perf_counter()
             from llm.summary_psp_review import (
                 build_waiver_semantic_context,
                 review_waiver_reason_with_llm,
@@ -85,11 +89,17 @@ def run_workbook_qc(
             )
 
             def waiver_reason_reviewer(row):
-                return review_waiver_reason_with_llm(
-                    row,
-                    config,
-                    semantic_context=waiver_semantic_context,
-                )
+                nonlocal llm_seconds
+                review_t0 = perf_counter()
+                try:
+                    return review_waiver_reason_with_llm(
+                        row,
+                        config,
+                        semantic_context=waiver_semantic_context,
+                    )
+                finally:
+                    llm_seconds += perf_counter() - review_t0
+            llm_seconds += perf_counter() - llm_t0
 
         psp_raw_issues = check_psp_completion(
             ctx.summary,
@@ -99,6 +109,7 @@ def run_workbook_qc(
             enforce_template_completeness=True,
         )
         if config.enabled and wb_for_psp and sheet_titles:
+            llm_t0 = perf_counter()
             from llm.summary_psp_review import build_sheet_semantic_issues
 
             psp_raw_issues.extend(
@@ -109,6 +120,7 @@ def run_workbook_qc(
                     workbook_sheet_titles=sheet_titles,
                 )
             )
+            llm_seconds += perf_counter() - llm_t0
         psp_issues = attach_rule_metadata(psp_raw_issues)
         issues.extend(psp_issues)
         summary_sheet_section = build_summary_sheet_section(ctx.summary, psp_issues)
@@ -143,6 +155,7 @@ def run_workbook_qc(
         lead_semantic_context = None
 
         if config.enabled:
+            llm_t0 = perf_counter()
             from llm.lead_adjustment_review import (
                 RULE_LAYOUT,
                 RULE_SEMANTIC,
@@ -183,6 +196,7 @@ def run_workbook_qc(
                         layout_result=adjustment_layout_result,
                         extracted_rows=adjustment_extracted_rows,
                     )
+            llm_seconds += perf_counter() - llm_t0
 
         lead_raw_issues = run_lead_rules(
             ctx.lead,
@@ -192,6 +206,7 @@ def run_workbook_qc(
             adjustment_extracted_rows=adjustment_extracted_rows,
         )
         if config.enabled:
+            llm_t0 = perf_counter()
             llm_lead_issues = build_lead_semantic_issues(
                 ctx.lead,
                 config,
@@ -207,6 +222,7 @@ def run_workbook_qc(
                 for rid in (RULE_LAYOUT, RULE_SEMANTIC):
                     if rid not in rule_ids:
                         rule_ids.append(rid)
+            llm_seconds += perf_counter() - llm_t0
         lead_issues = attach_rule_metadata(lead_raw_issues)
         issues.extend(lead_issues)
         lead_sheet_section = build_lead_sheet_section(ctx.lead, lead_issues)
@@ -215,7 +231,13 @@ def run_workbook_qc(
             source_sheet = ctx.lead.source_sheet
 
     if ctx.addition_list:
-        addition_issues = attach_rule_metadata(run_addition_rules(ctx.addition_list))
+        addition_issues = attach_rule_metadata(
+            run_addition_rules(
+                ctx.addition_list,
+                rollforward=ctx.rollforward,
+                lead=ctx.lead,
+            )
+        )
         issues.extend(addition_issues)
         rule_ids.extend(list(ADDITION_RULE_IDS))
         if not source_sheet:
@@ -223,13 +245,39 @@ def run_workbook_qc(
 
     rollforward_sheet_section = None
     if ctx.rollforward:
-        rollforward_issues = attach_rule_metadata(
-            run_rollforward_rules(
-                ctx.rollforward,
-                lead=ctx.lead,
-                reconciliations=ctx.reconciliations,
-            )
+        rollforward_raw_issues = run_rollforward_rules(
+            ctx.rollforward,
+            lead=ctx.lead,
+            reconciliations=ctx.reconciliations,
         )
+        if config.enabled:
+            llm_t0 = perf_counter()
+            from llm.lead_review import build_lead_semantic_context
+            from llm.rollforward_notes_review import (
+                RULE_ID as RF_NOTES_RULE,
+                build_rollforward_notes_issues,
+            )
+
+            rf_semantic_context = build_lead_semantic_context(
+                summary=ctx.summary,
+                rollforward=ctx.rollforward,
+                addition_list=ctx.addition_list,
+                disposal_list=ctx.disposal_list,
+                reconciliations=ctx.reconciliations,
+                workbook_sheet_titles=sheet_titles,
+            )
+            rf_note_issues = build_rollforward_notes_issues(
+                ctx.rollforward,
+                config,
+                lead=ctx.lead,
+                prior_issues=rollforward_raw_issues,
+                workbook_context=rf_semantic_context,
+            )
+            rollforward_raw_issues.extend(rf_note_issues)
+            if rf_note_issues and RF_NOTES_RULE not in rule_ids:
+                rule_ids.append(RF_NOTES_RULE)
+            llm_seconds += perf_counter() - llm_t0
+        rollforward_issues = attach_rule_metadata(rollforward_raw_issues)
         issues.extend(rollforward_issues)
         rollforward_sheet_section = build_rollforward_sheet_section(
             ctx.rollforward, rollforward_issues
@@ -255,12 +303,22 @@ def run_workbook_qc(
     report.manual_review_sections = build_manual_review_sections(ctx.lead)
 
     if config.enabled:
+        llm_t0 = perf_counter()
         report = enrich_report_with_llm(
             report,
             config,
             summary=ctx.summary,
             workbook=ctx,
         )
+        llm_seconds += perf_counter() - llm_t0
+    qc_seconds = perf_counter() - qc_start
+    report.runtime_timings.update(
+        {
+            "rules_seconds": round(max(qc_seconds - llm_seconds, 0.0), 3),
+            "llm_seconds": round(llm_seconds, 3),
+            "llm_enabled": bool(config.enabled),
+        }
+    )
     return report
 
 
@@ -275,6 +333,7 @@ def run_workbook_qc_from_path(
     disposal_sheet: str | None = None,
     llm: bool | None = None,
 ) -> QcReport:
+    ingest_t0 = perf_counter()
     ctx = load_workbook_context(
         path,
         fa_sheet=fa_sheet,
@@ -284,7 +343,10 @@ def run_workbook_qc_from_path(
         addition_sheet=addition_sheet,
         disposal_sheet=disposal_sheet,
     )
-    return run_workbook_qc(ctx, llm=llm)
+    ingest_seconds = perf_counter() - ingest_t0
+    report = run_workbook_qc(ctx, llm=llm)
+    report.runtime_timings.update({"ingest_seconds": round(ingest_seconds, 3)})
+    return report
 
 
 def run_input_qc(

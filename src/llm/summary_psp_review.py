@@ -181,6 +181,7 @@ def _rollforward_context(rollforward: RollforwardSheetDataset) -> dict[str, Any]
         "tb_reconciliation_detected": rollforward.tb_reconciliation_detected,
         "tb_difference_values": [str(v) for v in rollforward.tb_difference_values[:8]],
         "tb_notes_text": rollforward.tb_notes_text,
+        "table3_notes_text": rollforward.table3_notes_text,
         "table4_difference": (
             str(rollforward.table4_difference)
             if rollforward.table4_difference is not None

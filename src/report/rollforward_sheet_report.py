@@ -16,6 +16,7 @@ _DICT_CODES: dict[str, str | None] = {
     "rollforward_fa_list_reconciliation": "GL-002",
     "rollforward_difference_over_sad": "GL-008",
     "rollforward_depreciation_pl_reconciliation": "GL-004",
+    "rollforward_notes_semantic": "GL-009",
 }
 
 _MAX_BINDINGS = 24
@@ -95,6 +96,9 @@ def build_rollforward_sheet_section(
         "table2_amount_count": rollforward.table2_amount_count,
         "table3_check_values": [str(v) for v in rollforward.table3_check_values[:20]],
         "table3_check_row": rollforward.table3_check_row,
+        "table3_notes_text_present": rollforward.table3_notes_text_present,
+        "table3_notes_row": rollforward.table3_notes_row,
+        "table3_notes_text": rollforward.table3_notes_text,
         "tb_reconciliation": {
             "detected": rollforward.tb_reconciliation_detected,
             "confidence": rollforward.tb_reconciliation_confidence,

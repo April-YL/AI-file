@@ -54,6 +54,60 @@ def score_by_name(sheet_name: str) -> tuple[SheetKind, float, str | None]:
     return SheetKind.UNCLASSIFIED, 0.0, None
 
 
+def _resolve_name_over_content(
+    *,
+    name_kind: SheetKind,
+    name_score: float,
+    name_hint: str | None,
+    content_kind: SheetKind,
+    content_score: float,
+    content_cells: list,
+    header_row: int | None,
+) -> tuple[SheetKind, float, float, float, str | None, int | None] | None:
+    """名称明确的程序 sheet 不得被后推表头内容覆盖。"""
+    if content_kind != SheetKind.ROLLFORWARD:
+        return None
+
+    min_hits: dict[SheetKind, tuple[float, int]] = {
+        SheetKind.FA_LIST: (0.85, 3),
+        SheetKind.ADDITION_LIST: (0.85, 2),
+        SheetKind.DISPOSAL_LIST: (0.85, 2),
+        SheetKind.SUMMARY: (0.75, 0),
+        SheetKind.LEAD: (0.85, 1),
+    }
+    rule = min_hits.get(name_kind)
+    if rule is None or name_score < rule[0]:
+        return None
+
+    if name_kind == SheetKind.SUMMARY:
+        confidence = min(0.96, 0.55 * name_score + 0.35)
+        return (
+            SheetKind.SUMMARY,
+            confidence,
+            name_score,
+            content_score,
+            name_hint,
+            header_row,
+        )
+
+    sig = CONTENT_SIGNATURES.get(name_kind, set())
+    if not sig:
+        return None
+    hit = count_signature_fields(content_cells, sig, sheet_kind=name_kind)
+    if hit < rule[1]:
+        return None
+
+    confidence = min(0.96, 0.35 * name_score + 0.45 * (hit / max(len(sig), 1)) + 0.2)
+    return (
+        name_kind,
+        confidence,
+        name_score,
+        content_score,
+        name_hint,
+        header_row,
+    )
+
+
 def _rollforward_period_bonus(header_cells: list) -> float:
     """表头含期初/期末/本期变动等时抬高 K.01 与「仅有金额列的 FA list」的区分度。"""
     if not header_cells:
@@ -135,6 +189,18 @@ def classify_sheet(
         rows,
         sheet_kind_hint=name_kind if name_score >= 0.7 else None,
     )
+
+    locked = _resolve_name_over_content(
+        name_kind=name_kind,
+        name_score=name_score,
+        name_hint=name_hint,
+        content_kind=content_kind,
+        content_score=content_score,
+        content_cells=content_cells,
+        header_row=header_row,
+    )
+    if locked is not None:
+        return locked
 
     # 名称明确为 FA list 时，不因仅含金额列而被判为后推表（K.01 不会命名为 FA list）
     if (

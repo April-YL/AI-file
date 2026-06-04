@@ -52,6 +52,17 @@ class K01SectionRegion:
 
 
 @dataclass
+class MovementTransactionAmount:
+    """K.01 后推明细表中的交易行金额（如购置、处置）。"""
+
+    transaction_key: str
+    transaction_label: str
+    measure: str
+    amount: Decimal
+    source_row: int
+
+
+@dataclass
 class RollforwardSheetDataset:
     """K.01 后推表解析结果（明细行 + 合计行 + 列绑定）。
 
@@ -80,6 +91,9 @@ class RollforwardSheetDataset:
     table2_amount_count: int = 0
     table3_check_values: list[Decimal] = field(default_factory=list)
     table3_check_row: int | None = None
+    table3_notes_text_present: bool = False
+    table3_notes_row: int | None = None
+    table3_notes_text: str | None = None
     tb_reconciliation_detected: bool = False
     tb_reconciliation_confidence: float = 0.0
     tb_difference_values: list[Decimal] = field(default_factory=list)
@@ -98,6 +112,7 @@ class RollforwardSheetDataset:
     table4_notes_text_present: bool = False
     table4_notes_row: int | None = None
     table4_notes_text: str | None = None
+    movement_transactions: list[MovementTransactionAmount] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
 
@@ -324,6 +339,228 @@ def _detect_movement_rows(rows: list[tuple[Any, ...]]) -> bool:
             if text == "变动":
                 return True
     return False
+
+
+_MOVEMENT_TRANSACTION_LABELS: dict[str, tuple[str, ...]] = {
+    "purchase": ("购置", "采购", "购买"),
+    "cip_transfer": ("在建工程转入", "在建转入", "转固", "在建工程转固"),
+    "disposal": ("处置或报废", "处置", "报废", "减少"),
+    "depreciation": ("计提折旧", "计提", "折旧计提"),
+}
+
+_DEFAULT_MEASURE_BY_TRANSACTION: dict[str, str] = {
+    "purchase": "original_value",
+    "cip_transfer": "original_value",
+    "disposal": "net_value",
+    "depreciation": "accumulated_depreciation",
+}
+
+
+def _match_movement_transaction_label(text: str) -> tuple[str, str] | None:
+    raw = text.strip()
+    if not raw or len(raw) > 16:
+        return None
+    for key, labels in _MOVEMENT_TRANSACTION_LABELS.items():
+        if raw in labels:
+            return key, raw
+    return None
+
+
+def _movement_columns_for_measure(
+    bindings: list[RollforwardColumnBinding],
+    measure: str,
+) -> list[int]:
+    cols: list[int] = []
+    for role in (RollforwardPeriodRole.MOVEMENT, RollforwardPeriodRole.UNKNOWN):
+        cols.extend(
+            b.column_index
+            for b in bindings
+            if b.measure == measure and b.period_role == role
+        )
+    return sorted(dict.fromkeys(cols))
+
+
+def _sum_row_transaction_amounts(
+    row: tuple[Any, ...],
+    *,
+    label_col_idx: int,
+) -> Decimal | None:
+    """从交易行按矩阵审定列（每 3 列一组取末列）汇总金额。"""
+    start = label_col_idx + 1
+    while start < min(len(row), label_col_idx + 4):
+        text = _cell_str(row[start])
+        if text and parse_amount(text) is None and not text.startswith("K."):
+            start += 1
+        else:
+            break
+
+    numeric: list[tuple[int, Decimal]] = []
+    for c_idx in range(start, min(len(row), 40)):
+        text = _cell_str(row[c_idx])
+        if not text:
+            continue
+        if text.endswith("%") or "比例" in text or "变动" in text:
+            continue
+        amt = parse_amount(text)
+        if amt is not None:
+            numeric.append((c_idx, amt))
+
+    if not numeric:
+        return None
+
+    non_zero = [a for _, a in numeric if a != 0]
+    if len(non_zero) <= 1:
+        return non_zero[0] if non_zero else numeric[0][1]
+
+    total = Decimal("0")
+    idx = numeric[0][0]
+    end = numeric[-1][0]
+    while idx <= end:
+        group: list[Decimal] = []
+        for offset in range(3):
+            if idx + offset >= len(row):
+                break
+            amt = parse_amount(_cell_str(row[idx + offset]))
+            if amt is not None:
+                group.append(amt)
+        if group:
+            total += group[-1]
+        idx += 3
+    return total
+
+
+def _amount_for_transaction_row(
+    row: tuple[Any, ...],
+    *,
+    bindings: list[RollforwardColumnBinding],
+    measure: str,
+    label_col_idx: int,
+) -> Decimal | None:
+    row_total = _sum_row_transaction_amounts(row, label_col_idx=label_col_idx)
+    if row_total is not None:
+        return row_total
+
+    mov_cols = _movement_columns_for_measure(bindings, measure)
+    if len(mov_cols) == 1:
+        return _amount_at_col(row, mov_cols[0])
+    return None
+
+
+def _scan_rows_for_movement_transactions(
+    rows: list[tuple[Any, ...]],
+    *,
+    start_row: int,
+    end_row: int,
+    bindings: list[RollforwardColumnBinding],
+) -> list[MovementTransactionAmount]:
+    results: list[MovementTransactionAmount] = []
+    current_measure: str | None = None
+    start_idx = max(0, start_row - 1)
+    end_idx = min(end_row, len(rows))
+
+    for r_idx in range(start_idx, end_idx):
+        row = rows[r_idx]
+        if row is None:
+            continue
+        row_no = r_idx + 1
+
+        for val in row[:8]:
+            text = _cell_str(val)
+            if not text:
+                continue
+            inferred = _infer_rollforward_measure(text)
+            if inferred in {
+                "original_value",
+                "accumulated_depreciation",
+                "impairment_provision",
+                "net_value",
+            }:
+                current_measure = inferred
+
+        for col_i, val in enumerate(row[:10]):
+            text = _cell_str(val)
+            if not text:
+                continue
+            matched = _match_movement_transaction_label(text)
+            if matched is None:
+                continue
+            txn_key, txn_label = matched
+            measure = current_measure or _DEFAULT_MEASURE_BY_TRANSACTION.get(
+                txn_key, "original_value"
+            )
+            amount = _amount_for_transaction_row(
+                row,
+                bindings=bindings,
+                measure=measure,
+                label_col_idx=col_i,
+            )
+            if amount is None:
+                continue
+            results.append(
+                MovementTransactionAmount(
+                    transaction_key=txn_key,
+                    transaction_label=txn_label,
+                    measure=measure,
+                    amount=amount,
+                    source_row=row_no,
+                )
+            )
+    return results
+
+
+def _extract_movement_transactions(
+    rows: list[tuple[Any, ...]],
+    *,
+    bindings: list[RollforwardColumnBinding],
+    section_regions: dict[str, K01SectionRegion],
+    has_movement_rows: bool,
+) -> list[MovementTransactionAmount]:
+    if not has_movement_rows:
+        return []
+
+    regions: list[tuple[int, int]] = []
+    for sid in ("b1_bkd_main_table", "b2_movement_tb_reconciliation"):
+        region = section_regions.get(sid)
+        if region and region.start_row and region.end_row:
+            regions.append((region.start_row, region.end_row))
+    if not regions:
+        regions.append((1, min(len(rows), 120)))
+
+    merged: list[MovementTransactionAmount] = []
+    seen: set[tuple[str, str, int]] = set()
+    for start_row, end_row in regions:
+        for item in _scan_rows_for_movement_transactions(
+            rows,
+            start_row=start_row,
+            end_row=end_row,
+            bindings=bindings,
+        ):
+            dedupe_key = (item.transaction_key, item.measure, item.source_row)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            merged.append(item)
+    return merged
+
+
+def get_movement_transaction_amount(
+    rollforward: RollforwardSheetDataset | None,
+    *,
+    transaction_key: str,
+    measure: str,
+) -> tuple[Decimal | None, int | None]:
+    """读取指定交易行金额；多行同 key+measure 时求和。"""
+    if rollforward is None:
+        return None, None
+    matches = [
+        t
+        for t in rollforward.movement_transactions
+        if t.transaction_key == transaction_key and t.measure == measure
+    ]
+    if not matches:
+        return None, None
+    total = sum((t.amount for t in matches), Decimal("0"))
+    return total, matches[0].source_row
 
 
 def _sheet_text_blob(rows: list[tuple[Any, ...]], *, max_rows: int = 80) -> str:
@@ -893,6 +1130,40 @@ def _adjacent_note_marker(row: tuple[Any, ...], value_idx: int) -> str | None:
     return candidates[0] if candidates else None
 
 
+def _extract_notes_between_rows(
+    rows: list[tuple[Any, ...]],
+    *,
+    start_row: int | None,
+    end_row: int | None,
+) -> tuple[bool, int | None, str | None]:
+    """在指定行范围内摘录 Notes 正文（用于表3 与表4 之间等区域）。"""
+    if not start_row or start_row < 1:
+        return False, None, None
+    end = end_row if end_row and end_row >= start_row else len(rows)
+    region = K01SectionRegion(
+        section_id="scoped_notes",
+        start_row=start_row,
+        end_row=end,
+    )
+    return _extract_note_text(rows, region)
+
+
+def _extract_table3_notes(
+    rows: list[tuple[Any, ...]],
+    *,
+    table3_region: K01SectionRegion | None,
+    table4_region: K01SectionRegion | None,
+) -> tuple[bool, int | None, str | None]:
+    """表3 专题 Notes：仅读表3 区至表4 开始前，避免误用 TB/表4 远处说明。"""
+    if table3_region is None or not table3_region.start_row:
+        return False, None, None
+    start = table3_region.start_row
+    end = table3_region.end_row or len(rows)
+    if table4_region and table4_region.start_row and table4_region.start_row > start:
+        end = min(end, table4_region.start_row - 1)
+    return _extract_notes_between_rows(rows, start_row=start, end_row=end)
+
+
 def _extract_note_text(
     rows: list[tuple[Any, ...]],
     region: K01SectionRegion | None,
@@ -995,7 +1266,7 @@ def _extract_table4_depreciation_check(
         if header_row is not None and row_no > header_row and pl_total_row is None and amt is not None:
             pl_amounts.append(amt)
 
-    notes_present, notes_row, notes_text = _extract_note_text(rows, notes_region)
+    notes_present, notes_row, notes_text = _extract_note_text(rows, table4_region)
     return (
         pl_amounts,
         pl_total,
@@ -1306,6 +1577,17 @@ def parse_rollforward_rows(
     if table3_check_values:
         notes.append(f"k01_table3_check_values:{len(table3_check_values)}")
     (
+        table3_notes_text_present,
+        table3_notes_row,
+        table3_notes_text,
+    ) = _extract_table3_notes(
+        rows,
+        table3_region=section_regions.get("b4_table3_check_with_table1"),
+        table4_region=section_regions.get("b5_table4_depreciation_pl"),
+    )
+    if table3_notes_text_present:
+        notes.append("k01_table3_notes_text")
+    (
         tb_reconciliation_detected,
         tb_reconciliation_confidence,
         tb_difference_values,
@@ -1447,6 +1729,15 @@ def parse_rollforward_rows(
             }
             notes.append("ending_from_detail_sum")
 
+    movement_transactions = _extract_movement_transactions(
+        rows,
+        bindings=bindings,
+        section_regions=section_regions,
+        has_movement_rows=has_movement_rows,
+    )
+    if movement_transactions:
+        notes.append(f"k01_movement_transactions:{len(movement_transactions)}")
+
     return RollforwardSheetDataset(
         source_file=source_file,
         source_sheet=source_sheet,
@@ -1469,6 +1760,9 @@ def parse_rollforward_rows(
         table2_amount_count=table2_amount_count,
         table3_check_values=table3_check_values,
         table3_check_row=table3_check_row,
+        table3_notes_text_present=table3_notes_text_present,
+        table3_notes_row=table3_notes_row,
+        table3_notes_text=table3_notes_text,
         tb_reconciliation_detected=tb_reconciliation_detected,
         tb_reconciliation_confidence=tb_reconciliation_confidence,
         tb_difference_values=tb_difference_values,
@@ -1487,6 +1781,7 @@ def parse_rollforward_rows(
         table4_notes_text_present=table4_notes_text_present,
         table4_notes_row=table4_notes_row,
         table4_notes_text=table4_notes_text,
+        movement_transactions=movement_transactions,
         notes=notes,
     )
 
