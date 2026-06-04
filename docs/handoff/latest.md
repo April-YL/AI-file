@@ -231,6 +231,32 @@
 - 读取 `K.02.1 新增测试` 与 `K.02.1a 新增选样输出` 的总体金额/样本列表，为 `addition_sample_match` 做准备。
 - 后续再补处置清单字段完整性、处置总体同质性与处置清单 vs K.01 后推勾稽。
 
+## 2026-06-04 K.01 与 Lead LLM 复测修复沉淀
+
+本轮根据更新后的 UI 复测结果，聚焦 `K1 SWP 固定资产 20251231 E锂原 - 测试0604.xlsx` 中的 K.01 读取错位与 Lead 语义复核误提示。
+
+已完成：
+
+- **K.01 表1/表3读取分离**：`rollforward_sheet.py` 新增表1矩阵读取，`ending_totals` 优先读取表1合计列的期末审定数；表1 `CHECK` 列、表3 `表2 check with 表1` 分别保存，避免把表3差异误读为 K.01 期末余额。
+- **LEAD-010 定位修复**：Lead 与 K.01 后推核对优先读取 K.01 表1 `CHECK` 列，并把 finding 定位到 K.01 对应行；当 CHECK 不可读时，才退回 Lead 与 K.01 期末数直接比对。
+- **测试0604 复测结果**：K.01 期末数读取为原值 `694,376,870.69`、累计折旧 `134,308,399.27`、减值 `0`、净值 `560,068,471.42`；LEAD-010 仅报原值和净值差异，不再误报累计折旧。
+- **GL-002 / GL-008 复测结果**：表3 FA list 与后推 check 差异、TB check 超 SAD 且无 Note 标识均可在 K.01 中识别并定位。
+- **LEAD-013 语义复核修复**：LLM 输入新增 `note_required_by_threshold` 与 `volatility_threshold_reason`；金额阈值和比例阈值同时存在时，必须两者均超过才强制要求 Note。金额变动为 0 时，即使比例显示 100%，也不要求补 Note；未超阈值但编制者自愿写 Note，不按强制异常波动标准判断。
+- **LEAD-012 语义复核收窄**：预期分析已包含主要业务原因和变动方向，且未见与 Lead/K.01 可见方向冲突时，不应再要求补 K.01 期初、期末及变动金额。LLM 返回 `unclear` 不再生成 `LEAD-012` Comments，避免与 `LEAD-014` 重复。
+
+已验证：
+
+- `.\.venv\Scripts\pytest.exe tests\ingest\test_workbook_ingest.py tests\rules\test_rollforward_rules.py tests\rules\test_lead_rules_extended.py -q --basetemp .pytest_tmp_k01_fix_core`：67 passed
+- `.\.venv\Scripts\pytest.exe tests\report\test_workbook_pipeline.py tests\report\test_export_annotated_workbook.py -q --basetemp .pytest_tmp_k01_fix_report`：13 passed
+- `.\.venv\Scripts\pytest.exe tests\llm\test_lead_review.py -q --basetemp .pytest_tmp_lead012_fix`：9 passed
+- `.\.venv\Scripts\pytest.exe tests\llm -q --basetemp .pytest_tmp_lead012_fix_all`：37 passed
+
+待复测重点：
+
+- UI 重新跑 `测试0604`，确认主 Comments 中不再出现“减值准备 0 金额 + 100% 变动需补 Note”的 LEAD-013。
+- 确认 LEAD-012 不再因“补充 K.01 后推明细表期初/期末/变动金额”进入 Comments；预期分析简略但无明显冲突时，仅保留 LEAD-014 的人工复核提示。
+- 若 K.01 表1 `CHECK` 列在其他模板中位置变化，需继续补充表1矩阵读取回归。
+
 ## 相关文件
 
 - `AGENTS.md` — 终态目标与必交付项

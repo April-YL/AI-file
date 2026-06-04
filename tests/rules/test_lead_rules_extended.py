@@ -8,7 +8,7 @@ import openpyxl
 import pytest
 
 from ingest.lead_sheet import load_lead_from_workbook
-from ingest.rollforward_sheet import parse_rollforward_rows
+from ingest.rollforward_sheet import RollforwardSheetDataset, parse_rollforward_rows
 from rules.lead_expectation_analysis import check_lead_expectation_analysis
 from rules.lead_movement_rows_complete import check_lead_movement_rows_complete
 from rules.lead_rollforward_tb_reconciliation import check_lead_rollforward_tb_reconciliation
@@ -262,6 +262,61 @@ def test_rollforward_reconciliation_mismatch(tmp_path: Path):
     rf = parse_rollforward_rows(rows, source_sheet="K.01 Agree SL to GL")
     issues = check_lead_rollforward_tb_reconciliation(lead, rf)
     assert any(i.severity == Severity.FAIL for i in issues)
+
+
+def test_rollforward_reconciliation_prefers_k01_check_column(tmp_path: Path):
+    path = tmp_path / "lead_rf_k01_check.xlsx"
+    wb = openpyxl.Workbook()
+    ws_lead = wb.active
+    ws_lead.title = "K.00 Lead Sheet"
+    ws_lead["C40"] = "科目名称"
+    ws_lead["E40"] = "期末账面数"
+    ws_lead["C41"] = "原值"
+    ws_lead["E41"] = 696
+    ws_lead["C42"] = "累计折旧"
+    ws_lead["E42"] = 134
+    ws_lead["C43"] = "减值准备"
+    ws_lead["E43"] = 0
+    ws_lead["C44"] = "净值"
+    ws_lead["E44"] = 562
+    wb.save(path)
+    wb.close()
+
+    lead = load_lead_from_workbook(path)
+    rf = RollforwardSheetDataset(
+        source_file=str(path),
+        source_sheet="K.01 Agree SL to GL",
+        header_row=None,
+        mapped_fields=[],
+        ending_totals={
+            "original_value": Decimal("694"),
+            "accumulated_depreciation": Decimal("134"),
+            "impairment_provision": Decimal("0"),
+            "net_value": Decimal("560"),
+        },
+        table1_check_values={
+            "original_value": Decimal("-2"),
+            "accumulated_depreciation": Decimal("0"),
+            "impairment_provision": Decimal("0"),
+            "net_value": Decimal("-2"),
+        },
+        table1_check_rows={
+            "original_value": 18,
+            "accumulated_depreciation": 24,
+            "impairment_provision": 30,
+            "net_value": 32,
+        },
+    )
+
+    issues = check_lead_rollforward_tb_reconciliation(lead, rf)
+    assert len(issues) == 2
+    assert {i.field for i in issues} == {
+        "table1_check|original_value",
+        "table1_check|net_value",
+    }
+    assert {i.source_sheet for i in issues} == {"K.01 Agree SL to GL"}
+    assert {i.procedure_code for i in issues} == {"K.01"}
+    assert {i.source_row for i in issues} == {18, 32}
 
 
 def test_run_lead_rules_attaches_metadata(swp_lead_xlsx: Path):

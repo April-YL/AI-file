@@ -10,6 +10,7 @@ from ingest.rollforward_sheet import RollforwardSheetDataset
 from ingest.summary_sheet import SummarySheetDataset
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
+from rules.lead_common import exceeds_volatility_threshold
 from rules.parsing import parse_amount
 from rules.models import QcIssue, Severity
 
@@ -22,7 +23,7 @@ _EXPECTATION_SYSTEM = """你是固定资产审计 K.00 Lead 底稿复核助手�
 输出含义：
 - sufficient：预期分析包含主要业务原因和变动方向，且与输入中后推明细表/引导表可见方向不冲突。
 - insufficient：预期分析明显缺少业务原因，或变动方向与输入中后推明细表合计金额方向冲突。
-- unclear：属于会计政策/会计估计变化或其他未覆盖情形，或输入不足以判断方向一致性。
+- unclear：属于会计政策/会计估计变化或其他未覆盖情形，或输入不足以判断方向一致性；unclear 仅作内部判断，不应要求底稿编制者补充 K.01 期初、期末及变动金额。
 
 不足表达：
 1) 包含主要业务原因和变动方向，但变动方向与 K.01 后推明细表中合计金额变动方向不一致，例如预期原值存在新增，而后推明细表中购置及在建工程转入金额为 0；
@@ -31,6 +32,7 @@ _EXPECTATION_SYSTEM = """你是固定资产审计 K.00 Lead 底稿复核助手�
 可接受表达：
 针对新增、减少、在建工程转入、折旧费用、转让、外汇和其他调整，只要包含主要业务原因和变动方向，且与输入可见的后推明细表合计金额变动方向一致，可以判断 sufficient；不要因为没有使用标准审计术语而判不足。
 标准 K.00 Lead 预期分析不要求单独对“减值准备”科目逐行建立预期；不得仅因未写“减值准备预期分析”而判 insufficient。减值相关事项应在减值测试/减值迹象识别程序或异常波动说明充分性中关注。
+如果预期分析已包含主要业务原因和变动方向，且输入没有显示与 Lead/K.01 可见方向冲突，应判断 sufficient；不得仅因想进一步验证 K.01 期初、期末或变动金额而返回 insufficient。
 
 不确定表达：
 1) 会计政策及会计估计类，如折旧方法、使用寿命，默认无重大变化；如果预期分析中存在变化，需要对应的合理原因说明，否则返回 unclear；
@@ -42,9 +44,10 @@ _FLUCTUATION_SYSTEM = """你是固定资产审计 K.00 Lead 底稿复核助手�
 判断时必须贴近固定资产 K1 底稿实际执行口径；引入 LLM 后仍需人工确认复核。
 
 逻辑判定：
-1) Lead 引导表中变动超过阈值（波动幅度 CNY）时，必须添加 Note 进行分析，且 Note 编号应与下方波动分析编号一致；超过阈值但未添加索引编号，需要提示。
-2) 未超过阈值时，可以选择性添加 Note；如存在“无金额变动超过 TT”“无变动大于 10%”等描述，判断条件可放宽。
-3) 比较金额时注意单位换算，避免误判，例如 k=千，m=百万。
+1) 只对输入 movement_rows 中 note_required_by_threshold=true 的行执行强制 Note 判断。
+2) 当金额阈值和比例阈值同时存在时，必须“金额变动超过阈值”且“比例变动超过阈值”才需要 Note；金额变动为 0 的行，即使比例显示 100%，也不得仅因比例判为不足。
+3) note_required_by_threshold=false 但已有 Note 的行，属于底稿编制者自愿补充分析；可以检查是否明显自相矛盾，但不得按“异常波动必须覆盖”标准报不足。
+4) 比较金额时注意单位换算，避免误判，例如 k=千，m=百万。
 
 不足表达：
 1) 波动说明中的变动金额与 Lead 引导表不一致；
@@ -140,10 +143,10 @@ def _review_expectation_semantic(
         payload=payload,
         rationale_hint="预期分析",
     )
-    if out is None or out["assessment"] == "sufficient":
+    if out is None or out["assessment"] in {"sufficient", "unclear"}:
         return []
-    sev = Severity.WARN if out["assessment"] == "insufficient" else Severity.NEED_REVIEW
-    msg = "Lead 预期分析语义上不足" if out["assessment"] == "insufficient" else "Lead 预期分析语义不明确"
+    sev = Severity.WARN
+    msg = "Lead 预期分析语义上不足"
     if out["rationale"]:
         msg += f"；模型提示：{out['rationale']}"
     return [
@@ -175,19 +178,11 @@ def _review_fluctuation_notes_semantic(
     payload = {
         "source_sheet": lead.source_sheet,
         "fluctuation_notes": notes,
-        "movement_rows": [
-            {
-                "account_label": r.account_label,
-                "source_row": r.source_row,
-                "movement": r.values.get("movement"),
-                "movement_pct": r.values.get("movement_pct"),
-                "notes": r.values.get("notes"),
-            }
-            for r in lead.movement_rows[:12]
-        ],
+        "movement_rows": _movement_rows_for_fluctuation_review(lead),
         "volatility": lead.volatility.to_dict() if lead.volatility else None,
         "review_hint": (
-            "若 movement_rows 中存在超过阈值的变动，应关注 notes/索引编号与下方波动说明是否对应；"
+            "只有 note_required_by_threshold=true 的行才必须有 notes/索引编号并与下方波动说明对应；"
+            "note_required_by_threshold=false 但已有 notes 的行属于自愿说明，不按强制异常波动标准判断。"
             "并结合 workbook_context 中的 K.01、清单、汇总页 PSP 和勾稽结果判断说明是否有支持。"
             "比较金额时注意 k=千、m=百万等单位换算。"
         ),
@@ -219,6 +214,80 @@ def _review_fluctuation_notes_semantic(
             llm_review_type="Lead异常波动说明充分性",
         )
     ]
+
+
+def _parse_percent(value: str | None):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    pct = parse_amount(text.rstrip("%"))
+    if pct is None:
+        return None
+    if text.endswith("%"):
+        return pct / 100
+    return pct
+
+
+def _movement_rows_for_fluctuation_review(lead: LeadSheetDataset) -> list[dict[str, Any]]:
+    vol_amount = parse_amount(lead.volatility.amount) if lead.volatility else None
+    vol_percent = _parse_percent(lead.volatility.percent) if lead.volatility else None
+    rows: list[dict[str, Any]] = []
+    for r in lead.movement_rows[:12]:
+        movement_amt = parse_amount(r.values.get("movement_amount") or r.values.get("movement"))
+        movement_pct = _parse_percent(r.values.get("movement_pct"))
+        required = exceeds_volatility_threshold(
+            movement_amt,
+            movement_pct,
+            vol_amount=vol_amount,
+            vol_percent=vol_percent,
+        )
+        notes = r.values.get("notes")
+        rows.append(
+            {
+                "account_label": r.account_label,
+                "source_row": r.source_row,
+                "movement": r.values.get("movement"),
+                "movement_amount": r.values.get("movement_amount"),
+                "movement_pct": r.values.get("movement_pct"),
+                "notes": notes,
+                "note_required_by_threshold": required,
+                "volatility_threshold_reason": _threshold_reason(
+                    movement_amt=movement_amt,
+                    movement_pct=movement_pct,
+                    vol_amount=vol_amount,
+                    vol_percent=vol_percent,
+                    required=required,
+                    has_note=bool(str(notes or "").strip()),
+                ),
+            }
+        )
+    return rows
+
+
+def _threshold_reason(
+    *,
+    movement_amt,
+    movement_pct,
+    vol_amount,
+    vol_percent,
+    required: bool,
+    has_note: bool,
+) -> str:
+    if movement_amt is not None and movement_amt == 0:
+        return "金额变动为0；即使比例显示100%，也不属于强制异常波动说明。"
+    if vol_amount is not None and vol_percent is not None:
+        return (
+            "金额和比例均超过阈值，必须有Note。"
+            if required
+            else "金额阈值和比例阈值需同时超过；本行未同时超过。"
+        )
+    if required:
+        return "可取得的阈值已超过，必须有Note。"
+    if has_note:
+        return "未超过强制阈值但底稿已有自愿Note；仅检查是否明显自相矛盾。"
+    return "未超过强制阈值。"
 
 
 def _call_semantic_review(

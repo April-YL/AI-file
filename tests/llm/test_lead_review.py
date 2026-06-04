@@ -93,8 +93,37 @@ def test_lead_expectation_prompt_uses_rollforward_direction_criteria():
     assert "不要因为没有使用标准审计术语而判不足" in system
     assert "不要求单独对“减值准备”科目逐行建立预期" in system
     assert "不得仅因未写“减值准备预期分析”而判 insufficient" in system
+    assert "不得仅因想进一步验证 K.01 期初、期末或变动金额" in system
     assert payload["movement_rows"][0]["movement"] == "500000"
     assert "证据不足时返回 unclear" in payload["review_hint"]
+
+
+def test_lead_expectation_semantic_suppresses_unclear_to_avoid_duplicate_review():
+    lead = LeadSheetDataset(
+        source_file="wb.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        expectations=[
+            ExpectationRow(
+                account_change="固定资产新增",
+                expectation="预计因产线建设新增设备，原值增加。",
+                source_row=30,
+            )
+        ],
+    )
+    with patch(
+        "llm.lead_review.chat_completion_json",
+        side_effect=[
+            {
+                "assessment": "unclear",
+                "rationale": "需要补充K.01后推明细表中各账户期初、期末及变动金额。",
+                "suggested_action": "补充K.01后推明细表中各账户期初、期末及变动金额。",
+            },
+            {"assessment": "sufficient"},
+        ],
+    ):
+        issues = build_lead_semantic_issues(lead, _config())
+
+    assert not any(i.rule_id == "lead_expectation_semantic" for i in issues)
 
 
 def test_lead_expectation_prompt_includes_workbook_context():
@@ -239,6 +268,75 @@ def test_lead_fluctuation_prompt_uses_note_threshold_and_unit_criteria():
     assert "不得编造" in system
     assert payload["movement_rows"][0]["notes"] == "1"
     assert "单位换算" in payload["review_hint"]
+
+
+def test_lead_fluctuation_prompt_marks_zero_amount_percent_as_not_required():
+    lead = LeadSheetDataset(
+        source_file="wb.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        fluctuation_notes="本期原值和累计折旧波动已按NB1/NB2说明。",
+        movement_rows=[
+            LeadMovementRow(
+                account_label="减值准备",
+                sheet_ref="K.01",
+                values={
+                    "movement_amount": "0",
+                    "movement_pct": "1",
+                    "notes": None,
+                },
+                source_row=51,
+            )
+        ],
+    )
+    lead.volatility = type("Vol", (), {"amount": "2000000", "percent": "0.1", "to_dict": lambda self: {}})()
+    with patch(
+        "llm.lead_review.chat_completion_json",
+        return_value={"assessment": "sufficient"},
+    ) as mock_call:
+        issues = build_lead_semantic_issues(lead, _config())
+
+    assert issues == []
+    user = mock_call.call_args_list[-1].kwargs["user"]
+    payload = json.loads(user.split("输入：", 1)[1])
+    row = payload["movement_rows"][0]
+    assert row["account_label"] == "减值准备"
+    assert row["note_required_by_threshold"] is False
+    assert "金额变动为0" in row["volatility_threshold_reason"]
+    assert "即使比例显示 100%" in mock_call.call_args_list[-1].kwargs["system"]
+
+
+def test_lead_fluctuation_prompt_distinguishes_voluntary_note_from_required_note():
+    lead = LeadSheetDataset(
+        source_file="wb.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        fluctuation_notes="净值小幅波动，项目组自愿补充说明原因。",
+        movement_rows=[
+            LeadMovementRow(
+                account_label="净值",
+                sheet_ref="K.01",
+                values={
+                    "movement_amount": "1000",
+                    "movement_pct": "0.01",
+                    "notes": "NB3",
+                },
+                source_row=53,
+            )
+        ],
+    )
+    lead.volatility = type("Vol", (), {"amount": "2000000", "percent": "0.1", "to_dict": lambda self: {}})()
+    with patch(
+        "llm.lead_review.chat_completion_json",
+        return_value={"assessment": "sufficient"},
+    ) as mock_call:
+        issues = build_lead_semantic_issues(lead, _config())
+
+    assert issues == []
+    user = mock_call.call_args_list[-1].kwargs["user"]
+    payload = json.loads(user.split("输入：", 1)[1])
+    row = payload["movement_rows"][0]
+    assert row["note_required_by_threshold"] is False
+    assert "未同时超过" in row["volatility_threshold_reason"]
+    assert "自愿说明" in payload["review_hint"]
 
 
 def test_lead_semantic_issues_skip_when_llm_returns_invalid():

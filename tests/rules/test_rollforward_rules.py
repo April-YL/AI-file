@@ -212,21 +212,28 @@ def test_rollforward_ingest_extracts_table2_and_table3_check_values():
 def test_rollforward_ingest_extracts_side_by_side_table2_table3_check():
     rows = [
         ("表1",),
-        ("固定资产类别", "设备", None, None, None, None, None, "合计"),
-        ("", "年末余额", 100, 10, 0, 90, None, 100, 10, 0, 90),
+        (None, None, None, "固定资产类别", None, "设备", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, "合计"),
+        (None, None, None, None, "账面数", "账表调整/审计调整", "审定数", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, "账面数", "账表调整/审计调整", "审定数", "CHECK"),
+        (None, None, "年初余额", None, 90, None, 90, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, 90, None, 90, 0),
+        ("原值", None, "年末余额", None, 100, None, 100, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, 100, None, 100, -2),
+        ("累计折旧", None, "年末余额", None, 10, None, 10, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, 10, None, 10, 0),
+        ("减值准备", None, "年末余额", None, 0, None, 0, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, 0, None, 0, 0),
+        ("净值", None, "年末余额", None, 90, None, 90, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, 90, None, 90, -2),
         ("原值变动金额", "TB-原值", "差异"),
         ("表2", None, None, None, None, None, None, "表3"),
         (None, None, None, "汇总", None, None, None, "表2 check with 表1"),
         (None, "固定资产类别", "原值", "累计折旧", "减值准备", "净值", None, "原值", "累计折旧", "减值准备", "净值"),
-        (None, "设备", 100, 10, 0, 90, None, 0, 0, 0, 0),
-        (None, "合计", 100, 10, 0, 90, None, 0, 0, 0, 0),
+        (None, "设备", 100, 10, 0, 90, None, 2, 0, 0, 2),
+        (None, "合计", 100, 10, 0, 90, None, 2, 0, 0, 2),
         ("表4", "折旧费用与利润表科目核对"),
     ]
     rf = parse_rollforward_rows(rows, source_sheet="K.01 Agree SL to GL")
     assert rf.ending_totals["original_value"] == Decimal("100")
     assert rf.ending_totals["net_value"] == Decimal("90")
+    assert rf.table1_check_values["original_value"] == Decimal("-2")
+    assert rf.table1_check_values["net_value"] == Decimal("-2")
     assert rf.table2_amount_count >= 4
-    assert rf.table3_check_values == [Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0")]
+    assert rf.table3_check_values == [Decimal("2"), Decimal("0"), Decimal("0"), Decimal("2")]
     assert not all(v == 0 for v in rf.ending_totals.values() if v is not None)
 
 

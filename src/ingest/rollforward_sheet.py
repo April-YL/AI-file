@@ -68,6 +68,8 @@ class RollforwardSheetDataset:
     opening_totals: dict[str, Decimal | None] = field(default_factory=dict)
     ending_totals: dict[str, Decimal | None] = field(default_factory=dict)
     total_row: int | None = None
+    table1_check_values: dict[str, Decimal | None] = field(default_factory=dict)
+    table1_check_rows: dict[str, int] = field(default_factory=dict)
     layout_profile: RollforwardLayoutProfile = RollforwardLayoutProfile.UNRECOGNIZED
     has_movement_rows: bool = False
     section_presence: dict[str, bool] = field(default_factory=dict)
@@ -662,6 +664,102 @@ def _extract_side_by_side_table2_table3(
     return 0, [], None
 
 
+def _extract_b1_matrix_totals_and_checks(
+    rows: list[tuple[Any, ...]],
+    region: K01SectionRegion | None,
+) -> tuple[dict[str, Decimal | None], dict[str, Decimal | None], dict[str, int], int | None]:
+    """读取 SOP/Hybrid 表1的合计期末数和 CHECK 列。
+
+    标准 K.01 中表1按资产类别横向展开，最后一组为“合计”，通常包含
+    “账面数 / 账表调整/审计调整 / 审定数 / CHECK”。表2/表3区域右侧的
+    check 差异不能作为 K.01 期末合计。
+    """
+    if region is None or not region.start_row or not region.end_row:
+        return {}, {}, {}, None
+
+    start_idx = region.start_row - 1
+    end_idx = min(region.end_row, len(rows))
+    total_label_col: int | None = None
+    total_header_row: int | None = None
+    for r_idx in range(start_idx, end_idx):
+        row = rows[r_idx]
+        for c_idx, val in enumerate(row[:40]):
+            if _cell_str(val) == "合计":
+                total_label_col = c_idx + 1
+                total_header_row = r_idx + 1
+    if total_label_col is None:
+        return {}, {}, {}, None
+
+    subheader_row: tuple[Any, ...] | None = None
+    subheader_row_no: int | None = None
+    search_from = max(start_idx, (total_header_row or region.start_row) - 1)
+    for r_idx in range(search_from, min(search_from + 4, end_idx)):
+        row = rows[r_idx]
+        texts = [_cell_str(v) or "" for v in row[:45]]
+        if any("审定数" in t for t in texts) or any(t.upper() == "CHECK" for t in texts):
+            subheader_row = row
+            subheader_row_no = r_idx + 1
+            break
+
+    ending_col: int | None = None
+    opening_col: int | None = None
+    check_col: int | None = None
+    if subheader_row is not None:
+        for col_no in range(total_label_col, min(total_label_col + 6, len(subheader_row)) + 1):
+            text = _cell_str(subheader_row[col_no - 1]) or ""
+            if "审定数" in text:
+                ending_col = col_no
+            elif "账面数" in text and opening_col is None:
+                opening_col = col_no
+            elif text.upper() == "CHECK":
+                check_col = col_no
+
+    # 若未找到子表头，按标准三列组兜底：合计账面数/调整/审定数/check。
+    if ending_col is None:
+        ending_col = total_label_col + 2
+    if opening_col is None:
+        opening_col = total_label_col
+    if check_col is None and subheader_row_no is not None:
+        for col_no in range(ending_col + 1, min(ending_col + 4, len(subheader_row or ())) + 1):
+            if (_cell_str((subheader_row or ())[col_no - 1]) or "").upper() == "CHECK":
+                check_col = col_no
+
+    ending: dict[str, Decimal | None] = {}
+    opening: dict[str, Decimal | None] = {}
+    checks: dict[str, Decimal | None] = {}
+    check_rows: dict[str, int] = {}
+    current_measure: str | None = None
+    for r_idx in range(start_idx, end_idx):
+        row = rows[r_idx]
+        row_no = r_idx + 1
+        labels = [_cell_str(v) or "" for v in row[:4]]
+        joined = " ".join(labels)
+        explicit_measure = _infer_rollforward_measure(joined)
+        if explicit_measure in {
+            "original_value",
+            "accumulated_depreciation",
+            "impairment_provision",
+            "net_value",
+        }:
+            current_measure = explicit_measure
+
+        if current_measure is None:
+            continue
+        if not any("年末余额" in t or "期末余额" in t for t in labels):
+            continue
+
+        ending[current_measure] = _amount_at_col(row, ending_col)
+        opening[current_measure] = _amount_at_col(row, opening_col)
+        if check_col is not None:
+            checks[current_measure] = _amount_at_col(row, check_col)
+            check_rows[current_measure] = row_no
+
+    total_row = None
+    if ending:
+        total_row = max(check_rows.values()) if check_rows else None
+    return ending, checks, check_rows, total_row
+
+
 def _text_cells_in_region(
     rows: list[tuple[Any, ...]],
     region: K01SectionRegion | None,
@@ -1248,6 +1346,16 @@ def parse_rollforward_rows(
         for b in bindings
     ):
         notes.append("period_labels_applied")
+    table1_ending, table1_checks, table1_check_rows, table1_total_row = _extract_b1_matrix_totals_and_checks(
+        rows,
+        section_regions.get("b1_bkd_main_table"),
+    )
+    if _binding_totals_have_values(table1_ending):
+        ending = table1_ending
+        total_row = table1_total_row
+        notes.append("ending_from_b1_matrix_total")
+    if table1_checks:
+        notes.append("k01_table1_check_values")
     total_row_data: tuple[Any, ...] | None = None
 
     b1_region = section_regions.get("b1_bkd_main_table")
@@ -1261,7 +1369,7 @@ def parse_rollforward_rows(
         if scoped:
             col_for_totals = scoped
             notes.append("totals_columns_from_b1_region")
-    if b1_region and b1_region.start_row and b1_region.end_row and (col_for_totals or bindings):
+    if not _binding_totals_have_values(ending) and b1_region and b1_region.start_row and b1_region.end_row and (col_for_totals or bindings):
         total_row, total_row_data = _find_total_row_in_range(
             rows,
             start_row=b1_region.start_row,
@@ -1270,7 +1378,7 @@ def parse_rollforward_rows(
             bindings=bindings,
         )
 
-    if total_row_data is None and header_row and (col_for_totals or bindings):
+    if not _binding_totals_have_values(ending) and total_row_data is None and header_row and (col_for_totals or bindings):
         start = header_row
         for r_idx in range(start, len(rows)):
             row = rows[r_idx]
@@ -1282,7 +1390,7 @@ def parse_rollforward_rows(
             total_row = r_idx + 1
             break
 
-    if total_row_data is not None:
+    if not _binding_totals_have_values(ending) and total_row_data is not None:
         has_period_bindings = any(
             b.period_role in (RollforwardPeriodRole.OPENING, RollforwardPeriodRole.ENDING) for b in bindings
         )
@@ -1349,6 +1457,8 @@ def parse_rollforward_rows(
         opening_totals=opening,
         ending_totals=ending,
         total_row=total_row,
+        table1_check_values=table1_checks,
+        table1_check_rows=table1_check_rows,
         layout_profile=layout_profile,
         has_movement_rows=has_movement_rows,
         section_presence=section_presence,
