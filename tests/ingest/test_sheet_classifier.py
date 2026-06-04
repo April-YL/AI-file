@@ -17,6 +17,16 @@ def test_name_addition_list():
     assert s >= 0.8
 
 
+def test_name_disposal_list_variants():
+    k, s, _ = score_by_name("K.02.2b 处置清单")
+    assert k == SheetKind.DISPOSAL_LIST
+    assert s >= 0.8
+
+    k2, s2, _ = score_by_name("K.02.2b 减少清单")
+    assert k2 == SheetKind.DISPOSAL_LIST
+    assert s2 >= 0.8
+
+
 def test_skip_internal():
     k, _, _ = score_by_name("DS_INTERNAL_DOCUMENT_STORAGE")
     assert k == SheetKind.SKIP

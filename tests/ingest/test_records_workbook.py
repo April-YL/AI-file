@@ -3,6 +3,7 @@ from pathlib import Path
 import openpyxl
 import pytest
 
+from ingest.models import SheetKind
 from ingest.records import (
     find_fa_list_sheets,
     load_fa_list_csv,
@@ -74,3 +75,32 @@ def test_parse_fa_list_rows_skips_reclassification_summary_rows():
     ]
     dataset = parse_fa_list_rows(rows)
     assert [r.asset_id for r in dataset.records] == ["FA-TEST-001"]
+
+
+def test_parse_addition_list_keeps_addition_method():
+    rows = [
+        (
+            "固定资产类别",
+            "固定资产编号",
+            "固定资产名称",
+            "入账开始日期",
+            "原值",
+            "新增方式",
+        ),
+        ("机器设备", "FA-TEST-001", "设备A", "2024-01-01", 1000, "在建工程转入"),
+    ]
+    dataset = parse_fa_list_rows(
+        rows,
+        source_file="dummy.xlsx",
+        source_sheet="新增清单",
+        sheet_kind=SheetKind.ADDITION_LIST,
+    )
+    assert dataset.records[0].addition_method == "在建工程转入"
+    assert {m.standard_field for m in dataset.mapped_fields} >= {
+        "asset_category",
+        "asset_id",
+        "asset_name",
+        "start_date",
+        "original_value",
+        "addition_method",
+    }

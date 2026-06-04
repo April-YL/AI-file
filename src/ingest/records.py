@@ -24,6 +24,7 @@ _RECORD_FIELDS = (
     "accumulated_depreciation",
     "impairment_provision",
     "net_value",
+    "addition_method",
 )
 
 

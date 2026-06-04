@@ -53,6 +53,7 @@ class AssetRecord:
     accumulated_depreciation: str | None = None
     impairment_provision: str | None = None
     net_value: str | None = None
+    addition_method: str | None = None
 
     def identity(self) -> str:
         if self.asset_id and str(self.asset_id).strip():

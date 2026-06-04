@@ -11,6 +11,11 @@ from report.summary import QcReport, build_report
 from report.lead_sheet_report import build_lead_sheet_section
 from report.rollforward_sheet_report import build_rollforward_sheet_section
 from report.summary_sheet_report import build_summary_sheet_section
+from rules.addition_test_package import (
+    check_addition_test_package,
+    check_disposal_test_package,
+)
+from rules.addition_runner import ADDITION_RULE_IDS, run_addition_rules
 from rules.lead_runner import LEAD_RULE_IDS, run_lead_rules
 from rules.models import ColumnContext
 from rules.psp_completion import check_psp_completion
@@ -21,6 +26,9 @@ from rules.runner import FA_LIST_RULE_IDS, run_fa_list_rules
 WORKBOOK_RULE_IDS = (
     *FA_LIST_RULE_IDS,
     "psp_completion",
+    "addition_test_package_complete",
+    "disposal_test_package_complete",
+    *ADDITION_RULE_IDS,
     *LEAD_RULE_IDS,
     *ROLLFORWARD_RULE_IDS,
 )
@@ -105,6 +113,22 @@ def run_workbook_qc(
         issues.extend(psp_issues)
         summary_sheet_section = build_summary_sheet_section(ctx.summary, psp_issues)
         rule_ids.append("psp_completion")
+        addition_package_issues = attach_rule_metadata(
+            check_addition_test_package(
+                ctx.summary,
+                workbook_sheet_titles=sheet_titles,
+            )
+        )
+        issues.extend(addition_package_issues)
+        rule_ids.append("addition_test_package_complete")
+        disposal_package_issues = attach_rule_metadata(
+            check_disposal_test_package(
+                ctx.summary,
+                workbook_sheet_titles=sheet_titles,
+            )
+        )
+        issues.extend(disposal_package_issues)
+        rule_ids.append("disposal_test_package_complete")
         if not source_sheet:
             source_sheet = ctx.summary.source_sheet
     else:
@@ -189,6 +213,13 @@ def run_workbook_qc(
         rule_ids.extend(list(LEAD_RULE_IDS))
         if not source_sheet:
             source_sheet = ctx.lead.source_sheet
+
+    if ctx.addition_list:
+        addition_issues = attach_rule_metadata(run_addition_rules(ctx.addition_list))
+        issues.extend(addition_issues)
+        rule_ids.extend(list(ADDITION_RULE_IDS))
+        if not source_sheet:
+            source_sheet = ctx.addition_list.source_sheet
 
     rollforward_sheet_section = None
     if ctx.rollforward:

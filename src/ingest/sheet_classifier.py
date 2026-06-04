@@ -34,7 +34,11 @@ def score_by_name(sheet_name: str) -> tuple[SheetKind, float, str | None]:
         return SheetKind.SAP, 0.88, "name_sap"
     if "新增清单" in raw or "k.02.1b" in n and "新增" in raw:
         return SheetKind.ADDITION_LIST, 0.9, "name_addition"
-    if "处置清单" in raw:
+    if (
+        "处置清单" in raw
+        or "减少清单" in raw
+        or ("k.02.2b" in n and ("处置" in raw or "减少" in raw or "报废" in raw))
+    ):
         return SheetKind.DISPOSAL_LIST, 0.9, "name_disposal"
     if "fa list" in n or "固定资产清单" in raw or "资产清单" in raw:
         return SheetKind.FA_LIST, 0.88, "name_fa_list"

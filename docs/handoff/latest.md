@@ -206,6 +206,31 @@
 - Lead 调整事项汇总表若出现真实复杂借贷/跨科目调整，后续继续接入 `lead_adjustment_review` 的 LLM 判断。
 - K.01 TB 差异若同时存在多行超过 SAD，当前会列示全部无 Note 标识的差异单元格，复测时重点看是否符合审计口径。
 
+## 2026-06-04 K.02 新增/处置基础诊断沉淀
+
+本轮开始补 K.02 新增测试诊断，按 SOP 将新增测试理解为三表程序包：`新增清单`、`K.02.1 新增测试`、`K.02.1a 新增选样输出`；处置测试同理为 `处置清单`、`K.02.2 处置测试`、`K.02.2a 处置选样输出`。
+
+已完成：
+
+- **K.02 程序包完整性**：新增 `addition_test_package_complete`、`disposal_test_package_complete`，当汇总页显示新增/处置测试已执行时，分别检查三表链条是否存在；支持名称变体，如 `K.02.1 细节测试`、`K.02.1b 新增清单`、`新增抽样输出结果`、`K.02.2b 减少清单`、`处置抽样输出结果`。
+- **处置 sheet 识别补强**：`sheet_classifier` 支持 `K.02.2b 处置清单`、`K.02.2b 减少清单` 等变体，不把新增选样输出误当作处置选样输出。
+- **新增清单字段完整性**：新增 `addition_required_fields`，检查新增清单必需字段：固定资产类别、编号、名称、入账开始日期、原值、新增方式。
+- **新增总体同质性提示**：新增 `addition_population_homogeneity`，对在建工程转入、企业合并、调拨、重分类等非购置新增输出 `NEED_REVIEW`，提示确认是否单独分总体、索引其他 PSP/OSP 或设计额外程序。
+- **ingest 支持**：`AssetRecord` 与 `parse_fa_list_rows(..., sheet_kind=ADDITION_LIST)` 已保留 `addition_method`（新增方式），供规则使用。
+- **流水线接入**：`run_workbook_qc` 已接入 K.02 程序包完整性与新增清单基础规则；规则元数据已登记在 `src/rules/registry.py`。
+
+已验证：
+
+- `.\.venv\Scripts\pytest.exe tests\rules\test_addition_test_package.py tests\ingest\test_sheet_classifier.py -q --basetemp .pytest_tmp_k02_package`：16 passed
+- `.\.venv\Scripts\pytest.exe tests\rules\test_addition_rules.py tests\ingest\test_records_workbook.py -q --basetemp .pytest_tmp_addition_rules`：10 passed
+- `.\.venv\Scripts\pytest.exe tests\report\test_workbook_pipeline.py -q --basetemp .pytest_tmp_addition_rules_pipeline`：1 passed
+
+下一步建议：
+
+- 继续做 `addition_rollforward_reconciliation`：新增清单购置新增合计 vs K.01 后推购置新增金额，差异超过 SAD 时提示调查。
+- 读取 `K.02.1 新增测试` 与 `K.02.1a 新增选样输出` 的总体金额/样本列表，为 `addition_sample_match` 做准备。
+- 后续再补处置清单字段完整性、处置总体同质性与处置清单 vs K.01 后推勾稽。
+
 ## 相关文件
 
 - `AGENTS.md` — 终态目标与必交付项
