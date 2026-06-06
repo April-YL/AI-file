@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ingest.addition_test_sheet import (
+    AdditionExecutionPathDataset,
+    AdditionSampleOutputDataset,
+    AdditionTestSheetDataset,
+)
 from ingest.lead_sheet import LeadSheetDataset
 from ingest.reconciliation import ReconciliationCheck
 from ingest.records import FaListDataset
@@ -22,6 +27,9 @@ class WorkbookQcContext:
     lead: LeadSheetDataset | None
     rollforward: RollforwardSheetDataset | None = None
     addition_list: FaListDataset | None = None
+    addition_test: AdditionTestSheetDataset | None = None
+    addition_sample_output: AdditionSampleOutputDataset | None = None
+    addition_execution_path: AdditionExecutionPathDataset | None = None
     disposal_list: FaListDataset | None = None
     structure: WorkbookStructure | None = None
     reconciliations: list[ReconciliationCheck] = field(default_factory=list)
@@ -56,6 +64,9 @@ def load_workbook_context(
         lead=ing.lead,
         rollforward=ing.rollforward,
         addition_list=ing.addition_list,
+        addition_test=ing.addition_test,
+        addition_sample_output=ing.addition_sample_output,
+        addition_execution_path=ing.addition_execution_path,
         disposal_list=ing.disposal_list,
         structure=ing.structure,
         reconciliations=list(ing.reconciliations),

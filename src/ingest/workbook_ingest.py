@@ -6,6 +6,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ingest.addition_test_sheet import (
+    AdditionExecutionPathDataset,
+    AdditionSampleOutputDataset,
+    AdditionTestSheetDataset,
+    build_addition_execution_path,
+    load_addition_sample_output_from_workbook,
+    load_addition_test_from_workbook,
+)
 from ingest.lead_sheet import LeadSheetDataset, load_lead_from_workbook
 from ingest.models import SheetKind
 from ingest.reconciliation import ReconciliationCheck, run_workbook_reconciliations
@@ -27,6 +35,9 @@ class WorkbookIngestContext:
     rollforward: RollforwardSheetDataset | None = None
     addition_list: FaListDataset | None = None
     addition_lists: list[FaListDataset] = field(default_factory=list)
+    addition_test: AdditionTestSheetDataset | None = None
+    addition_sample_output: AdditionSampleOutputDataset | None = None
+    addition_execution_path: AdditionExecutionPathDataset | None = None
     disposal_list: FaListDataset | None = None
     disposal_lists: list[FaListDataset] = field(default_factory=list)
     summary: SummarySheetDataset | None = None
@@ -41,6 +52,15 @@ class WorkbookIngestContext:
             "fa_list_sheets": [_dataset_summary(d) for d in self.fa_list_sheets],
             "rollforward": _rollforward_summary(self.rollforward),
             "addition_list": _dataset_summary(self.addition_list),
+            "addition_test": _addition_test_summary(self.addition_test),
+            "addition_sample_output": _addition_sample_output_summary(
+                self.addition_sample_output
+            ),
+            "addition_execution_path": (
+                self.addition_execution_path.to_dict()
+                if self.addition_execution_path
+                else None
+            ),
             "disposal_list": _dataset_summary(self.disposal_list),
             "summary": _summary_summary(self.summary),
             "lead": _lead_summary(self.lead),
@@ -55,6 +75,32 @@ def _dataset_summary(ds: FaListDataset | None) -> dict[str, Any] | None:
         "source_sheet": ds.source_sheet,
         "record_count": len(ds.records),
         "mapped_fields": [m.standard_field for m in ds.mapped_fields],
+    }
+
+
+def _addition_test_summary(
+    ds: AdditionTestSheetDataset | None,
+) -> dict[str, Any] | None:
+    if ds is None or not ds.source_sheet:
+        return None
+    return {
+        "source_sheet": ds.source_sheet,
+        "waiver_note_text": ds.waiver_note_text,
+        "waiver_note_rows": ds.waiver_note_rows,
+        "recognition_confidence": ds.recognition_confidence,
+        "notes": ds.notes,
+    }
+
+
+def _addition_sample_output_summary(
+    ds: AdditionSampleOutputDataset | None,
+) -> dict[str, Any] | None:
+    if ds is None or not ds.source_sheet:
+        return None
+    return {
+        "source_sheet": ds.source_sheet,
+        "recognition_confidence": ds.recognition_confidence,
+        "notes": ds.notes,
     }
 
 
@@ -180,6 +226,12 @@ def load_workbook_ingest(
         addition_list = None
     addition_lists = load_all_sheets_of_kind(path, SheetKind.ADDITION_LIST, max_rows=max_rows)
 
+    addition_test = load_addition_test_from_workbook(path, max_rows=max_rows)
+    addition_sample_output = load_addition_sample_output_from_workbook(
+        path,
+        max_rows=max_rows,
+    )
+
     disposal_list = load_asset_sheet_from_workbook(
         path,
         SheetKind.DISPOSAL_LIST,
@@ -210,6 +262,13 @@ def load_workbook_ingest(
         disposal_list=disposal_list,
     )
 
+    addition_execution_path = build_addition_execution_path(
+        summary=summary,
+        addition_list=addition_list,
+        addition_test=addition_test,
+        addition_sample_output=addition_sample_output,
+    )
+
     return WorkbookIngestContext(
         source_file=str(path),
         structure=structure,
@@ -218,6 +277,9 @@ def load_workbook_ingest(
         rollforward=rollforward,
         addition_list=addition_list,
         addition_lists=addition_lists,
+        addition_test=addition_test,
+        addition_sample_output=addition_sample_output,
+        addition_execution_path=addition_execution_path,
         disposal_list=disposal_list,
         disposal_lists=disposal_lists,
         summary=summary,

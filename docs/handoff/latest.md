@@ -125,18 +125,19 @@
   - **待做**：对案例库 6 份底稿重跑 `fa-qc-diagnose` 更新 `case-workpaper-diagnostic.md`
 - **Lead 质检规则（模块 1–5 P0）**：含 `lead_check_with_a3_row`（ingest 摘录 Check with A3/Diff/Notes + Diff≠0/缺说明 FAIL）；其余 `lead_*`、AE-004、`lead_rollforward_tb_reconciliation`；`lead_runner` + `lead_sheet_section`
 - **K.01 M2b（区块 2–6 勾稽）**：TB check 读取层、`rollforward_difference_over_sad`、GL-004 表4折旧核对已加；**ingest 稳定优先**后再扩 GL-002 变体、TE 路由等（见 `k01-six-block-qc-matrix.md`）
-- **ingest 优先（2026-06-04）**：P1 多期 sheet 路由、K.01 购置合计口径、新增清单字段映射；案例库回归见 `artifacts/case_addition_reconciliation.md`
+- **K.02 ingest + 门控（2026-06-04）**：程序包执行路径门控（waived / documented_limited / full_expected）；处置/新增 QC 详细矩阵；P1 多期 sheet 路由；K.02.1/K.02.2 测试页轻量扫描与 `addition_test_sheet` ingest 接入
+- **ingest 优先（案例库）**：处置 P0（清单字段、`disposal_common` 净值汇总、K.01 处置行勾稽）待矩阵评审后开发；见 `docs/planning/k02-disposal-qc-matrix.md`
 
 ## 下一步（M2a 验收导向）
 
-1. **K.01 M2b**：GL-002 表3模板变体增强、>TE 路由、Notes 充分性/折旧分摊合理性；识别置信度/锚点去重优化
-2. **rules（Lead 余量）**：`lead_fluctuation_notes_refs`、`lead_arp_three_triggers`；Streamlit K.01 页签（可选）
-2. **M3c（P1）**：`--llm-rules`、`--llm-checklist`（见 roadmap）；**非**优先扩展 `--llm` 报告叙述
-3. **ingest**：案例库字段映射回归
-4. report：独立 Excel 质检报告（非标注副本）、标注 Cell Ref. 与共性合并规则优化
-5. 案例库端到端回归（`fa-qc-run` / UI）；Lead 见 `python scripts/run_case_lead_regression.py`
+1. **K.02 处置 ingest P0**（评审 `k02-disposal-qc-matrix.md` 后）：处置清单字段映射、`disposal_common`（出售+报废净值）、K.01 处置行勾稽输入；案例 B–G 回归
+2. **ingest 修复**：`scripts/run_case_ingest_routing.py` 中 `FaListSheetCandidate` 下标 bug；B/F `addition_method` 映射
+3. **K.01 M2b**：GL-002 表3模板变体增强、>TE 路由、Notes 充分性；识别置信度/锚点去重优化
+4. **rules（Lead 余量）**：`lead_fluctuation_notes_refs`、`lead_arp_three_triggers`
+5. **M3c（P1）**：`--llm-rules`、`--llm-checklist`（见 roadmap）
+6. report：独立 Excel 质检报告、标注 Cell Ref. 与共性合并规则优化
 
-**暂缓为主战场**：单独扩展 FA list 规则条数。
+**暂缓**：K.02.2 E14 结构化读取、大量 disposal rules、单独扩展 FA list 规则条数。
 
 ## 产品优先级：LLM 与质检准确度（2026-05-21 确认）
 
@@ -290,6 +291,49 @@
 - 确认 LEAD-012 不再因“补充 K.01 后推明细表期初/期末/变动金额”进入 Comments；预期分析简略但无明显冲突时，仅保留 LEAD-014 的人工复核提示。
 - 若 K.01 表1 `CHECK` 列在其他模板中位置变化，需继续补充表1矩阵读取回归。
 
+## 2026-06-04 K.02 程序包门控 + QC 矩阵 + ingest 多期路由沉淀
+
+本轮按 SOP 先理解处置/新增测试三表程序包，再推进 ingest 与门控；**研发顺序共识**：第 1 层 ingest 稳定 → 第 2 层 rules 勾稽 → 第 3 层 LLM/checklist。
+
+### 处置/新增测试口径（SOP 对齐）
+
+| 程序 | 三表程序包 | 样本总体口径 |
+| --- | --- | --- |
+| 新增测试 K.02.1 | 新增清单 + K.02.1 新增测试 + K.02.1a 选样输出 | 新增清单原值合计（购置类勾稽 K.01 购置行） |
+| 处置测试 K.02.2 | 处置清单 + K.02.2 处置测试 + K.02.2a 选样输出 | **出售+报废净值**（E14/G/I/K），非原值、非处置损益 |
+
+程序包不完整 ≠ 程序未执行：汇总页拒绝+理由合理，或拒绝说明写在 K.02.1/K.02.2 测试底稿时，按 **documented_limited** 处理。
+
+### 已完成（代码 + 文档）
+
+- **程序包门控**（`addition_test_package.py`）：`K02ExecutionScope` = `waived` / `documented_limited` / `full_expected`；缺表一律 **NEED_REVIEW**（不再 FAIL）；读取 K.02.1/K.02.2 测试页 waiver 说明（`k02_test_sheet.py`）；流水线传入 `workbook_path`
+- **QC 规划矩阵**：`docs/planning/k02-disposal-qc-matrix.md`（DT-A～G）、`k02-addition-qc-matrix.md`；总索引 `k02-k03-qc-matrix.md` 已链接
+- **ingest P1 多期路由**（`sheet_period_routing.py`）：双套 24/25 底稿按 sheet 名称后缀选当期；接入 `sheet_loader` / `records` / `summary` / `lead` / `rollforward`
+- **新增测试 ingest 第一阶段**（`addition_test_sheet.py`）：识别 K.02.1/K.02.1a 存在性与 waiver 说明；`build_addition_execution_path` 汇总执行路径；`workbook_ingest` / `workbook_context` 已接入
+- **sheet 识别**：`ADDITION_TEST` / `ADDITION_SAMPLE_OUTPUT`；K.02.1 / K.02.1a 名称变体；`addition_method` 同义词扩展
+- **回归脚本**：`scripts/run_case_ingest_routing.py`（已知 bug：`FaListSheetCandidate` 不可下标，待修）
+
+### 案例库 ingest 门禁（B–G，修复 P0 后快照）
+
+| 案例 | 关注点 |
+| --- | --- |
+| B | 新增清单有；购置 0 行（`addition_method`）；K.01 购置为各类别审定合计 |
+| C/D/F | 双套 24/25 底稿，需多期路由 |
+| E | 清单与 K.01 购置可一致 |
+| G | 处置清单易误标 rollforward；K.02.2 恒为 unclassified |
+
+### 已验证
+
+- `pytest tests/rules/test_addition_test_package.py tests/ingest/test_k02_test_sheet.py tests/ingest/test_sheet_period_routing.py tests/ingest/test_addition_test_sheet.py -q --basetemp .pytest_tmp_k02_gate`：23 passed
+
+### 下一步（ingest 优先，处置 P0）
+
+1. 评审确认 `k02-disposal-qc-matrix.md`（尤其 DT-A 执行路径、DT-C E14 净值汇总、DT-D K.01 勾稽）
+2. DT-B 处置清单字段映射 → DT-C `disposal_common` → DT-D K.01 处置行
+3. 修复 `run_case_ingest_routing.py`；案例 B–G 回归
+
+**暂缓**：K.02.2 E14 结构化读取（P1.5/P2）、DT-E/F/G 规则、大量 disposal rules
+
 ## 相关文件
 
 - `AGENTS.md` — 终态目标与必交付项
@@ -308,6 +352,9 @@
 - `docs/planning/lead-qc-rules.md` — K.00 分模块质检点、SOP 对照遗漏、M2 实现顺序
 - `docs/planning/program-qc-coverage-index.md` — **程序质检覆盖总索引**（汇总 / Lead / K.01 / K.02 / K.03 开发进度）
 - `docs/planning/k01-qc-rules.md`、`docs/planning/k01-workpaper-layouts.md`、`docs/planning/k01-six-block-qc-matrix.md` — K.01 SOP 对照、版式、六区块矩阵
+- `docs/planning/k02-disposal-qc-matrix.md`、`docs/planning/k02-addition-qc-matrix.md`、`docs/planning/k02-k03-qc-matrix.md` — K.02 处置/新增详细矩阵与总索引
+- `src/ingest/addition_test_sheet.py`、`src/ingest/k02_test_sheet.py`、`src/ingest/sheet_period_routing.py` — K.02 ingest 与多期路由
+- `src/rules/addition_test_package.py` — K.02 程序包执行路径门控
 
 ## Demo 命令（本次收工验证）
 
