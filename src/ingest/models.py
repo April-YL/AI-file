@@ -26,6 +26,8 @@ class RollforwardLayoutProfile(str, Enum):
 class SheetKind(str, Enum):
     FA_LIST = "fa_list"
     ADDITION_LIST = "addition_list"
+    ADDITION_TEST = "addition_test"
+    ADDITION_SAMPLE_OUTPUT = "addition_sample_output"
     DISPOSAL_LIST = "disposal_list"
     DEPRECIATION_TOD = "depreciation_tod"
     DEPRECIATION_TOD_SAMPLE = "depreciation_tod_sample"

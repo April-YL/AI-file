@@ -42,7 +42,7 @@ FIELD_SYNONYMS: dict[str, list[str]] = {
     "net_value": [
         "净值", "账面净值", "资产净值", "账面价值", "2025年末净值", "处置净值",
     ],
-    "addition_method": ["新增方式", "增加方式", "卡片来源"],
+    "addition_method": ["新增方式", "增加方式", "卡片来源", "取得方式", "资产来源", "新增类型", "来源"],
     "disposal_date": ["处置日期", "报废日期", "减少日期", "业务日期"],
     "disposal_method": [
         "处置/报废", "减少方式", "处置方式", "报废方式", "处置情况", "变动方式",
@@ -101,6 +101,8 @@ CONTENT_SIGNATURES: dict[SheetKind, set[str]] = {
         "accumulated_depreciation", "net_value",
     },
     SheetKind.ADDITION_LIST: {"addition_method", "original_value", "asset_id", "asset_name"},
+    SheetKind.ADDITION_TEST: set(),
+    SheetKind.ADDITION_SAMPLE_OUTPUT: set(),
     SheetKind.DISPOSAL_LIST: {
         "disposal_date", "disposal_method", "net_value",
         "original_value", "accumulated_depreciation",

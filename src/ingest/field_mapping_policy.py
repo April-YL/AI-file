@@ -59,6 +59,6 @@ SHORT_SYNONYM_MAX_LEN = 3
 # 仅特定 sheet 启用的额外同义词（避免 FA list 误映射「变动方式」等）
 SHEET_FIELD_SYNONYM_EXTRAS: dict[SheetKind, dict[str, list[str]]] = {
     SheetKind.ADDITION_LIST: {
-        "addition_method": ["变动方式"],
+        "addition_method": ["变动方式", "取得方式", "资产来源", "新增类型"],
     },
 }

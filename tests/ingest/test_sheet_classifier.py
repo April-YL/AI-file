@@ -17,6 +17,36 @@ def test_name_addition_list():
     assert s >= 0.8
 
 
+def test_name_addition_test_and_sample_output():
+    k, s, _ = score_by_name("K.02.1 新增测试")
+    assert k == SheetKind.ADDITION_TEST
+    assert s >= 0.85
+
+    k2, s2, _ = score_by_name("K.02.1a 新增选样输出")
+    assert k2 == SheetKind.ADDITION_SAMPLE_OUTPUT
+    assert s2 >= 0.85
+
+
+def test_addition_test_name_wins_over_asset_table_content():
+    rows = [
+        ("样本类型", "固定资产编号", "固定资产名称", "资产原价"),
+        ("代表性样本", "FA-TEST-001", "设备A", 1000),
+    ]
+    kind, confidence, *_ = classify_sheet("K.02.1 新增测试", rows)
+    assert kind == SheetKind.ADDITION_TEST
+    assert confidence >= 0.8
+
+
+def test_addition_sample_output_name_wins_over_asset_table_content():
+    rows = [
+        ("源样本#", "抽样ID", "样本类型", "固定资产编号", "固定资产名称", "原值", "新增方式"),
+        (1, 140, "代表性样本", "FA-TEST-001", "设备A", 1000, "购置"),
+    ]
+    kind, confidence, *_ = classify_sheet("K.02.1a 新增选样输出", rows)
+    assert kind == SheetKind.ADDITION_SAMPLE_OUTPUT
+    assert confidence >= 0.8
+
+
 def test_name_disposal_list_variants():
     k, s, _ = score_by_name("K.02.2b 处置清单")
     assert k == SheetKind.DISPOSAL_LIST

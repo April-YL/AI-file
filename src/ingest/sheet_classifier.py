@@ -32,6 +32,14 @@ def score_by_name(sheet_name: str) -> tuple[SheetKind, float, str | None]:
         return SheetKind.DEPRECIATION_TOD_SAMPLE, 0.75, "name_dep_tod_sample"
     if "k.03.1" in n or (n.endswith("sap") or " sap" in n):
         return SheetKind.SAP, 0.88, "name_sap"
+    if "k.02.1a" in n or (
+        "新增" in raw and any(x in raw for x in ("选样", "抽样")) and any(x in raw for x in ("输出", "结果"))
+    ):
+        return SheetKind.ADDITION_SAMPLE_OUTPUT, 0.9, "name_addition_sample_output"
+    if "k.02.1" in n and "k.02.1b" not in n:
+        return SheetKind.ADDITION_TEST, 0.9, "name_addition_test"
+    if "新增" in raw and any(x in raw for x in ("测试", "细节")):
+        return SheetKind.ADDITION_TEST, 0.86, "name_addition_test"
     if "新增清单" in raw or "k.02.1b" in n and "新增" in raw:
         return SheetKind.ADDITION_LIST, 0.9, "name_addition"
     if (
@@ -201,6 +209,11 @@ def classify_sheet(
     )
     if locked is not None:
         return locked
+
+    # K.02.1/K.02.1a 是程序页，不应因包含资产编号/原值等测试表头被当作 FA list 或 K.01。
+    if name_kind in (SheetKind.ADDITION_TEST, SheetKind.ADDITION_SAMPLE_OUTPUT) and name_score >= 0.85:
+        header_row, _, _ = scan_rows_for_headers(rows, sheet_kind=name_kind)
+        return name_kind, min(0.95, name_score * 0.9), name_score, content_score, name_hint, header_row
 
     # 名称明确为 FA list 时，不因仅含金额列而被判为后推表（K.01 不会命名为 FA list）
     if (

@@ -157,6 +157,7 @@ def run_workbook_qc(
             check_addition_test_package(
                 ctx.summary,
                 workbook_sheet_titles=sheet_titles,
+                workbook_path=ctx.source_file,
             )
         )
         issues.extend(addition_package_issues)
@@ -165,6 +166,7 @@ def run_workbook_qc(
             check_disposal_test_package(
                 ctx.summary,
                 workbook_sheet_titles=sheet_titles,
+                workbook_path=ctx.source_file,
             )
         )
         issues.extend(disposal_package_issues)

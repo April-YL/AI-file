@@ -22,6 +22,7 @@ from ingest.models import (
     SheetKind,
 )
 from ingest.sheet_loader import SheetLoadCandidate
+from ingest.sheet_period_routing import choose_sheet_candidate
 from ingest.records import parse_fa_list_rows
 from ingest.sheet_loader import find_sheets_by_kind
 from ingest.workbook_reader import read_worksheet_rows
@@ -1412,22 +1413,6 @@ def _detect_layout_profile(
         return RollforwardLayoutProfile.CATEGORY_DUAL_PERIOD
     return RollforwardLayoutProfile.UNRECOGNIZED
 
-
-def _choose_rollforward_candidate(candidates: list[SheetLoadCandidate]) -> SheetLoadCandidate:
-    """多 K.01 候选时优先当年主表（降低 -24 / 尾随 - 权重）。"""
-
-    def sort_key(c: SheetLoadCandidate) -> tuple[float, float, str]:
-        name = c.sheet_name.strip()
-        penalty = 0.0
-        if re.search(r"-24\s*$", name, re.I):
-            penalty += 1.0
-        if name.endswith("-") and not name.lower().endswith("gl"):
-            penalty += 0.5
-        return (penalty, -c.confidence, name)
-
-    return sorted(candidates, key=sort_key)[0]
-
-
 def infer_rollforward_column_bindings(
     header_cells: list[tuple[int, str]],
 ) -> list[RollforwardColumnBinding]:
@@ -1813,7 +1798,13 @@ def load_rollforward_from_workbook(
             header_row=None,
             mapped_fields=[],
         )
-    chosen = _choose_rollforward_candidate(candidates)
+    chosen = choose_sheet_candidate(
+        candidates,
+        name=lambda c: c.sheet_name,
+        confidence=lambda c: c.confidence,
+        source_path=path,
+    )
+    assert chosen is not None
     return parse_rollforward_rows(
         chosen.rows,
         source_file=str(path),

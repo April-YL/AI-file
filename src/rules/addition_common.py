@@ -13,6 +13,9 @@ _PURCHASE_TERMS = (
     "购买",
     "新购",
     "外购",
+    "购入",
+    "入库",
+    "自购",
     "purchase",
     "acquisition",
 )

@@ -857,7 +857,7 @@ def _specs() -> list[RuleSpec]:
             k1_ref="K.02.1 新增测试程序包",
             agent_priority=AgentPriority.P3,
             implementation=ImplementationStatus.IMPLEMENTED,
-            notes="新增购置金额超过 TE 并执行 K.02.1 时，通常应包含新增清单、新增测试、抽样/选样输出结果三类 sheet；名称允许变体。",
+            notes="汇总页标记已执行时检查三表链条；汇总拒绝执行则不查。缺表为 NEED_REVIEW 结构提示，不等于程序未执行；若测试底稿/汇总有受限执行说明则提示一致性复核。",
         ),
         RuleSpec(
             dict_code="SP-002",
@@ -1000,7 +1000,7 @@ def _specs() -> list[RuleSpec]:
             k1_ref="K.02.2 处置测试程序包",
             agent_priority=AgentPriority.P3,
             implementation=ImplementationStatus.IMPLEMENTED,
-            notes="处置测试执行时，通常应包含处置清单、处置测试、抽样/选样输出结果三类 sheet；名称允许变体。",
+            notes="汇总页标记已执行时检查三表链条；汇总拒绝执行则不查。缺表为 NEED_REVIEW 结构提示，不等于程序未执行；若测试底稿/汇总有受限执行说明则提示一致性复核。",
         ),
         RuleSpec(
             dict_code="DT-002",

@@ -19,6 +19,7 @@ from ingest.lead_sheet_blocks import (
 )
 from ingest.models import SheetKind
 from ingest.sheet_classifier import classify_sheet, score_by_name
+from ingest.sheet_period_routing import choose_sheet_candidate, sort_sheet_candidates
 from ingest.workbook_reader import read_worksheet_rows
 
 _DEFAULT_MAX_ROWS = 200
@@ -1129,8 +1130,13 @@ def find_lead_sheets(
                 found.append((ws.title, name_score, rows))
     finally:
         wb.close()
-    found.sort(key=lambda x: x[1], reverse=True)
-    return found
+    ordered = sort_sheet_candidates(
+        found,
+        name=lambda c: c[0],
+        confidence=lambda c: c[1],
+        source_path=path,
+    )
+    return ordered
 
 
 def load_lead_from_workbook(
@@ -1156,7 +1162,14 @@ def load_lead_from_workbook(
         return parse_lead_sheet_rows(rows, source_file=str(path), source_sheet=name)
 
     if candidates:
-        name, _, rows = candidates[0]
+        chosen = choose_sheet_candidate(
+            candidates,
+            name=lambda c: c[0],
+            confidence=lambda c: c[1],
+            source_path=path,
+        )
+        assert chosen is not None
+        name, _, rows = chosen
         return parse_lead_sheet_rows(rows, source_file=str(path), source_sheet=name)
 
     return LeadSheetDataset(

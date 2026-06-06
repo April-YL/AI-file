@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import openpyxl
+
 from ingest.summary_sheet import PspProgramRow, SummarySheetDataset
 from rules.addition_test_package import (
     check_addition_test_package,
@@ -101,7 +105,7 @@ def test_addition_package_reports_missing_sampling_output():
     assert "抽样输出结果" in issues[0].message
 
 
-def test_addition_package_reports_stronger_when_multiple_sheets_missing():
+def test_addition_package_reports_need_review_when_multiple_sheets_missing():
     issues = check_addition_test_package(
         _summary(),
         workbook_sheet_titles=[
@@ -110,9 +114,11 @@ def test_addition_package_reports_stronger_when_multiple_sheets_missing():
         ],
     )
     assert len(issues) == 1
-    assert issues[0].severity == Severity.FAIL
+    assert issues[0].severity == Severity.NEED_REVIEW
+    assert issues[0].severity != Severity.FAIL
     assert "新增清单" in issues[0].message
     assert "抽样输出结果" in issues[0].message
+    assert "不代表程序一定未执行" in issues[0].message
 
 
 def test_addition_package_does_not_run_when_not_executed():
@@ -177,3 +183,51 @@ def test_disposal_package_does_not_run_when_not_executed():
         ],
     )
     assert issues == []
+
+
+def test_disposal_package_documented_limited_on_test_sheet(tmp_path: Path):
+    path = tmp_path / "wb.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.02.2 处置测试"
+    ws["A5"] = "本期处置资产净值小于TE，未执行抽样测试"
+    wb.save(path)
+
+    issues = check_disposal_test_package(
+        _summary_with_disposal(status="是"),
+        workbook_sheet_titles=[
+            "汇总",
+            "K.02.2 处置测试",
+        ],
+        workbook_path=path,
+    )
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.NEED_REVIEW
+    assert "不等于程序未执行" in issues[0].message
+    assert "小于TE" in issues[0].message
+
+
+def test_addition_package_uses_summary_notes_as_limited_execution():
+    summary = SummarySheetDataset(
+        source_file="dummy.xlsx",
+        source_sheet="汇总",
+        header_row=1,
+        programs=[
+            PspProgramRow(
+                procedure_name="K.02.1 新增测试",
+                sheet_ref="K.02.1 新增测试",
+                execution_status="是",
+                waiver_reason=None,
+                notes="本期新增原值小于TE，未执行抽样",
+                source_row=12,
+            ),
+        ],
+        layout="swp",
+    )
+    issues = check_addition_test_package(
+        summary,
+        workbook_sheet_titles=["汇总", "K.02.1 新增测试"],
+    )
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.NEED_REVIEW
+    assert "不等于程序未执行" in issues[0].message

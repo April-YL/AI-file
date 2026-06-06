@@ -11,6 +11,7 @@ from ingest.field_mapping import map_headers
 from ingest.header_detection import scan_rows_for_headers
 from ingest.models import AssetRecord, FieldMapping, SheetKind
 from ingest.sheet_classifier import classify_sheet
+from ingest.sheet_period_routing import choose_sheet_candidate, sort_sheet_candidates
 from ingest.workbook_reader import read_worksheet_rows
 
 _RECORD_FIELDS = (
@@ -156,8 +157,12 @@ def find_fa_list_sheets(
                 )
     finally:
         wb.close()
-    candidates.sort(key=lambda c: c.confidence, reverse=True)
-    return candidates
+    return sort_sheet_candidates(
+        candidates,
+        name=lambda c: c.sheet_name,
+        confidence=lambda c: c.confidence,
+        source_path=path,
+    )
 
 
 def load_fa_list_from_workbook(
@@ -186,7 +191,13 @@ def load_fa_list_from_workbook(
             )
         chosen = match
     elif candidates:
-        chosen = candidates[0]
+        chosen = choose_sheet_candidate(
+            candidates,
+            name=lambda c: c.sheet_name,
+            confidence=lambda c: c.confidence,
+            source_path=path,
+        )
+        assert chosen is not None
     else:
         return FaListDataset(
             source_file=str(path),

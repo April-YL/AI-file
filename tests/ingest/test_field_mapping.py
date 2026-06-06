@@ -39,6 +39,10 @@ def test_addition_list_变动方式():
     assert match_standard_field("变动方式", SheetKind.ADDITION_LIST) == "addition_method"
 
 
+def test_addition_list_取得方式():
+    assert match_standard_field("取得方式", SheetKind.ADDITION_LIST) == "addition_method"
+
+
 def test_disposal_处置情况():
     assert match_standard_field("处置情况", SheetKind.DISPOSAL_LIST) == "disposal_method"
 

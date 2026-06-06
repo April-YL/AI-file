@@ -11,6 +11,7 @@ import openpyxl
 from ingest.models import SheetKind
 from ingest.records import FaListDataset, parse_fa_list_rows
 from ingest.sheet_classifier import classify_sheet
+from ingest.sheet_period_routing import choose_sheet_candidate, sort_sheet_candidates
 from ingest.workbook_reader import read_worksheet_rows
 
 
@@ -46,8 +47,12 @@ def find_sheets_by_kind(
                 )
     finally:
         wb.close()
-    candidates.sort(key=lambda c: c.confidence, reverse=True)
-    return candidates
+    return sort_sheet_candidates(
+        candidates,
+        name=lambda c: c.sheet_name,
+        confidence=lambda c: c.confidence,
+        source_path=path,
+    )
 
 
 def load_asset_sheet_from_workbook(
@@ -78,7 +83,13 @@ def load_asset_sheet_from_workbook(
             )
         chosen = match
     elif candidates:
-        chosen = candidates[0]
+        chosen = choose_sheet_candidate(
+            candidates,
+            name=lambda c: c.sheet_name,
+            confidence=lambda c: c.confidence,
+            source_path=path,
+        )
+        assert chosen is not None
     else:
         return FaListDataset(
             source_file=str(path),

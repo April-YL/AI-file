@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from enum import Enum
+from pathlib import Path
 
+from ingest.k02_test_sheet import read_k02_limited_execution_note
 from ingest.summary_sheet import PspProgramRow, SummarySheetDataset
 from rules.models import QcIssue, Severity
 from rules.psp_completion import normalize_execution_status
@@ -11,10 +14,17 @@ RULE_ID = "addition_test_package_complete"
 DISPOSAL_RULE_ID = "disposal_test_package_complete"
 
 
+class K02ExecutionScope(str, Enum):
+    WAIVED = "waived"
+    DOCUMENTED_LIMITED = "documented_limited"
+    FULL_EXPECTED = "full_expected"
+
+
 def check_addition_test_package(
     summary: SummarySheetDataset | None,
     *,
     workbook_sheet_titles: Sequence[str] | None,
+    workbook_path: str | Path | None = None,
 ) -> list[QcIssue]:
     """检查新增测试执行时是否形成新增清单/测试表/抽样输出三表链条。"""
     if summary is None or not summary.programs or not workbook_sheet_titles:
@@ -22,6 +32,7 @@ def check_addition_test_package(
     return _check_k02_package(
         summary,
         workbook_sheet_titles=workbook_sheet_titles,
+        workbook_path=workbook_path,
         kind="addition",
     )
 
@@ -30,6 +41,7 @@ def check_disposal_test_package(
     summary: SummarySheetDataset | None,
     *,
     workbook_sheet_titles: Sequence[str] | None,
+    workbook_path: str | Path | None = None,
 ) -> list[QcIssue]:
     """检查处置测试执行时是否形成处置清单/测试表/抽样输出三表链条。"""
     if summary is None or not summary.programs or not workbook_sheet_titles:
@@ -37,6 +49,7 @@ def check_disposal_test_package(
     return _check_k02_package(
         summary,
         workbook_sheet_titles=workbook_sheet_titles,
+        workbook_path=workbook_path,
         kind="disposal",
     )
 
@@ -45,10 +58,17 @@ def _check_k02_package(
     summary: SummarySheetDataset,
     *,
     workbook_sheet_titles: Sequence[str],
+    workbook_path: str | Path | None,
     kind: str,
 ) -> list[QcIssue]:
     spec = _package_spec(kind)
-    if not _test_marked_executed(summary.programs, kind=kind):
+    gate = _resolve_execution_scope(
+        summary.programs,
+        kind=kind,
+        workbook_path=workbook_path,
+        workbook_sheet_titles=list(workbook_sheet_titles),
+    )
+    if gate.scope is K02ExecutionScope.WAIVED:
         return []
 
     evidence = _find_package_sheets(workbook_sheet_titles, kind=kind)
@@ -56,28 +76,116 @@ def _check_k02_package(
     if not missing:
         return []
 
-    severity = Severity.FAIL if len(missing) >= 2 else Severity.NEED_REVIEW
     found = [f"{label}: {title}" for label, title in evidence.items() if title]
+    missing_text = "、".join(missing)
+    found_suffix = f"；已识别：{'；'.join(found)}" if found else ""
+
+    if gate.scope is K02ExecutionScope.DOCUMENTED_LIMITED:
+        note = gate.test_sheet_note or gate.summary_note or "（见测试底稿或汇总页说明）"
+        return [
+            QcIssue(
+                asset_id=None,
+                rule_id=spec["rule_id"],
+                field=spec["field"],
+                severity=Severity.NEED_REVIEW,
+                message=(
+                    f"汇总页显示{spec['name']}已执行，但未识别到完整程序包（缺少：{missing_text}）；"
+                    f"测试底稿/汇总页存在受限执行或不执行说明：「{note}」。"
+                    "程序包不完整不等于程序未执行，请人工确认说明是否充分、"
+                    "是否应在汇总页同步标记不执行。"
+                    + found_suffix
+                ),
+                suggestion=(
+                    "若确属不执行或受限执行，建议在汇总页「执行/不执行原因」与测试底稿说明保持一致；"
+                    f"若应执行完整程序，请补充{spec['list_label']}、"
+                    f"{spec['test_label']}和抽样/选样输出结果。"
+                ),
+                procedure_code=spec["procedure_code"],
+                source_sheet=summary.source_sheet or "汇总",
+                source_row=_first_execution_row(summary.programs, kind=kind),
+            )
+        ]
+
     return [
         QcIssue(
             asset_id=None,
             rule_id=spec["rule_id"],
             field=spec["field"],
-            severity=severity,
+            severity=Severity.NEED_REVIEW,
             message=(
                 f"汇总页显示{spec['name']}已执行，但未识别到完整的{spec['name']}程序包；"
-                f"缺少：{'、'.join(missing)}"
-                + (f"；已识别：{'；'.join(found)}" if found else "")
+                f"缺少：{missing_text}"
+                + found_suffix
+                + "。此为底稿结构提示，不代表程序一定未执行；"
+                "请核对是否合并页、命名变体，或在测试底稿中已有不执行/受限执行说明。"
             ),
             suggestion=(
                 f"核对是否存在{spec['list_label']}、{spec['test_label']}和抽样/选样输出结果；"
-                "如使用合并页或其他命名，请在底稿或汇总页中保留可识别的索引说明。"
+                "如确不执行，请在汇总页标记「否」并填写理由，或在测试底稿中记录充分说明。"
             ),
             procedure_code=spec["procedure_code"],
             source_sheet=summary.source_sheet or "汇总",
             source_row=_first_execution_row(summary.programs, kind=kind),
         )
     ]
+
+
+def _resolve_execution_scope(
+    programs: list[PspProgramRow],
+    *,
+    kind: str,
+    workbook_path: str | Path | None,
+    workbook_sheet_titles: list[str],
+) -> _GateContext:
+    if not _test_marked_executed(programs, kind=kind):
+        return _GateContext(scope=K02ExecutionScope.WAIVED)
+
+    summary_note = _collect_summary_limited_note(programs, kind=kind)
+    test_sheet_note: str | None = None
+    if workbook_path:
+        test_sheet_note = read_k02_limited_execution_note(
+            workbook_path,
+            workbook_sheet_titles,
+            kind="disposal" if kind == "disposal" else "addition",
+        )
+    if summary_note or test_sheet_note:
+        return _GateContext(
+            scope=K02ExecutionScope.DOCUMENTED_LIMITED,
+            summary_note=summary_note,
+            test_sheet_note=test_sheet_note,
+        )
+    return _GateContext(scope=K02ExecutionScope.FULL_EXPECTED)
+
+
+class _GateContext:
+    __slots__ = ("scope", "summary_note", "test_sheet_note")
+
+    def __init__(
+        self,
+        *,
+        scope: K02ExecutionScope,
+        summary_note: str | None = None,
+        test_sheet_note: str | None = None,
+    ) -> None:
+        self.scope = scope
+        self.summary_note = summary_note
+        self.test_sheet_note = test_sheet_note
+
+
+def _collect_summary_limited_note(programs: list[PspProgramRow], *, kind: str) -> str | None:
+    from ingest.k02_test_sheet import extract_limited_execution_note_from_rows
+
+    inherited = _inherit_k02_status(programs, kind=kind)
+    for idx, row in enumerate(programs):
+        if not _is_k02_group_row(row, kind=kind):
+            continue
+        if normalize_execution_status(inherited.get(idx, row.execution_status)) != "yes":
+            continue
+        for text in (row.notes, row.waiver_reason):
+            snippet = extract_limited_execution_note_from_rows([(text,)])
+            if snippet:
+                return snippet
+    return None
 
 
 def _package_spec(kind: str) -> dict[str, str]:

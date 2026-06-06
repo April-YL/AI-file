@@ -26,7 +26,9 @@
 | **K2-A 新增清单** | 字段完整、与后推购置勾稽 | `addition_list` ingest ✅，已保留 `addition_method` | `addition_required_fields` ✅；`addition_rollforward_reconciliation` ✅ |
 | **K2-B 处置清单** | 字段完整、与后推处置勾稽 | `disposal_list` ingest ✅ 部分 | `disposal_required_fields` 等 |
 | **K2-C 交叉 K.01** | 清单合计 vs 后推变动行 | ✅ 购置行 ingest | `addition_rollforward_reconciliation` ✅、`disposal_rollforward_reconciliation` 待做 |
-| **K2-D 样本/TOD** | 程序包完整、同质性、截止、证据 | 三表程序包名称变体识别 ✅ | `addition_test_package_complete` ✅、`disposal_test_package_complete` ✅、`addition_population_homogeneity` ✅；样本一致性/证据充分性待做 |
+| **K2-D 样本/TOD** | 程序包完整、同质性、截止、证据 | 三表程序包名称变体识别 ✅ | `addition_test_package_complete` ✅、`disposal_test_package_complete` ✅（门控）、`addition_population_homogeneity` ✅；样本一致性/证据充分性待做 |
+
+**详细矩阵**：[k02-addition-qc-matrix.md](./k02-addition-qc-matrix.md)（K.02.1）、[k02-disposal-qc-matrix.md](./k02-disposal-qc-matrix.md)（K.02.2，DT-A～D 已写，E～G 框架）。
 
 ### Checklist 对照（摘要）
 
