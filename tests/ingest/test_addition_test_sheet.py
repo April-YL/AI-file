@@ -46,8 +46,19 @@ def test_addition_execution_path_complete(tmp_path: Path):
 
     assert ctx.addition_test is not None
     assert ctx.addition_test.source_sheet == "K.02.1 新增测试"
+    assert ctx.addition_test.amounts["purchase_population_amount"].amount == "1000"
+    assert ctx.addition_test.amounts["rollforward_purchase_amount"].amount == "1000"
+    assert ctx.addition_test.amounts["difference_amount"].amount == "0"
+    assert len(ctx.addition_test.tested_samples) == 1
+    assert ctx.addition_test.tested_samples[0].asset_id == "FA-TEST-001"
+    assert ctx.addition_test.tested_samples[0].original_value == "1000"
     assert ctx.addition_sample_output is not None
     assert ctx.addition_sample_output.source_sheet == "K.02.1a 新增选样输出"
+    assert ctx.addition_sample_output.amounts["uploaded_data_amount"].amount == "1000"
+    assert ctx.addition_sample_output.amounts["sample_pool_amount"].amount == "1000"
+    assert len(ctx.addition_sample_output.selected_samples) == 1
+    assert ctx.addition_sample_output.selected_samples[0].asset_id == "FA-TEST-001"
+    assert ctx.addition_sample_output.selected_samples[0].addition_method == "购置"
     assert ctx.addition_execution_path is not None
     assert ctx.addition_execution_path.path_kind == "executed_package_complete"
     assert ctx.addition_execution_path.missing_components == []

@@ -87,6 +87,8 @@ def _addition_test_summary(
         "source_sheet": ds.source_sheet,
         "waiver_note_text": ds.waiver_note_text,
         "waiver_note_rows": ds.waiver_note_rows,
+        "amounts": {k: v.to_dict() for k, v in ds.amounts.items()},
+        "tested_samples": [row.to_dict() for row in ds.tested_samples],
         "recognition_confidence": ds.recognition_confidence,
         "notes": ds.notes,
     }
@@ -99,6 +101,8 @@ def _addition_sample_output_summary(
         return None
     return {
         "source_sheet": ds.source_sheet,
+        "amounts": {k: v.to_dict() for k, v in ds.amounts.items()},
+        "selected_samples": [row.to_dict() for row in ds.selected_samples],
         "recognition_confidence": ds.recognition_confidence,
         "notes": ds.notes,
     }

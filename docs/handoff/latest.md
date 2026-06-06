@@ -310,6 +310,7 @@
 - **QC 规划矩阵**：`docs/planning/k02-disposal-qc-matrix.md`（DT-A～G）、`k02-addition-qc-matrix.md`；总索引 `k02-k03-qc-matrix.md` 已链接
 - **ingest P1 多期路由**（`sheet_period_routing.py`）：双套 24/25 底稿按 sheet 名称后缀选当期；接入 `sheet_loader` / `records` / `summary` / `lead` / `rollforward`
 - **新增测试 ingest 第一阶段**（`addition_test_sheet.py`）：识别 K.02.1/K.02.1a 存在性与 waiver 说明；`build_addition_execution_path` 汇总执行路径；`workbook_ingest` / `workbook_context` 已接入
+- **新增测试 ingest 第二层读取**（`addition_test_sheet.py`）：K.02.1 可按锚点读取购置总体金额、K.01 后推购置金额、差异、关键项目金额、剩余代表性总体，并读取实际测试样本表（样本类型、资产编号、资产名称、资产原价、支持性文件金额、证据描述、差异、四项测试属性结论）；K.02.1a 可按锚点读取已上传数据、样本池总体金额、会计记录金额、差额、关键项数量/金额、代表性样本量、样本选择方法，并读取已选样本表（源样本号、抽样 ID、样本类型、资产编号、资产名称、原值、新增方式）
 - **sheet 识别**：`ADDITION_TEST` / `ADDITION_SAMPLE_OUTPUT`；K.02.1 / K.02.1a 名称变体；`addition_method` 同义词扩展
 - **回归脚本**：`scripts/run_case_ingest_routing.py`（已知 bug：`FaListSheetCandidate` 不可下标，待修）
 
@@ -325,6 +326,8 @@
 ### 已验证
 
 - `pytest tests/rules/test_addition_test_package.py tests/ingest/test_k02_test_sheet.py tests/ingest/test_sheet_period_routing.py tests/ingest/test_addition_test_sheet.py -q --basetemp .pytest_tmp_k02_gate`：23 passed
+- `.\.venv\Scripts\pytest.exe tests\ingest\test_addition_test_sheet.py tests\ingest\test_sheet_classifier.py tests\ingest\test_workbook_ingest.py -q --basetemp .pytest_tmp_k02_ingest_detail`：29 passed
+- 只读验证标准模板 `FY26_SOP K1 SWP 固定资产.xlsx`：`K.02.1 新增测试` 可读到总体金额锚点与 1 条实际测试样本；`K.02.1a 新增选样输出` 可读到样本池/抽样金额锚点与 2 条选样输出样本
 
 ### 下一步（ingest 优先，处置 P0）
 

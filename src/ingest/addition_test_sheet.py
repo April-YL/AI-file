@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -15,23 +16,101 @@ from ingest.workbook_reader import read_worksheet_rows
 
 
 @dataclass
+class AdditionAmountItem:
+    label: str
+    amount: str | None
+    source_row: int
+    source_column: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "amount": self.amount,
+            "source_row": self.source_row,
+            "source_column": self.source_column,
+        }
+
+
+@dataclass
+class AdditionSampleRow:
+    source_row: int
+    sample_type: str | None = None
+    asset_id: str | None = None
+    asset_name: str | None = None
+    original_value: str | None = None
+    addition_method: str | None = None
+    sample_source_no: str | None = None
+    sampling_id: str | None = None
+    asset_category: str | None = None
+    start_date: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_row": self.source_row,
+            "sample_type": self.sample_type,
+            "asset_id": self.asset_id,
+            "asset_name": self.asset_name,
+            "original_value": self.original_value,
+            "addition_method": self.addition_method,
+            "sample_source_no": self.sample_source_no,
+            "sampling_id": self.sampling_id,
+            "asset_category": self.asset_category,
+            "start_date": self.start_date,
+        }
+
+
+@dataclass
+class AdditionTestedSampleRow:
+    source_row: int
+    sample_type: str | None = None
+    asset_id: str | None = None
+    asset_name: str | None = None
+    original_value: str | None = None
+    evidence_amount: str | None = None
+    evidence_description: str | None = None
+    amount_difference: str | None = None
+    attribute_results: list[str | None] = field(default_factory=list)
+    asset_category: str | None = None
+    capitalized_date: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_row": self.source_row,
+            "sample_type": self.sample_type,
+            "asset_id": self.asset_id,
+            "asset_name": self.asset_name,
+            "original_value": self.original_value,
+            "evidence_amount": self.evidence_amount,
+            "evidence_description": self.evidence_description,
+            "amount_difference": self.amount_difference,
+            "attribute_results": self.attribute_results,
+            "asset_category": self.asset_category,
+            "capitalized_date": self.capitalized_date,
+        }
+
+
+@dataclass
 class AdditionTestSheetDataset:
-    """K.02.1 新增测试页读取结果（第一阶段仅用于执行路径识别）。"""
+    """K.02.1 新增测试页读取结果。"""
 
     source_file: str
     source_sheet: str
     waiver_note_text: str | None = None
     waiver_note_rows: list[int] = field(default_factory=list)
+    amounts: dict[str, AdditionAmountItem] = field(default_factory=dict)
+    tested_samples: list[AdditionTestedSampleRow] = field(default_factory=list)
     recognition_confidence: float = 0.0
     notes: list[str] = field(default_factory=list)
 
 
 @dataclass
 class AdditionSampleOutputDataset:
-    """K.02.1a 新增选样输出页读取结果（第一阶段仅识别存在性）。"""
+    """K.02.1a 新增选样输出页读取结果。"""
 
     source_file: str
     source_sheet: str
+    amounts: dict[str, AdditionAmountItem] = field(default_factory=dict)
+    selected_samples: list[AdditionSampleRow] = field(default_factory=list)
     recognition_confidence: float = 0.0
     notes: list[str] = field(default_factory=list)
 
@@ -95,6 +174,31 @@ _GUIDANCE_TERMS = (
     "审计抽样指南",
 )
 
+_AMOUNT_CHARS = re.compile(r"[¥$€￥,\s]")
+_PAREN_NEGATIVE = re.compile(r"^\((.+)\)$")
+
+_TEST_AMOUNT_ANCHORS: dict[str, tuple[str, ...]] = {
+    "purchase_population_amount": ("购置总金额", "购置新增总金额", "购置新增原值", "样本总体金额"),
+    "rollforward_purchase_amount": ("breakdown中购置金额", "后推购置金额", "k01购置金额", "bkd购置金额"),
+    "difference_amount": ("差异",),
+    "key_item_amount": ("测试的关键项目", "关键项目金额"),
+    "remaining_population_amount": ("代表性抽样的剩余总体", "剩余总体", "代表性总体"),
+}
+_SAMPLE_AMOUNT_ANCHORS: dict[str, tuple[str, ...]] = {
+    "uploaded_data_amount": ("已上传数据", "上传数据"),
+    "necessary_exclusion_amount": ("必要的数据排除项", "剔除项金额"),
+    "sample_pool_amount": ("样本池总体金额", "样本池总金额"),
+    "representative_population_amount": ("代表性总体价值", "代表性总体金额"),
+    "total_amount": ("总金额",),
+    "accounting_record_amount": ("会计记录的重大账户余额或活动", "会计记录金额"),
+    "difference_amount": ("差额", "差异"),
+    "key_item_count": ("关键项数量",),
+    "key_item_amount": ("定量关键项金额", "关键项金额"),
+    "representative_sample_size": ("代表性样本量",),
+    "total_sample_size": ("代表性样本与关键项数量合计", "样本合计"),
+    "sample_method": ("样本选择方法", "抽样方法"),
+}
+
 
 def load_addition_test_from_workbook(
     path: str | Path,
@@ -108,14 +212,22 @@ def load_addition_test_from_workbook(
         return None
     rows = candidate["rows"]
     waiver_text, waiver_rows = _scan_waiver_notes(rows)
+    amounts = _extract_amount_items(rows, _TEST_AMOUNT_ANCHORS)
+    tested_samples = _extract_tested_samples(rows)
     notes = [f"addition_test_sheet_detected:{candidate['sheet_name']}"]
     if waiver_text:
         notes.append("addition_test_waiver_note_detected")
+    if amounts:
+        notes.append(f"addition_test_amounts_detected:{len(amounts)}")
+    if tested_samples:
+        notes.append(f"addition_test_samples_detected:{len(tested_samples)}")
     return AdditionTestSheetDataset(
         source_file=str(path),
         source_sheet=candidate["sheet_name"],
         waiver_note_text=waiver_text,
         waiver_note_rows=waiver_rows,
+        amounts=amounts,
+        tested_samples=tested_samples,
         recognition_confidence=float(candidate["confidence"]),
         notes=notes,
     )
@@ -133,11 +245,21 @@ def load_addition_sample_output_from_workbook(
     )
     if candidate is None:
         return None
+    rows = candidate["rows"]
+    amounts = _extract_amount_items(rows, _SAMPLE_AMOUNT_ANCHORS)
+    selected_samples = _extract_selected_samples(rows)
+    notes = [f"addition_sample_output_sheet_detected:{candidate['sheet_name']}"]
+    if amounts:
+        notes.append(f"addition_sample_output_amounts_detected:{len(amounts)}")
+    if selected_samples:
+        notes.append(f"addition_sample_output_rows_detected:{len(selected_samples)}")
     return AdditionSampleOutputDataset(
         source_file=str(path),
         source_sheet=candidate["sheet_name"],
+        amounts=amounts,
+        selected_samples=selected_samples,
         recognition_confidence=float(candidate["confidence"]),
-        notes=[f"addition_sample_output_sheet_detected:{candidate['sheet_name']}"],
+        notes=notes,
     )
 
 
@@ -256,6 +378,191 @@ def _scan_waiver_notes(rows: list[tuple[Any, ...]]) -> tuple[str | None, list[in
     return "；".join(hits[:3]), hit_rows[:6]
 
 
+def _extract_amount_items(
+    rows: list[tuple[Any, ...]],
+    anchors: dict[str, tuple[str, ...]],
+) -> dict[str, AdditionAmountItem]:
+    found: dict[str, AdditionAmountItem] = {}
+    for r_idx, row in enumerate(rows, 1):
+        for c_idx, cell in enumerate(row, 1):
+            label = _clean(cell)
+            if not label:
+                continue
+            normalized = _norm(label)
+            for key, terms in anchors.items():
+                if key in found:
+                    continue
+                if not any(_norm(term) in normalized for term in terms):
+                    continue
+                value, value_col = _first_value_to_right(row, c_idx)
+                if value is None:
+                    continue
+                found[key] = AdditionAmountItem(
+                    label=label,
+                    amount=_stringify_cell(value),
+                    source_row=r_idx,
+                    source_column=value_col,
+                )
+    return found
+
+
+def _first_value_to_right(row: tuple[Any, ...], label_col: int) -> tuple[Any | None, int | None]:
+    for c_idx in range(label_col + 1, min(len(row), label_col + 9) + 1):
+        if c_idx - 1 >= len(row):
+            break
+        value = row[c_idx - 1]
+        if value is None or str(value).strip() == "":
+            continue
+        # 说明性长文本不是金额/数量/方法摘录的首选值。
+        text = str(value).strip()
+        if len(text) > 120:
+            continue
+        return value, c_idx
+    return None, None
+
+
+def _extract_selected_samples(rows: list[tuple[Any, ...]]) -> list[AdditionSampleRow]:
+    header_row, mapping = _find_table_header(
+        rows,
+        {
+            "sample_source_no": ("源样本#", "源样本号", "样本#"),
+            "sampling_id": ("抽样id", "抽样ID", "随机抽样ID"),
+            "sample_type": ("样本类型",),
+            "asset_category": ("固定资产类别", "资产类别"),
+            "asset_id": ("固定资产编号", "资产编号", "卡片编号"),
+            "asset_name": ("固定资产名称", "资产名称"),
+            "start_date": ("入账开始日期", "资本化日期"),
+            "original_value": ("原值", "资产原价", "固定资产原值"),
+            "addition_method": ("新增方式", "增加方式", "取得方式"),
+        },
+        required=("asset_id", "asset_name", "original_value"),
+    )
+    if header_row is None:
+        return []
+    out: list[AdditionSampleRow] = []
+    for r_idx, row in _iter_table_rows(rows, header_row + 1, mapping):
+        out.append(
+            AdditionSampleRow(
+                source_row=r_idx,
+                sample_type=_value_at(row, mapping.get("sample_type")),
+                asset_id=_value_at(row, mapping.get("asset_id")),
+                asset_name=_value_at(row, mapping.get("asset_name")),
+                original_value=_value_at(row, mapping.get("original_value")),
+                addition_method=_value_at(row, mapping.get("addition_method")),
+                sample_source_no=_value_at(row, mapping.get("sample_source_no")),
+                sampling_id=_value_at(row, mapping.get("sampling_id")),
+                asset_category=_value_at(row, mapping.get("asset_category")),
+                start_date=_value_at(row, mapping.get("start_date")),
+            )
+        )
+    return out
+
+
+def _extract_tested_samples(rows: list[tuple[Any, ...]]) -> list[AdditionTestedSampleRow]:
+    header_row, mapping = _find_table_header(
+        rows,
+        {
+            "sample_type": ("样本类型",),
+            "asset_category": ("固定资产类别", "资产类别"),
+            "asset_id": ("固定资产编号", "资产编号", "卡片编号"),
+            "asset_name": ("固定资产名称", "资产名称"),
+            "original_value": ("资产原价", "原值", "固定资产原值"),
+            "capitalized_date": ("资本化日期", "入账开始日期"),
+            "evidence_amount": ("支持性文件取得", "通过审计证据", "支持性文件金额"),
+            "evidence_description": ("获得的证据", "支持的描述", "证据描述"),
+            "amount_difference": ("资产原价差异", "金额差异", "差异"),
+        },
+        required=("asset_id", "asset_name", "original_value"),
+    )
+    if header_row is None:
+        return []
+    attribute_cols = [
+        col
+        for field, col in mapping.items()
+        if field.startswith("attribute_")
+    ]
+    out: list[AdditionTestedSampleRow] = []
+    for r_idx, row in _iter_table_rows(rows, header_row + 1, mapping):
+        out.append(
+            AdditionTestedSampleRow(
+                source_row=r_idx,
+                sample_type=_value_at(row, mapping.get("sample_type")),
+                asset_id=_value_at(row, mapping.get("asset_id")),
+                asset_name=_value_at(row, mapping.get("asset_name")),
+                original_value=_value_at(row, mapping.get("original_value")),
+                evidence_amount=_value_at(row, mapping.get("evidence_amount")),
+                evidence_description=_value_at(row, mapping.get("evidence_description")),
+                amount_difference=_value_at(row, mapping.get("amount_difference")),
+                attribute_results=[_value_at(row, col) for col in attribute_cols],
+                asset_category=_value_at(row, mapping.get("asset_category")),
+                capitalized_date=_value_at(row, mapping.get("capitalized_date")),
+            )
+        )
+    return out
+
+
+def _find_table_header(
+    rows: list[tuple[Any, ...]],
+    field_terms: dict[str, tuple[str, ...]],
+    *,
+    required: tuple[str, ...],
+) -> tuple[int | None, dict[str, int]]:
+    best_row: int | None = None
+    best_mapping: dict[str, int] = {}
+    best_score = 0
+    for r_idx, row in enumerate(rows, 1):
+        mapping: dict[str, int] = {}
+        for c_idx, cell in enumerate(row, 1):
+            text = _norm(cell)
+            if not text:
+                continue
+            matched = False
+            for field, terms in field_terms.items():
+                if field in mapping:
+                    continue
+                if any(_norm(term) == text or _norm(term) in text for term in terms):
+                    mapping[field] = c_idx
+                    matched = True
+                    break
+            if not matched and text in {"1", "2", "3", "4"}:
+                mapping[f"attribute_{text}"] = c_idx
+        score = len(mapping)
+        if score > best_score and all(field in mapping for field in required):
+            best_score = score
+            best_row = r_idx
+            best_mapping = mapping
+    return best_row, best_mapping
+
+
+def _iter_table_rows(
+    rows: list[tuple[Any, ...]],
+    start_row: int,
+    mapping: dict[str, int],
+) -> list[tuple[int, tuple[Any, ...]]]:
+    out: list[tuple[int, tuple[Any, ...]]] = []
+    blank_streak = 0
+    identity_cols = [
+        col
+        for key, col in mapping.items()
+        if key in {"asset_id", "asset_name", "original_value"}
+    ]
+    for r_idx in range(start_row, len(rows) + 1):
+        row = rows[r_idx - 1]
+        has_identity = any(_value_at(row, col) for col in identity_cols)
+        if not has_identity:
+            blank_streak += 1
+            if blank_streak >= 2:
+                break
+            continue
+        blank_streak = 0
+        # 避免把说明段落误当作样本行。
+        joined = _norm(" ".join(str(v) for v in row if v is not None))
+        if any(term in joined for term in _GUIDANCE_TERMS):
+            continue
+        out.append((r_idx, row))
+    return out
+
+
 def _find_summary_addition_row(
     summary: SummarySheetDataset | None,
 ) -> PspProgramRow | None:
@@ -299,6 +606,44 @@ def _clean(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text if text else None
+
+
+def _stringify_cell(value: Any) -> str:
+    if isinstance(value, Decimal):
+        return format(value, "f").rstrip("0").rstrip(".") if "." in format(value, "f") else format(value, "f")
+    if isinstance(value, (int, float)):
+        dec = Decimal(str(value))
+        text = format(dec, "f")
+        return text.rstrip("0").rstrip(".") if "." in text else text
+    return str(value).strip()
+
+
+def _parse_amount(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text in ("-", "—", "N/A", "n/a", "#N/A"):
+        return None
+    text = _AMOUNT_CHARS.sub("", text)
+    paren = _PAREN_NEGATIVE.match(text)
+    if paren:
+        text = f"-{paren.group(1)}"
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return None
+
+
+def _value_at(row: tuple[Any, ...], col: int | None) -> str | None:
+    if col is None or col <= 0 or col > len(row):
+        return None
+    value = row[col - 1]
+    if value is None or str(value).strip() == "":
+        return None
+    amount = _parse_amount(value)
+    if amount is not None:
+        return str(amount)
+    return str(value).strip()
 
 
 def _norm(value: Any) -> str:
