@@ -43,6 +43,8 @@ class AdditionSampleRow:
     sampling_id: str | None = None
     asset_category: str | None = None
     start_date: str | None = None
+    useful_life_months: str | None = None
+    salvage_rate: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +58,8 @@ class AdditionSampleRow:
             "sampling_id": self.sampling_id,
             "asset_category": self.asset_category,
             "start_date": self.start_date,
+            "useful_life_months": self.useful_life_months,
+            "salvage_rate": self.salvage_rate,
         }
 
 
@@ -71,7 +75,11 @@ class AdditionTestedSampleRow:
     amount_difference: str | None = None
     attribute_results: list[str | None] = field(default_factory=list)
     asset_category: str | None = None
+    gl_account_code: str | None = None
     capitalized_date: str | None = None
+    useful_life_months: str | None = None
+    salvage_rate: str | None = None
+    depreciation_method: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -85,7 +93,11 @@ class AdditionTestedSampleRow:
             "amount_difference": self.amount_difference,
             "attribute_results": self.attribute_results,
             "asset_category": self.asset_category,
+            "gl_account_code": self.gl_account_code,
             "capitalized_date": self.capitalized_date,
+            "useful_life_months": self.useful_life_months,
+            "salvage_rate": self.salvage_rate,
+            "depreciation_method": self.depreciation_method,
         }
 
 
@@ -99,6 +111,7 @@ class AdditionTestSheetDataset:
     waiver_note_rows: list[int] = field(default_factory=list)
     amounts: dict[str, AdditionAmountItem] = field(default_factory=dict)
     tested_samples: list[AdditionTestedSampleRow] = field(default_factory=list)
+    module_assessments: list[ModuleAssessment] = field(default_factory=list)
     recognition_confidence: float = 0.0
     notes: list[str] = field(default_factory=list)
 
@@ -111,6 +124,7 @@ class AdditionSampleOutputDataset:
     source_sheet: str
     amounts: dict[str, AdditionAmountItem] = field(default_factory=dict)
     selected_samples: list[AdditionSampleRow] = field(default_factory=list)
+    module_assessments: list[ModuleAssessment] = field(default_factory=list)
     recognition_confidence: float = 0.0
     notes: list[str] = field(default_factory=list)
 
@@ -149,6 +163,26 @@ class AdditionExecutionPathDataset:
         }
 
 
+@dataclass
+class ModuleAssessment:
+    module_key: str
+    module_name: str
+    status: str
+    confidence: float
+    evidence: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "module_key": self.module_key,
+            "module_name": self.module_name,
+            "status": self.status,
+            "confidence": self.confidence,
+            "evidence": self.evidence,
+            "notes": self.notes,
+        }
+
+
 _WAIVER_TERMS = (
     "无新增",
     "本期无购置",
@@ -157,11 +191,18 @@ _WAIVER_TERMS = (
     "无需测试",
     "无需抽样",
     "不执行",
+    "不在执行",
+    "不再执行",
+    "不执行tod",
+    "不在执行tod",
+    "不再执行tod",
     "未执行",
     "小于te",
     "低于te",
     "小于tt",
     "低于tt",
+    "小于sad",
+    "低于sad",
     "无性质异常",
     "无异常性质",
 )
@@ -200,6 +241,386 @@ _SAMPLE_AMOUNT_ANCHORS: dict[str, tuple[str, ...]] = {
 }
 
 
+def _build_module_assessments(
+    rows: list[tuple[Any, ...]],
+    *,
+    execution_path: AdditionExecutionPathDataset,
+    waiver_text: str | None,
+    amounts: dict[str, AdditionAmountItem],
+    tested_samples: list[AdditionTestedSampleRow],
+) -> list[ModuleAssessment]:
+    return [
+        _assess_execution_path(execution_path),
+        _assess_population_definition(rows, amounts),
+        _assess_amount_reconciliation(amounts),
+        _assess_key_item_and_representation(rows, amounts),
+        _assess_test_sample_table(tested_samples),
+        _assess_exception_summary(rows, waiver_text, tested_samples),
+    ]
+
+
+def _assess_execution_path(execution_path: AdditionExecutionPathDataset) -> ModuleAssessment:
+    evidence = [f"path_kind={execution_path.path_kind}"]
+    if execution_path.summary_status:
+        evidence.append(f"summary_status={execution_path.summary_status}")
+    if execution_path.summary_waiver_reason:
+        evidence.append(f"summary_reason={execution_path.summary_waiver_reason}")
+    if execution_path.test_sheet_waiver_note:
+        evidence.append("test_sheet_waiver_note")
+    if execution_path.missing_components:
+        evidence.append("missing=" + ",".join(execution_path.missing_components))
+    if execution_path.path_kind in {
+        "summary_waived",
+        "executed_package_complete",
+        "test_sheet_waiver_note",
+    }:
+        status = "recognized"
+    elif execution_path.path_kind in {"executed_package_incomplete"}:
+        status = "partial"
+    else:
+        status = "unclear"
+    return ModuleAssessment(
+        module_key="execution_path",
+        module_name="执行路径",
+        status=status,
+        confidence=execution_path.recognition_confidence,
+        evidence=evidence,
+        notes=list(execution_path.notes),
+    )
+
+
+def _assess_population_definition(
+    rows: list[tuple[Any, ...]],
+    amounts: dict[str, AdditionAmountItem],
+) -> ModuleAssessment:
+    hits = _collect_text_hits(
+        rows,
+        (
+            "详细测试所涵盖的总体",
+            "样本总体",
+            "购置增加",
+            "购置新增",
+            "本年固定资产购置增加",
+            "测试总体",
+        ),
+    )
+    purchase_amount = amounts.get("purchase_population_amount")
+    rollforward_amount = amounts.get("rollforward_purchase_amount")
+    evidence = hits[:4]
+    if purchase_amount:
+        evidence.append(f"purchase_population_amount={purchase_amount.amount}")
+    if rollforward_amount:
+        evidence.append(f"rollforward_purchase_amount={rollforward_amount.amount}")
+    if purchase_amount and hits:
+        status = "recognized"
+    elif purchase_amount or hits:
+        status = "partial"
+    else:
+        status = "missing"
+    return ModuleAssessment(
+        module_key="population_definition",
+        module_name="新增测试总体定义",
+        status=status,
+        confidence=0.78 if hits else 0.52 if purchase_amount else 0.25,
+        evidence=evidence,
+        notes=[],
+    )
+
+
+def _assess_amount_reconciliation(
+    amounts: dict[str, AdditionAmountItem],
+) -> ModuleAssessment:
+    purchase = _amount_decimal(amounts.get("purchase_population_amount"))
+    rollforward = _amount_decimal(amounts.get("rollforward_purchase_amount"))
+    diff = _amount_decimal(amounts.get("difference_amount"))
+    evidence: list[str] = []
+    for key in ("purchase_population_amount", "rollforward_purchase_amount", "difference_amount"):
+        item = amounts.get(key)
+        if item and item.amount is not None:
+            evidence.append(f"{key}={item.amount}")
+    if purchase is not None and rollforward is not None and diff is not None:
+        status = "recognized" if diff == purchase - rollforward and diff == 0 else "partial"
+    elif purchase is not None or rollforward is not None:
+        status = "partial"
+    else:
+        status = "missing"
+    return ModuleAssessment(
+        module_key="amount_reconciliation",
+        module_name="金额勾稽",
+        status=status,
+        confidence=0.88 if status == "recognized" else 0.64 if status == "partial" else 0.3,
+        evidence=evidence,
+        notes=[],
+    )
+
+
+def _assess_key_item_and_representation(
+    rows: list[tuple[Any, ...]],
+    amounts: dict[str, AdditionAmountItem],
+) -> ModuleAssessment:
+    hits = _collect_text_hits(
+        rows,
+        (
+            "关键项目",
+            "代表性样本",
+            "关键项",
+            "定量关键项",
+            "定性关键项",
+            "Skywind",
+            "Smart Sampling",
+            "抽样工具",
+            "TT",
+        ),
+    )
+    evidence = hits[:4]
+    for key in (
+        "key_item_amount",
+        "key_item_count",
+        "representative_sample_size",
+        "total_sample_size",
+        "sample_method",
+    ):
+        item = amounts.get(key)
+        if item and item.amount is not None:
+            evidence.append(f"{key}={item.amount}")
+    if amounts.get("key_item_amount") or amounts.get("representative_sample_size"):
+        status = "recognized"
+    elif hits:
+        status = "partial"
+    else:
+        status = "missing"
+    return ModuleAssessment(
+        module_key="key_item_representation",
+        module_name="关键项目与代表性抽样",
+        status=status,
+        confidence=0.74 if hits else 0.38,
+        evidence=evidence,
+        notes=[],
+    )
+
+
+def _assess_test_sample_table(
+    tested_samples: list[AdditionTestedSampleRow],
+) -> ModuleAssessment:
+    evidence: list[str] = [f"tested_samples={len(tested_samples)}"]
+    if tested_samples:
+        first = tested_samples[0]
+        evidence.append(f"first_asset_id={first.asset_id or ''}")
+        evidence.append(f"first_asset_name={first.asset_name or ''}")
+        evidence.append(f"attribute_count={len([v for v in first.attribute_results if v is not None])}")
+    if tested_samples and all(s.asset_id and s.asset_name and s.original_value for s in tested_samples):
+        if any(s.attribute_results for s in tested_samples):
+            status = "recognized"
+        else:
+            status = "partial"
+    elif tested_samples:
+        status = "partial"
+    else:
+        status = "missing"
+    return ModuleAssessment(
+        module_key="sample_table",
+        module_name="测试样本与属性表",
+        status=status,
+        confidence=0.86 if status == "recognized" else 0.6 if status == "partial" else 0.25,
+        evidence=evidence,
+        notes=[],
+    )
+
+
+def _assess_exception_summary(
+    rows: list[tuple[Any, ...]],
+    waiver_text: str | None,
+    tested_samples: list[AdditionTestedSampleRow],
+) -> ModuleAssessment:
+    hits = _collect_text_hits(rows, ("无异常情况", "已识别异常", "异常情况", "Note", "说明", "调查"))
+    evidence = hits[:4]
+    if waiver_text:
+        evidence.append(f"waiver_text={waiver_text}")
+    if tested_samples:
+        any_note = any(
+            (s.evidence_description and _norm(s.evidence_description).find("异常") >= 0)
+            or (s.amount_difference and _norm(s.amount_difference).strip() not in {"", "0"})
+            for s in tested_samples
+        )
+        if any_note:
+            evidence.append("sample_level_exception_or_difference")
+    if waiver_text or any("无异常" in hit for hit in hits):
+        status = "recognized"
+    elif hits:
+        status = "partial"
+    else:
+        status = "missing"
+    return ModuleAssessment(
+        module_key="exception_summary",
+        module_name="异常说明与结论",
+        status=status,
+        confidence=0.72 if waiver_text else 0.58 if hits else 0.28,
+        evidence=evidence,
+        notes=[],
+    )
+
+
+def _collect_text_hits(
+    rows: list[tuple[Any, ...]],
+    terms: tuple[str, ...],
+    *,
+    max_cols: int = 24,
+    limit: int = 6,
+) -> list[str]:
+    hits: list[str] = []
+    for row in rows:
+        texts = [_clean(v) for v in row[:max_cols]]
+        joined = " ".join(t for t in texts if t)
+        if not joined:
+            continue
+        low = _norm(joined)
+        if any(term in low for term in map(_norm, terms)):
+            hits.append(_truncate(joined, 200))
+            if len(hits) >= limit:
+                break
+    return hits
+
+
+def _amount_decimal(item: AdditionAmountItem | None) -> Decimal | None:
+    if item is None or item.amount is None:
+        return None
+    return _parse_amount(item.amount)
+
+
+def _build_sample_output_module_assessments(
+    rows: list[tuple[Any, ...]],
+    *,
+    amounts: dict[str, AdditionAmountItem],
+    selected_samples: list[AdditionSampleRow],
+) -> list[ModuleAssessment]:
+    return [
+        _assess_sample_source_summary(rows, amounts),
+        _assess_sample_strategy(rows, amounts),
+        _assess_sample_accounting_reconciliation(amounts),
+        _assess_selected_sample_table(selected_samples),
+    ]
+
+
+def _assess_sample_source_summary(
+    rows: list[tuple[Any, ...]],
+    amounts: dict[str, AdditionAmountItem],
+) -> ModuleAssessment:
+    hits = _collect_text_hits(rows, ("源数据汇总", "已上传数据", "样本池总体金额"), max_cols=12)
+    evidence = hits[:3]
+    for key in ("uploaded_data_amount", "necessary_exclusion_amount", "sample_pool_amount"):
+        item = amounts.get(key)
+        if item and item.amount is not None:
+            evidence.append(f"{key}={item.amount}")
+    if amounts.get("uploaded_data_amount") and amounts.get("sample_pool_amount"):
+        status = "recognized"
+    elif hits or amounts:
+        status = "partial"
+    else:
+        status = "missing"
+    return ModuleAssessment(
+        module_key="source_data_summary",
+        module_name="源数据与样本池摘要",
+        status=status,
+        confidence=0.86 if status == "recognized" else 0.58 if status == "partial" else 0.25,
+        evidence=evidence,
+        notes=[],
+    )
+
+
+def _assess_sample_strategy(
+    rows: list[tuple[Any, ...]],
+    amounts: dict[str, AdditionAmountItem],
+) -> ModuleAssessment:
+    hits = _collect_text_hits(
+        rows,
+        ("抽样策略", "关键项数量", "代表性样本量", "样本选择方法", "随机抽样", "MUS"),
+        max_cols=12,
+    )
+    evidence = hits[:4]
+    for key in (
+        "key_item_count",
+        "key_item_amount",
+        "representative_population_amount",
+        "representative_sample_size",
+        "total_sample_size",
+        "sample_method",
+    ):
+        item = amounts.get(key)
+        if item and item.amount is not None:
+            evidence.append(f"{key}={item.amount}")
+    if amounts.get("sample_method") and (
+        amounts.get("representative_sample_size") or amounts.get("total_sample_size")
+    ):
+        status = "recognized"
+    elif hits or any(key in amounts for key in ("sample_method", "representative_sample_size")):
+        status = "partial"
+    else:
+        status = "missing"
+    return ModuleAssessment(
+        module_key="sampling_strategy",
+        module_name="抽样策略与样本量",
+        status=status,
+        confidence=0.84 if status == "recognized" else 0.56 if status == "partial" else 0.25,
+        evidence=evidence,
+        notes=[],
+    )
+
+
+def _assess_sample_accounting_reconciliation(
+    amounts: dict[str, AdditionAmountItem],
+) -> ModuleAssessment:
+    total = _amount_decimal(amounts.get("total_amount"))
+    accounting = _amount_decimal(amounts.get("accounting_record_amount"))
+    diff = _amount_decimal(amounts.get("difference_amount"))
+    evidence: list[str] = []
+    for key in ("total_amount", "accounting_record_amount", "difference_amount"):
+        item = amounts.get(key)
+        if item and item.amount is not None:
+            evidence.append(f"{key}={item.amount}")
+    if total is not None and accounting is not None and diff is not None:
+        status = "recognized" if diff == total - accounting else "partial"
+    elif total is not None or accounting is not None:
+        status = "partial"
+    else:
+        status = "missing"
+    return ModuleAssessment(
+        module_key="accounting_reconciliation",
+        module_name="总体与会计记录核对",
+        status=status,
+        confidence=0.86 if status == "recognized" else 0.58 if status == "partial" else 0.25,
+        evidence=evidence,
+        notes=[],
+    )
+
+
+def _assess_selected_sample_table(
+    selected_samples: list[AdditionSampleRow],
+) -> ModuleAssessment:
+    evidence: list[str] = [f"selected_samples={len(selected_samples)}"]
+    if selected_samples:
+        first = selected_samples[0]
+        evidence.append(f"first_sample_source_no={first.sample_source_no or ''}")
+        evidence.append(f"first_sampling_id={first.sampling_id or ''}")
+        evidence.append(f"first_asset_id={first.asset_id or ''}")
+    if selected_samples and all(
+        row.sample_source_no and row.sampling_id and row.sample_type and row.asset_id and row.original_value
+        for row in selected_samples
+    ):
+        status = "recognized"
+    elif selected_samples:
+        status = "partial"
+    else:
+        status = "missing"
+    return ModuleAssessment(
+        module_key="selected_samples",
+        module_name="已选取样本明细",
+        status=status,
+        confidence=0.9 if status == "recognized" else 0.6 if status == "partial" else 0.25,
+        evidence=evidence,
+        notes=[],
+    )
+
+
 def load_addition_test_from_workbook(
     path: str | Path,
     *,
@@ -214,6 +635,31 @@ def load_addition_test_from_workbook(
     waiver_text, waiver_rows = _scan_waiver_notes(rows)
     amounts = _extract_amount_items(rows, _TEST_AMOUNT_ANCHORS)
     tested_samples = _extract_tested_samples(rows)
+    if waiver_text:
+        path_kind = "test_sheet_waiver_note"
+        path_confidence = 0.72
+    elif amounts and tested_samples:
+        path_kind = "executed_package_complete"
+        path_confidence = 0.84
+    elif amounts or tested_samples:
+        path_kind = "executed_package_incomplete"
+        path_confidence = 0.63
+    else:
+        path_kind = "unclear"
+        path_confidence = 0.35
+    module_assessments = _build_module_assessments(
+        rows,
+        execution_path=AdditionExecutionPathDataset(
+            path_kind=path_kind,
+            recognition_confidence=path_confidence,
+            test_sheet_waiver_note=waiver_text,
+            test_sheet_waiver_rows=waiver_rows,
+            notes=["page_only_execution_path_inferred"],
+        ),
+        waiver_text=waiver_text,
+        amounts=amounts,
+        tested_samples=tested_samples,
+    )
     notes = [f"addition_test_sheet_detected:{candidate['sheet_name']}"]
     if waiver_text:
         notes.append("addition_test_waiver_note_detected")
@@ -221,6 +667,8 @@ def load_addition_test_from_workbook(
         notes.append(f"addition_test_amounts_detected:{len(amounts)}")
     if tested_samples:
         notes.append(f"addition_test_samples_detected:{len(tested_samples)}")
+    if module_assessments:
+        notes.append(f"addition_test_modules_detected:{len(module_assessments)}")
     return AdditionTestSheetDataset(
         source_file=str(path),
         source_sheet=candidate["sheet_name"],
@@ -228,6 +676,7 @@ def load_addition_test_from_workbook(
         waiver_note_rows=waiver_rows,
         amounts=amounts,
         tested_samples=tested_samples,
+        module_assessments=module_assessments,
         recognition_confidence=float(candidate["confidence"]),
         notes=notes,
     )
@@ -248,16 +697,24 @@ def load_addition_sample_output_from_workbook(
     rows = candidate["rows"]
     amounts = _extract_amount_items(rows, _SAMPLE_AMOUNT_ANCHORS)
     selected_samples = _extract_selected_samples(rows)
+    module_assessments = _build_sample_output_module_assessments(
+        rows,
+        amounts=amounts,
+        selected_samples=selected_samples,
+    )
     notes = [f"addition_sample_output_sheet_detected:{candidate['sheet_name']}"]
     if amounts:
         notes.append(f"addition_sample_output_amounts_detected:{len(amounts)}")
     if selected_samples:
         notes.append(f"addition_sample_output_rows_detected:{len(selected_samples)}")
+    if module_assessments:
+        notes.append(f"addition_sample_output_modules_detected:{len(module_assessments)}")
     return AdditionSampleOutputDataset(
         source_file=str(path),
         source_sheet=candidate["sheet_name"],
         amounts=amounts,
         selected_samples=selected_samples,
+        module_assessments=module_assessments,
         recognition_confidence=float(candidate["confidence"]),
         notes=notes,
     )
@@ -381,20 +838,31 @@ def _scan_waiver_notes(rows: list[tuple[Any, ...]]) -> tuple[str | None, list[in
 def _extract_amount_items(
     rows: list[tuple[Any, ...]],
     anchors: dict[str, tuple[str, ...]],
+    *,
+    max_anchor_col: int = 18,
 ) -> dict[str, AdditionAmountItem]:
     found: dict[str, AdditionAmountItem] = {}
     for r_idx, row in enumerate(rows, 1):
-        for c_idx, cell in enumerate(row, 1):
+        for c_idx, cell in enumerate(row[:max_anchor_col], 1):
             label = _clean(cell)
             if not label:
                 continue
             normalized = _norm(label)
+            if len(label) > 120:
+                continue
+            if any(term in normalized for term in _GUIDANCE_TERMS):
+                continue
             for key, terms in anchors.items():
                 if key in found:
                     continue
                 if not any(_norm(term) in normalized for term in terms):
                     continue
-                value, value_col = _first_value_to_right(row, c_idx)
+                value, value_col = _first_value_to_right(
+                    row,
+                    c_idx,
+                    require_numeric=_amount_item_requires_numeric(key),
+                    require_short_text=key == "sample_method",
+                )
                 if value is None:
                     continue
                 found[key] = AdditionAmountItem(
@@ -406,16 +874,33 @@ def _extract_amount_items(
     return found
 
 
-def _first_value_to_right(row: tuple[Any, ...], label_col: int) -> tuple[Any | None, int | None]:
+def _amount_item_requires_numeric(key: str) -> bool:
+    return key != "sample_method"
+
+
+def _first_value_to_right(
+    row: tuple[Any, ...],
+    label_col: int,
+    *,
+    require_numeric: bool = False,
+    require_short_text: bool = False,
+) -> tuple[Any | None, int | None]:
     for c_idx in range(label_col + 1, min(len(row), label_col + 9) + 1):
         if c_idx - 1 >= len(row):
             break
         value = row[c_idx - 1]
         if value is None or str(value).strip() == "":
             continue
+        if require_numeric and _parse_amount(value) is None:
+            continue
         # 说明性长文本不是金额/数量/方法摘录的首选值。
         text = str(value).strip()
         if len(text) > 120:
+            continue
+        if require_short_text and (
+            "\n" in text
+            or any(term in _norm(text) for term in ("基础操作指引", "进阶实操提示", "易错点", "抽样策略记录"))
+        ):
             continue
         return value, c_idx
     return None, None
@@ -432,6 +917,8 @@ def _extract_selected_samples(rows: list[tuple[Any, ...]]) -> list[AdditionSampl
             "asset_id": ("固定资产编号", "资产编号", "卡片编号"),
             "asset_name": ("固定资产名称", "资产名称"),
             "start_date": ("入账开始日期", "资本化日期"),
+            "useful_life_months": ("使用寿命(月)", "使用寿命", "预计使用期间数"),
+            "salvage_rate": ("残值率", "预计净残值率", "净残值率"),
             "original_value": ("原值", "资产原价", "固定资产原值"),
             "addition_method": ("新增方式", "增加方式", "取得方式"),
         },
@@ -453,6 +940,8 @@ def _extract_selected_samples(rows: list[tuple[Any, ...]]) -> list[AdditionSampl
                 sampling_id=_value_at(row, mapping.get("sampling_id")),
                 asset_category=_value_at(row, mapping.get("asset_category")),
                 start_date=_value_at(row, mapping.get("start_date")),
+                useful_life_months=_value_at(row, mapping.get("useful_life_months")),
+                salvage_rate=_value_at(row, mapping.get("salvage_rate")),
             )
         )
     return out
@@ -464,10 +953,14 @@ def _extract_tested_samples(rows: list[tuple[Any, ...]]) -> list[AdditionTestedS
         {
             "sample_type": ("样本类型",),
             "asset_category": ("固定资产类别", "资产类别"),
+            "gl_account_code": ("总账账户代码", "总账科目", "GL账户", "GL account"),
             "asset_id": ("固定资产编号", "资产编号", "卡片编号"),
             "asset_name": ("固定资产名称", "资产名称"),
             "original_value": ("资产原价", "原值", "固定资产原值"),
             "capitalized_date": ("资本化日期", "入账开始日期"),
+            "useful_life_months": ("使用寿命(月)", "使用寿命", "预计使用期间数"),
+            "salvage_rate": ("残值率", "预计净残值率", "净残值率"),
+            "depreciation_method": ("折旧方法", "折旧政策", "折旧方式"),
             "evidence_amount": ("支持性文件取得", "通过审计证据", "支持性文件金额"),
             "evidence_description": ("获得的证据", "支持的描述", "证据描述"),
             "amount_difference": ("资产原价差异", "金额差异", "差异"),
@@ -495,7 +988,11 @@ def _extract_tested_samples(rows: list[tuple[Any, ...]]) -> list[AdditionTestedS
                 amount_difference=_value_at(row, mapping.get("amount_difference")),
                 attribute_results=[_value_at(row, col) for col in attribute_cols],
                 asset_category=_value_at(row, mapping.get("asset_category")),
+                gl_account_code=_value_at(row, mapping.get("gl_account_code")),
                 capitalized_date=_value_at(row, mapping.get("capitalized_date")),
+                useful_life_months=_value_at(row, mapping.get("useful_life_months")),
+                salvage_rate=_value_at(row, mapping.get("salvage_rate")),
+                depreciation_method=_value_at(row, mapping.get("depreciation_method")),
             )
         )
     return out
