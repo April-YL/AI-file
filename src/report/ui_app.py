@@ -26,6 +26,7 @@ from report.export_json import export_report_json
 from report.export_review_html import export_review_html
 from report.pipeline import run_input_qc
 from report.procedure_labels import FINDING_UI_GROUPS
+from rules.delivery_completion import DeliveryCompletionContext
 
 st.set_page_config(
     page_title="固定资产质检",
@@ -33,7 +34,7 @@ st.set_page_config(
 )
 
 # 规则/ingest 变更时递增，避免 @st.cache_data 返回旧质检结果。
-_QC_CACHE_VERSION = "20260603-llm-rule-semantic-review"
+_QC_CACHE_VERSION = "20260608-delivery-completion"
 
 
 def _inject_style() -> None:
@@ -491,7 +492,21 @@ def _render_qc_summary(data: dict) -> None:
             f"**K.01 后推**：{rqc.get('overall_severity', 'PASS')}，"
             f"{rqc.get('issue_count', 0)} findings"
         )
-    if not any((lqc, psp, rqc)):
+    addition = data.get("addition_sheet_section") or {}
+    preview = addition.get("consistency_preview") or {}
+    if addition:
+        test = addition.get("addition_test") or {}
+        sample = addition.get("addition_sample_output") or {}
+        path = addition.get("addition_execution_path") or {}
+        st.markdown(
+            f"**K.02 新增测试**：{path.get('path_kind', 'unknown')}，"
+            f"样本匹配 {preview.get('matched_count', 0)}/{preview.get('selected_count', 0)}，"
+            f"关键项 {preview.get('key_item_selected_amount') or '—'} vs {preview.get('key_item_tested_amount') or '—'}"
+        )
+        st.caption(
+            f"测试页 {test.get('source_sheet') or '—'} · 选样输出 {sample.get('source_sheet') or '—'}"
+        )
+    if not any((lqc, psp, rqc, addition)):
         st.info("暂无程序级摘要。")
 
 
@@ -503,18 +518,23 @@ def _run_qc_cached(
     fa_sheet: str | None,
     summary_sheet: str | None,
     lead_sheet: str | None,
+    delivery_stage: str,
     cache_version: str,
 ) -> tuple[dict, bytes, bytes, bytes | None]:
     total_t0 = perf_counter()
     with tempfile.TemporaryDirectory() as tmp:
         inp = Path(tmp) / filename
         inp.write_bytes(file_bytes)
+        delivery_context = _build_delivery_context(
+            delivery_stage=delivery_stage,
+        )
         report = run_input_qc(
             str(inp),
             fa_sheet=fa_sheet or None,
             summary_sheet=summary_sheet or None,
             lead_sheet=lead_sheet or None,
             llm=use_llm,
+            delivery_context=delivery_context,
         )
         json_html_t0 = perf_counter()
         json_path = Path(tmp) / "report.json"
@@ -543,6 +563,17 @@ def _run_qc_cached(
         return data, json_path.read_bytes(), html_path.read_bytes(), annotated_bytes
 
 
+def _build_delivery_context(
+    *,
+    delivery_stage: str,
+) -> DeliveryCompletionContext | None:
+    if delivery_stage == "first":
+        return DeliveryCompletionContext(stage="first")
+    if delivery_stage == "final":
+        return DeliveryCompletionContext(stage="final")
+    return None
+
+
 _inject_style()
 _render_topbar()
 
@@ -558,6 +589,18 @@ with st.sidebar:
         fa_sheet = st.text_input("FA list 表名", "")
         summary_sheet = st.text_input("汇总表名", "")
         lead_sheet = st.text_input("Lead 表名", "")
+
+st.subheader("交付完成度")
+delivery_stage = st.radio(
+    "交付阶段",
+    options=["none", "first", "final"],
+    format_func=lambda v: {
+        "none": "不检查交付完成度",
+        "first": "首次交付",
+        "final": "整体交付",
+    }[v],
+    horizontal=True,
+)
 
 uploaded = st.file_uploader(
     "选择待质检底稿",
@@ -593,6 +636,7 @@ if st.button("开始质检", type="primary", use_container_width=True):
                 fa_sheet.strip() or None,
                 summary_sheet.strip() or None,
                 lead_sheet.strip() or None,
+                delivery_stage,
                 _QC_CACHE_VERSION,
             )
             st.session_state.setdefault("results", {})[uf.name] = {

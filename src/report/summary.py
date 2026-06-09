@@ -67,6 +67,7 @@ class QcReport:
     ``summary_sheet_section``：汇总页 + AE-003；
     ``lead_sheet_section``：K.00 Lead + 基准信息/摘录规则摘要；
     ``rollforward_sheet_section``：K.01 后推 + 六区块识别 + P0 规则摘要。
+    ``addition_sheet_section``：K.02 新增测试 + K.02.1a 选样输出 + 一致性预览。
     """
 
     source_file: str
@@ -81,6 +82,7 @@ class QcReport:
     summary_sheet_section: dict[str, Any] | None = None
     lead_sheet_section: dict[str, Any] | None = None
     rollforward_sheet_section: dict[str, Any] | None = None
+    addition_sheet_section: dict[str, Any] | None = None
     runtime_timings: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -99,6 +101,8 @@ class QcReport:
             data["lead_sheet_section"] = self.lead_sheet_section
         if self.rollforward_sheet_section is not None:
             data["rollforward_sheet_section"] = self.rollforward_sheet_section
+        if self.addition_sheet_section is not None:
+            data["addition_sheet_section"] = self.addition_sheet_section
         if self.llm_enrichment is not None:
             data["llm_enrichment"] = self.llm_enrichment.to_dict()
         if self.manual_review_sections:
@@ -122,6 +126,7 @@ def build_report(
     summary_sheet_section: dict[str, Any] | None = None,
     lead_sheet_section: dict[str, Any] | None = None,
     rollforward_sheet_section: dict[str, Any] | None = None,
+    addition_sheet_section: dict[str, Any] | None = None,
 ) -> QcReport:
     issues_by_asset: dict[str, list[QcIssue]] = {}
     sheet_level: list[QcIssue] = []
@@ -196,4 +201,5 @@ def build_report(
         summary_sheet_section=summary_sheet_section,
         lead_sheet_section=lead_sheet_section,
         rollforward_sheet_section=rollforward_sheet_section,
+        addition_sheet_section=addition_sheet_section,
     )

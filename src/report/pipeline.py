@@ -8,7 +8,8 @@ from ingest.workbook_reader import list_workbook_sheet_titles
 from llm.config import load_llm_config
 from llm.review import enrich_report_with_llm
 from report.manual_review import build_manual_review_sections
-from report.summary import QcReport, build_report
+from report.addition_test_report import build_addition_sheet_section
+from report.summary import QcReport, build_report, worst_severity
 from report.lead_sheet_report import build_lead_sheet_section
 from report.rollforward_sheet_report import build_rollforward_sheet_section
 from report.summary_sheet_report import build_summary_sheet_section
@@ -17,6 +18,10 @@ from rules.addition_test_package import (
     check_disposal_test_package,
 )
 from rules.addition_runner import ADDITION_RULE_IDS, run_addition_rules
+from rules.delivery_completion import (
+    DeliveryCompletionContext,
+    check_delivery_completion,
+)
 from rules.lead_runner import LEAD_RULE_IDS, run_lead_rules
 from rules.models import ColumnContext
 from rules.psp_completion import check_psp_completion
@@ -29,6 +34,8 @@ WORKBOOK_RULE_IDS = (
     "psp_completion",
     "addition_test_package_complete",
     "disposal_test_package_complete",
+    "first_delivery_standard",
+    "final_delivery_standard",
     *ADDITION_RULE_IDS,
     *LEAD_RULE_IDS,
     *ROLLFORWARD_RULE_IDS,
@@ -39,6 +46,7 @@ def run_workbook_qc(
     ctx: WorkbookQcContext,
     *,
     llm: bool | None = None,
+    delivery_context: DeliveryCompletionContext | None = None,
 ) -> QcReport:
     qc_start = perf_counter()
     config = load_llm_config(cli_enabled=llm)
@@ -278,12 +286,28 @@ def run_workbook_qc(
                 ctx.addition_list,
                 rollforward=ctx.rollforward,
                 lead=ctx.lead,
+                addition_test=ctx.addition_test,
+                addition_sample_output=ctx.addition_sample_output,
+                addition_execution_path=ctx.addition_execution_path,
             )
         )
         issues.extend(addition_issues)
         rule_ids.extend(list(ADDITION_RULE_IDS))
+        addition_sheet_section = build_addition_sheet_section(
+            ctx.addition_test,
+            ctx.addition_sample_output,
+            ctx.addition_execution_path,
+            addition_issues,
+        )
         if not source_sheet:
             source_sheet = ctx.addition_list.source_sheet
+    else:
+        addition_sheet_section = build_addition_sheet_section(
+            ctx.addition_test,
+            ctx.addition_sample_output,
+            ctx.addition_execution_path,
+            [],
+        )
 
     rollforward_sheet_section = None
     if ctx.rollforward:
@@ -334,6 +358,21 @@ def run_workbook_qc(
         if not source_sheet:
             source_sheet = ctx.rollforward.source_sheet
 
+    if delivery_context:
+        delivery_raw_issues = check_delivery_completion(
+            delivery_context,
+            prior_issues=issues,
+            workbook_context=ctx,
+            workbook_path=ctx.source_file,
+            workbook_sheet_titles=sheet_titles,
+        )
+        delivery_issues = attach_rule_metadata(delivery_raw_issues)
+        issues.extend(delivery_issues)
+        if delivery_context.stage == "first":
+            rule_ids.append("first_delivery_standard")
+        elif delivery_context.stage == "final":
+            rule_ids.append("final_delivery_standard")
+
     if not rule_ids:
         rule_ids = list(WORKBOOK_RULE_IDS)
 
@@ -347,6 +386,7 @@ def run_workbook_qc(
         summary_sheet_section=summary_sheet_section,
         lead_sheet_section=lead_sheet_section,
         rollforward_sheet_section=rollforward_sheet_section,
+        addition_sheet_section=addition_sheet_section,
     )
     report.manual_review_sections = build_manual_review_sections(ctx.lead)
 
@@ -395,6 +435,7 @@ def run_workbook_qc_from_path(
     addition_sheet: str | None = None,
     disposal_sheet: str | None = None,
     llm: bool | None = None,
+    delivery_context: DeliveryCompletionContext | None = None,
 ) -> QcReport:
     ingest_t0 = perf_counter()
     ctx = load_workbook_context(
@@ -407,7 +448,7 @@ def run_workbook_qc_from_path(
         disposal_sheet=disposal_sheet,
     )
     ingest_seconds = perf_counter() - ingest_t0
-    report = run_workbook_qc(ctx, llm=llm)
+    report = run_workbook_qc(ctx, llm=llm, delivery_context=delivery_context)
     report.runtime_timings.update({"ingest_seconds": round(ingest_seconds, 3)})
     return report
 
@@ -422,6 +463,7 @@ def run_input_qc(
     addition_sheet: str | None = None,
     disposal_sheet: str | None = None,
     llm: bool | None = None,
+    delivery_context: DeliveryCompletionContext | None = None,
 ) -> QcReport:
     """CSV 仅 FA list；Excel 走整本 workbook 流水线。"""
     from pathlib import Path
@@ -432,6 +474,30 @@ def run_input_qc(
     p = Path(path)
     if p.suffix.lower() == ".csv":
         report = run_fa_list_qc(load_fa_list_csv(p), llm=llm)
+        delivery_issues = attach_rule_metadata(
+            check_delivery_completion(
+                delivery_context,
+                prior_issues=report.issues,
+            )
+        )
+        if delivery_issues:
+            report.issues.extend(delivery_issues)
+            if delivery_context and delivery_context.stage == "first":
+                report.rule_ids.append("first_delivery_standard")
+            elif delivery_context and delivery_context.stage == "final":
+                report.rule_ids.append("final_delivery_standard")
+            for issue in delivery_issues:
+                if issue.severity.value == "FAIL":
+                    report.summary.fail_count += 1
+                elif issue.severity.value == "WARN":
+                    report.summary.warn_count += 1
+                elif issue.severity.value == "NEED_REVIEW":
+                    report.summary.need_review_count += 1
+                report.summary.by_rule[issue.rule_id] = (
+                    report.summary.by_rule.get(issue.rule_id, 0) + 1
+                )
+            all_severities = [i.severity for i in report.issues]
+            report.summary.overall_severity = worst_severity(all_severities)
         report.manual_review_sections = build_manual_review_sections(None)
         return report
     return run_workbook_qc_from_path(
@@ -443,4 +509,5 @@ def run_input_qc(
         addition_sheet=addition_sheet,
         disposal_sheet=disposal_sheet,
         llm=llm,
+        delivery_context=delivery_context,
     )

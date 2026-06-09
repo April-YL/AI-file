@@ -32,6 +32,22 @@ class AdditionAmountItem:
 
 
 @dataclass
+class AdditionParameterItem:
+    label: str
+    value: str | None
+    source_row: int
+    source_column: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "value": self.value,
+            "source_row": self.source_row,
+            "source_column": self.source_column,
+        }
+
+
+@dataclass
 class AdditionSampleRow:
     source_row: int
     sample_type: str | None = None
@@ -122,6 +138,7 @@ class AdditionSampleOutputDataset:
 
     source_file: str
     source_sheet: str
+    parameters: dict[str, AdditionParameterItem] = field(default_factory=dict)
     amounts: dict[str, AdditionAmountItem] = field(default_factory=dict)
     selected_samples: list[AdditionSampleRow] = field(default_factory=list)
     module_assessments: list[ModuleAssessment] = field(default_factory=list)
@@ -238,6 +255,12 @@ _SAMPLE_AMOUNT_ANCHORS: dict[str, tuple[str, ...]] = {
     "representative_sample_size": ("代表性样本量",),
     "total_sample_size": ("代表性样本与关键项数量合计", "样本合计"),
     "sample_method": ("样本选择方法", "抽样方法"),
+}
+_SAMPLE_PARAMETER_ANCHORS: dict[str, tuple[str, ...]] = {
+    "te": ("可容忍误差", "TE", "Tolerable Error"),
+    "covered_assertions": ("测试涵盖的认定", "涵盖的认定", "assertions covered"),
+    "fraud_or_special_risk": ("是否存在与上述认定相关的舞弊或特别风险", "舞弊或特别风险"),
+    "cra": ("综合风险评估", "CRA", "Combined Risk Assessment"),
 }
 
 
@@ -490,15 +513,41 @@ def _amount_decimal(item: AdditionAmountItem | None) -> Decimal | None:
 def _build_sample_output_module_assessments(
     rows: list[tuple[Any, ...]],
     *,
+    parameters: dict[str, AdditionParameterItem],
     amounts: dict[str, AdditionAmountItem],
     selected_samples: list[AdditionSampleRow],
 ) -> list[ModuleAssessment]:
     return [
+        _assess_sample_prerequisites(parameters),
         _assess_sample_source_summary(rows, amounts),
         _assess_sample_strategy(rows, amounts),
         _assess_sample_accounting_reconciliation(amounts),
         _assess_selected_sample_table(selected_samples),
     ]
+
+
+def _assess_sample_prerequisites(
+    parameters: dict[str, AdditionParameterItem],
+) -> ModuleAssessment:
+    evidence: list[str] = []
+    for key in ("te", "covered_assertions", "fraud_or_special_risk", "cra"):
+        item = parameters.get(key)
+        if item and item.value is not None:
+            evidence.append(f"{key}={item.value}")
+    if all(key in parameters for key in ("te", "covered_assertions", "cra")):
+        status = "recognized"
+    elif evidence:
+        status = "partial"
+    else:
+        status = "missing"
+    return ModuleAssessment(
+        module_key="sampling_prerequisites",
+        module_name="抽样参数与测试认定",
+        status=status,
+        confidence=0.86 if status == "recognized" else 0.58 if status == "partial" else 0.25,
+        evidence=evidence,
+        notes=[],
+    )
 
 
 def _assess_sample_source_summary(
@@ -695,14 +744,18 @@ def load_addition_sample_output_from_workbook(
     if candidate is None:
         return None
     rows = candidate["rows"]
+    parameters = _extract_parameter_items(rows, _SAMPLE_PARAMETER_ANCHORS)
     amounts = _extract_amount_items(rows, _SAMPLE_AMOUNT_ANCHORS)
     selected_samples = _extract_selected_samples(rows)
     module_assessments = _build_sample_output_module_assessments(
         rows,
+        parameters=parameters,
         amounts=amounts,
         selected_samples=selected_samples,
     )
     notes = [f"addition_sample_output_sheet_detected:{candidate['sheet_name']}"]
+    if parameters:
+        notes.append(f"addition_sample_output_parameters_detected:{len(parameters)}")
     if amounts:
         notes.append(f"addition_sample_output_amounts_detected:{len(amounts)}")
     if selected_samples:
@@ -712,6 +765,7 @@ def load_addition_sample_output_from_workbook(
     return AdditionSampleOutputDataset(
         source_file=str(path),
         source_sheet=candidate["sheet_name"],
+        parameters=parameters,
         amounts=amounts,
         selected_samples=selected_samples,
         module_assessments=module_assessments,
@@ -835,6 +889,45 @@ def _scan_waiver_notes(rows: list[tuple[Any, ...]]) -> tuple[str | None, list[in
     return "；".join(hits[:3]), hit_rows[:6]
 
 
+def _extract_parameter_items(
+    rows: list[tuple[Any, ...]],
+    anchors: dict[str, tuple[str, ...]],
+    *,
+    max_anchor_col: int = 18,
+) -> dict[str, AdditionParameterItem]:
+    found: dict[str, AdditionParameterItem] = {}
+    for r_idx, row in enumerate(rows, 1):
+        for c_idx, cell in enumerate(row[:max_anchor_col], 1):
+            label = _clean(cell)
+            if not label:
+                continue
+            normalized = _norm(label)
+            if len(label) > 160:
+                continue
+            if any(term in normalized for term in _GUIDANCE_TERMS):
+                continue
+            for key, terms in anchors.items():
+                if key in found:
+                    continue
+                if not any(_norm(term) in normalized for term in terms):
+                    continue
+                value, value_col = _first_value_to_right(
+                    row,
+                    c_idx,
+                    require_numeric=key == "te",
+                    require_short_text=key != "te",
+                )
+                if value is None:
+                    continue
+                found[key] = AdditionParameterItem(
+                    label=label,
+                    value=_stringify_cell(value),
+                    source_row=r_idx,
+                    source_column=value_col,
+                )
+    return found
+
+
 def _extract_amount_items(
     rows: list[tuple[Any, ...]],
     anchors: dict[str, tuple[str, ...]],
@@ -919,10 +1012,18 @@ def _extract_selected_samples(rows: list[tuple[Any, ...]]) -> list[AdditionSampl
             "start_date": ("入账开始日期", "资本化日期"),
             "useful_life_months": ("使用寿命(月)", "使用寿命", "预计使用期间数"),
             "salvage_rate": ("残值率", "预计净残值率", "净残值率"),
-            "original_value": ("原值", "资产原价", "固定资产原值"),
+            "original_value": (
+                "原值",
+                "资产原价",
+                "固定资产原值",
+                "凭证本币总金额",
+                "借方(本币)",
+                "借方本币",
+                "借方金额",
+            ),
             "addition_method": ("新增方式", "增加方式", "取得方式"),
         },
-        required=("asset_id", "asset_name", "original_value"),
+        required=("sample_source_no", "sampling_id", "sample_type", "original_value"),
     )
     if header_row is None:
         return []
@@ -1041,7 +1142,15 @@ def _iter_table_rows(
     identity_cols = [
         col
         for key, col in mapping.items()
-        if key in {"asset_id", "asset_name", "original_value"}
+        if key
+        in {
+            "asset_id",
+            "asset_name",
+            "original_value",
+            "sample_source_no",
+            "sampling_id",
+            "sample_type",
+        }
     ]
     for r_idx in range(start_row, len(rows) + 1):
         row = rows[r_idx - 1]

@@ -441,3 +441,69 @@ fa-qc-run tests/fixtures/workbook_with_lead.xlsx
 - 先在 report/人工核对视图展示新增清单字段映射、购置/外购总体金额、非购置新增分布，再推进规则判断。
 - K.02 新增测试规则应优先基于“购置/外购总体”与 K.01 勾稽；非购置新增（在建转入、资产合并、内部划转等）先作为 `NEED_REVIEW` 或说明性提示，不直接等同于购置新增总体。
 - 程序包完整性仍需保留例外口径：程序包不完整不必然代表程序执行不到位；若汇总页拒绝执行且理由合理，或满足拒绝执行条件但说明写在 K.02.1 新增测试中，应按已记录的受限/拒绝路径处理。
+
+## 2026-06-09 K.02 新增测试规则化首轮：B 公司案例
+
+本轮根据 `E:\FAQC\新增测试人工质检点.txt` 将人工质检过程拆为可规则化检查点，先落地 K.02.1a 选样输出与 K.02.1 新增测试之间的样本一致性检查。当前只用案例库中的 B 公司做第一次案例回归；本轮未读取标准模板，因为标准模板为空模板，不适合作为本次测试依据。
+
+已完成：
+
+- 新增 `addition_sample_match` 规则，用于检查 K.02.1a 已选取样本是否进入 K.02.1 实际测试，并核对关键项目金额是否一致。
+- K.02.1a Skywind 选样输出读取已兼容 B 公司格式：该表“已选取样本”没有资产编号/资产名称列，但可读取源样本号、抽样 ID、样本类型和金额。
+- B 公司读取结果：K.02.1a 已选样本 1 条；K.02.1 实测样本 1 条；两边均为关键项，金额均为 `380,000`，匹配通过。
+- K.02 报告结构已能展示新增测试页、选样输出页、执行路径和一致性预览。
+
+本次 B 公司规则结论：
+
+- `addition_sample_match`：`PASS`。
+- 因为本规则未产生 `FAIL/WARN/NEED_REVIEW` finding，所以标注底稿不会因该规则新增批注。
+
+界面与导出口径：
+
+- 质检界面走同一条 `run_input_qc` / `run_workbook_qc` 流水线，上传 Excel 后会生成 JSON、HTML 和 `*_qc_annotated.xlsx` 标注底稿下载。
+- K.02 识别结果会进入报告结构和界面摘要；标注底稿的 Comments 表和单元格批注主要来自 findings。
+- 因此，B 公司本次新增测试匹配为 `PASS` 时，界面仍会正常导出标注底稿，但不会额外出现 K.02 样本匹配问题批注。
+
+已验证：
+
+- `.\.venv\Scripts\pytest.exe tests\rules\test_addition_consistency.py::test_b_company_addition_selected_sample_matches_tested_sample tests\report\test_workbook_pipeline.py::test_workbook_qc_b_company_includes_addition_sheet_section -q --basetemp .pytest_tmp_k02_addition_rules_b_only`：`2 passed`
+
+后续建议：
+
+- 用户自行通过质检界面测试 B 公司导出，重点确认报告摘要能看到 K.02 模块，且标注副本可以正常下载。
+- 下一步可扩展其他案例回归，优先验证 I/H 这类拒绝执行或测试页说明路径，避免把“程序包不完整”误判为“程序未执行到位”。
+- 证据充分性、折旧政策一致性、控制权转移证据是否充分等人工判断点，建议作为下一阶段 `NEED_REVIEW` 型规则逐步落地。
+
+## 2026-06-09 K.02.1a 抽样输出补强：TE / CRA / 认定 / 替换样本
+
+本轮把 K.02.1a 从“能读样本”推进到“能判断抽样参数是否与 Lead 一致”。已把前置信息结构化读取出来，包括 TE、测试涵盖认定、舞弊/特别风险、综合风险评估，并接入四条规则：
+
+- 样本池总体金额与新增清单购置/外购金额一致性
+- K.02.1a TE 与 Lead TE 一致性
+- K.02.1a 综合风险评估与 Lead CRA 一致性
+- 测试涵盖认定不应默认包含完整性；替换样本需有原样本不可用原因
+
+B 公司已验证到的关键事实：
+
+- K.02.1a TE = `241,890.00`
+- K.02.1a 测试涵盖的认定 = `存在/发生, 计量/计价, 权利与义务`
+- K.02.1a 综合风险评估 = `最低`
+- Lead 页 TE = `213,730.00000000003`
+- Lead 页相关认定中，`计价/计量（V/M）= Low`
+
+阶段判断：
+
+- K.02.1a 抽样输出已经**基本能输出结果**。
+- 但仍处于**继续校准中**，还需要更多案例验证 I/H/E/G 等变体，以及继续收紧替换样本和认定范围边界。
+
+本轮 B 公司结果：
+
+- 样本池总体金额一致性：`PASS`
+- TE 一致性：`FAIL`
+- CRA 一致性：`FAIL`
+- 测试涵盖认定不含完整性：`PASS`
+
+已验证：
+
+- `.\.venv\Scripts\pytest.exe tests\rules\test_addition_sampling_output.py -q --basetemp .pytest_tmp_addition_sampling_output2`：`7 passed`
+- `.\.venv\Scripts\pytest.exe tests\rules\test_addition_consistency.py tests\report\test_workbook_pipeline.py -q --basetemp .pytest_tmp_addition_k02_b2`：`5 passed`

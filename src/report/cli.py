@@ -85,6 +85,18 @@ def print_summary(report, output_path: Path) -> None:
             f"sections={present}/6 conf={sec.get('recognition_confidence')} "
             f"| K.01 QC: {rqc.get('overall_severity')} ({rqc.get('issue_count', 0)} findings)"
         )
+    if getattr(report, "addition_sheet_section", None):
+        sec = report.addition_sheet_section
+        preview = (sec or {}).get("consistency_preview") or {}
+        test = (sec or {}).get("addition_test") or {}
+        sample = (sec or {}).get("addition_sample_output") or {}
+        path = (sec or {}).get("addition_execution_path") or {}
+        print(
+            f"K.02: path={path.get('path_kind', 'unknown')!r} "
+            f"test={test.get('source_sheet')!r} sample={sample.get('source_sheet')!r} "
+            f"| modules={len(test.get('module_assessments') or [])}/{len(sample.get('module_assessments') or [])} "
+            f"| samples {preview.get('matched_count', 0)}/{preview.get('selected_count', 0)} matched"
+        )
     if getattr(report, "llm_enrichment", None):
         le = report.llm_enrichment
         if le.error:
