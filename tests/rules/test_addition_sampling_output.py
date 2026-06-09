@@ -1,5 +1,6 @@
 from ingest.addition_test_sheet import (
     AdditionAmountItem,
+    AdditionExecutionPathDataset,
     AdditionParameterItem,
     AdditionSampleOutputDataset,
     AdditionTestSheetDataset,
@@ -8,6 +9,7 @@ from ingest.addition_test_sheet import (
 from ingest.field_mapping import FieldMapping
 from ingest.lead_sheet import CraAssertionRow, LeadBasicInfoField, LeadSheetDataset
 from ingest.records import AssetRecord, FaListDataset
+from rules.addition_runner import run_addition_rules
 from rules.addition_sampling_output import (
     check_addition_sample_pool_purchase_amount_match,
     check_addition_sample_replacement_reason,
@@ -89,6 +91,22 @@ def test_sample_pool_mismatch_fails():
     assert len(issues) == 1
     assert issues[0].severity == Severity.FAIL
     assert issues[0].rule_id == "addition_sample_pool_purchase_amount_match"
+
+
+def test_sampling_rules_are_skipped_when_addition_is_summary_waived():
+    issues = run_addition_rules(
+        None,
+        addition_sample_output=_sample_output(sample_pool="110", te="200"),
+        addition_execution_path=AdditionExecutionPathDataset(
+            path_kind="summary_waived",
+            recognition_confidence=0.82,
+            summary_status="no",
+            summary_waiver_reason="新增购置金额小于SAD。",
+            missing_components=["K.02.1 新增测试"],
+        ),
+    )
+
+    assert issues == []
 
 
 def test_sampling_te_and_chinese_cra_match_lead_english_cra():

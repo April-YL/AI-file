@@ -145,12 +145,38 @@ def _llm_passes() -> int:
     return n if n in (1, 3) else 1
 
 
+_LEAD017_ADDITIONAL_SYSTEM = """
+Additional LEAD-017 instructions:
+1. Do not compare the whole journal-entry net total with Lead guidance adjustments.
+   A balanced Dr/Cr entry may net to zero; that does not mean the PPE impact is zero.
+2. Only direct PPE rows may enter direct_ppe_net_amount and direct_amount_checks.
+   Direct PPE means original value/cost, accumulated depreciation, impairment, NBV,
+   or net PPE. Counterparty accounts such as SG&A/management expense, AP, cash,
+   tax, revenue, or other non-PPE accounts are indirect and must not create direct
+   amount mismatches.
+3. For Dr/Cr two-column layouts, derive signed_amount at row level from the row's
+   account and Dr/Cr columns. Do not use the total net Dr/Cr balance as the PPE amount.
+4. For direct rows, compare signed_amount with the matching guidance_adjustments
+   row for the same PPE account and mapped adjustment column: audit-type adjustments
+   map to audit_adjustment; book/management adjustments map to book_adjustment.
+   If only the sign is reversed but absolute values agree, mark match=true and
+   explain the sign convention in match_reason.
+5. If Dr/Cr direction, sign convention, or account classification is unclear, set
+   ppe_impact=unclear and assessment=unclear; do not create a direct mismatch from
+   uncertain evidence.
+"""
+
+
 def _call_combined_review(config: LlmConfig, payload: dict[str, Any]) -> dict[str, Any] | None:
     user = _USER_COMBINED_TEMPLATE.format(
         payload=json.dumps(payload, ensure_ascii=False, indent=2),
     )
     try:
-        return chat_completion_json(config, system=_SYSTEM_COMBINED, user=user)
+        return chat_completion_json(
+            config,
+            system=_SYSTEM_COMBINED + _LEAD017_ADDITIONAL_SYSTEM,
+            user=user,
+        )
     except LlmClientError:
         return None
 

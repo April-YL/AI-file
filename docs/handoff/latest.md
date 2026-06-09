@@ -507,3 +507,25 @@ B 公司已验证到的关键事实：
 
 - `.\.venv\Scripts\pytest.exe tests\rules\test_addition_sampling_output.py -q --basetemp .pytest_tmp_addition_sampling_output2`：`7 passed`
 - `.\.venv\Scripts\pytest.exe tests\rules\test_addition_consistency.py tests\report\test_workbook_pipeline.py -q --basetemp .pytest_tmp_addition_k02_b2`：`5 passed`
+## 2026-06-09 K.02 新增测试 LLM 语义复核接入
+
+本轮把 K.02.1 / K.02.1a 的 LLM 提示词补成了“只管语义充分性、不抢规则判断”的形态，并接入工作簿流水线。
+
+已完成：
+
+- 新增 `src/llm/addition_review.py`，定义 K.02.1 新增测试的 LLM 语义复核提示词与 payload。
+- 提示词明确约束：
+  - 不重新判断金额、样本、TE、CRA；
+  - 不用规则已发现的差异去覆盖结论；
+  - 只判断拒绝执行理由、样本选择理由、异常说明、特殊新增来源、跨表叙述是否充分。
+- `src/report/pipeline.py` 已接入新增测试 LLM 复核，仅在 `config.enabled=true` 时调用。
+- 新增 `tests/llm/test_addition_review.py` 和流水线集成测试，验证 mock LLM 结果可进入报告。
+
+验证：
+
+- `.\.venv\Scripts\pytest.exe tests\llm\test_addition_review.py tests\report\test_workbook_pipeline.py -q --basetemp .pytest_tmp_addition_llm_pipeline`：`10 passed`
+
+当前结论：
+
+- 新增测试 LLM 已进入 pipeline，但仍定位为“语义复核辅助”，不替代规则层的金额与样本判定。
+- 后续如果要继续扩展，可优先补充 K.02.1a 的样本选择、拒绝执行理由与跨表一致性案例库回归。

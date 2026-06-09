@@ -67,6 +67,8 @@ def run_addition_rules(
             execution_path=addition_execution_path,
         )
     )
+    if _is_addition_sampling_skipped(addition_execution_path):
+        return issues
     issues.extend(
         check_addition_sample_pool_purchase_amount_match(addition_list, addition_sample_output)
     )
@@ -74,3 +76,11 @@ def run_addition_rules(
     issues.extend(check_addition_sampling_assertions_scope(addition_sample_output))
     issues.extend(check_addition_sample_replacement_reason(addition_test))
     return issues
+
+
+def _is_addition_sampling_skipped(
+    addition_execution_path: AdditionExecutionPathDataset | None,
+) -> bool:
+    if addition_execution_path is None:
+        return False
+    return addition_execution_path.path_kind in {"summary_waived", "test_sheet_waiver_note"}

@@ -25,7 +25,7 @@ from report.export_annotated_workbook import (
 from report.export_json import export_report_json
 from report.export_review_html import export_review_html
 from report.pipeline import run_input_qc
-from report.procedure_labels import FINDING_UI_GROUPS
+from report.procedure_labels import group_findings_by_procedure
 from rules.delivery_completion import DeliveryCompletionContext
 
 st.set_page_config(
@@ -180,26 +180,6 @@ def _finding_issues(data: dict) -> list[dict]:
 
 def _finding_count(data: dict) -> int:
     return len(_finding_issues(data))
-
-
-def _group_issues(issues: list[dict]) -> list[tuple[str, str, list[dict]]]:
-    buckets: dict[str, list[dict]] = {code: [] for code, _ in FINDING_UI_GROUPS}
-    other: list[dict] = []
-    known = {code for code, _ in FINDING_UI_GROUPS}
-    for issue in issues:
-        if issue.get("severity") == "PASS":
-            continue
-        pc = issue.get("procedure_code") or ""
-        if pc in known:
-            buckets[pc].append(issue)
-        else:
-            other.append(issue)
-    out: list[tuple[str, str, list[dict]]] = [
-        (code, label, buckets[code]) for code, label in FINDING_UI_GROUPS if buckets[code]
-    ]
-    if other:
-        out.append(("_other", "其他", other))
-    return out
 
 
 def _worst_severity(items: list[dict]) -> str:
@@ -366,7 +346,7 @@ def _render_runtime_timings(data: dict) -> None:
 
 def _render_procedure_summary(data: dict) -> None:
     st.subheader("程序分组概览")
-    groups = _group_issues(data.get("issues", []))
+    groups = group_findings_by_procedure(data.get("issues", []))
     if not groups:
         st.success("所有程序暂无 FAIL / WARN / NEED_REVIEW findings。")
         return
@@ -449,13 +429,21 @@ def _render_manual_review(data: dict) -> None:
 
 
 def _render_findings_grouped(data: dict) -> None:
-    groups = _group_issues(data.get("issues", []))
+    groups = group_findings_by_procedure(data.get("issues", []))
     if not groups:
         st.success("未发现 FAIL / WARN / NEED_REVIEW 级 findings。")
         return
     for code, label, items in groups:
         sev = _worst_severity(items)
-        default_expanded = code in ("SUMMARY", "K.00", "K.01", "_other")
+        default_expanded = code in (
+            "SUMMARY",
+            "K.00",
+            "K.01",
+            "K.02.1",
+            "K.02.2",
+            "K.03.1",
+            "_other",
+        )
         title = f"{label} · {sev} · {len(items)} 条"
         with st.expander(title, expanded=default_expanded):
             st.dataframe(

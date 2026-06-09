@@ -1077,26 +1077,41 @@ def _extract_tested_samples(rows: list[tuple[Any, ...]]) -> list[AdditionTestedS
     ]
     out: list[AdditionTestedSampleRow] = []
     for r_idx, row in _iter_table_rows(rows, header_row + 1, mapping):
-        out.append(
-            AdditionTestedSampleRow(
-                source_row=r_idx,
-                sample_type=_value_at(row, mapping.get("sample_type")),
-                asset_id=_value_at(row, mapping.get("asset_id")),
-                asset_name=_value_at(row, mapping.get("asset_name")),
-                original_value=_value_at(row, mapping.get("original_value")),
-                evidence_amount=_value_at(row, mapping.get("evidence_amount")),
-                evidence_description=_value_at(row, mapping.get("evidence_description")),
-                amount_difference=_value_at(row, mapping.get("amount_difference")),
-                attribute_results=[_value_at(row, col) for col in attribute_cols],
-                asset_category=_value_at(row, mapping.get("asset_category")),
-                gl_account_code=_value_at(row, mapping.get("gl_account_code")),
-                capitalized_date=_value_at(row, mapping.get("capitalized_date")),
-                useful_life_months=_value_at(row, mapping.get("useful_life_months")),
-                salvage_rate=_value_at(row, mapping.get("salvage_rate")),
-                depreciation_method=_value_at(row, mapping.get("depreciation_method")),
-            )
+        sample = AdditionTestedSampleRow(
+            source_row=r_idx,
+            sample_type=_value_at(row, mapping.get("sample_type")),
+            asset_id=_value_at(row, mapping.get("asset_id")),
+            asset_name=_value_at(row, mapping.get("asset_name")),
+            original_value=_value_at(row, mapping.get("original_value")),
+            evidence_amount=_value_at(row, mapping.get("evidence_amount")),
+            evidence_description=_value_at(row, mapping.get("evidence_description")),
+            amount_difference=_value_at(row, mapping.get("amount_difference")),
+            attribute_results=[_value_at(row, col) for col in attribute_cols],
+            asset_category=_value_at(row, mapping.get("asset_category")),
+            gl_account_code=_value_at(row, mapping.get("gl_account_code")),
+            capitalized_date=_value_at(row, mapping.get("capitalized_date")),
+            useful_life_months=_value_at(row, mapping.get("useful_life_months")),
+            salvage_rate=_value_at(row, mapping.get("salvage_rate")),
+            depreciation_method=_value_at(row, mapping.get("depreciation_method")),
         )
+        if not _is_valid_tested_sample_row(sample):
+            continue
+        out.append(sample)
     return out
+
+
+def _is_valid_tested_sample_row(row: AdditionTestedSampleRow) -> bool:
+    if not (row.asset_id or row.asset_name or row.original_value):
+        return False
+    if row.asset_id and row.asset_name and row.original_value:
+        return True
+    if row.original_value and (row.asset_id or row.asset_name):
+        return True
+    if row.evidence_amount and (row.asset_id or row.asset_name or row.original_value):
+        return True
+    if row.attribute_results and any(v is not None for v in row.attribute_results):
+        return True
+    return False
 
 
 def _find_table_header(

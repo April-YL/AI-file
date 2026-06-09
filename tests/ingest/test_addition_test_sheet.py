@@ -161,10 +161,12 @@ def test_addition_execution_path_complete(tmp_path: Path):
     sample_modules = {m.module_key: m for m in ctx.addition_sample_output.module_assessments}
     assert set(sample_modules) == {
         "source_data_summary",
+        "sampling_prerequisites",
         "sampling_strategy",
         "accounting_reconciliation",
         "selected_samples",
     }
+    assert sample_modules["sampling_prerequisites"].status in {"missing", "partial"}
     assert sample_modules["source_data_summary"].status == "recognized"
     assert sample_modules["sampling_strategy"].status == "recognized"
     assert sample_modules["accounting_reconciliation"].status == "recognized"
@@ -191,6 +193,22 @@ def test_addition_test_ignores_right_side_guidance_amount_labels(tmp_path: Path)
     assert ctx.addition_test is not None
     assert ctx.addition_test.amounts["difference_amount"].amount == "0"
     assert ctx.addition_test.amounts["remaining_population_amount"].amount == "800"
+
+
+def test_addition_test_ignores_legend_and_conclusion_rows_after_samples(tmp_path: Path):
+    path = tmp_path / "addition_sample_rows.xlsx"
+    wb = _base_workbook(path)
+    ws = wb["K.02.1 新增测试"]
+    ws.append(["标记图例: 记录已识别的异常情况以及如何解决这些异常情况的详细信息。"])
+    ws.append(["我们根据固定资产新增测试属性检查了样本对应的支持性证据，无异常情况。"])
+    wb.save(path)
+    wb.close()
+
+    ctx = load_workbook_ingest(path)
+
+    assert ctx.addition_test is not None
+    assert len(ctx.addition_test.tested_samples) == 1
+    assert ctx.addition_test.tested_samples[0].asset_id == "FA-TEST-001"
 
 
 def test_addition_sample_output_ignores_right_side_guidance_strategy(tmp_path: Path):

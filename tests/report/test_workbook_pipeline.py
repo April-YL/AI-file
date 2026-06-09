@@ -3,7 +3,9 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-from report.pipeline import run_workbook_qc_from_path
+from ingest.addition_test_sheet import AdditionExecutionPathDataset, AdditionTestSheetDataset
+from ingest.workbook_context import WorkbookQcContext
+from report.pipeline import run_workbook_qc, run_workbook_qc_from_path
 from rules.delivery_completion import DeliveryCompletionContext
 from rules.models import Severity
 
@@ -95,3 +97,61 @@ def test_workbook_qc_b_company_includes_addition_sheet_section():
     assert preview["key_item_tested_amount"] == "380000"
     assert "addition_sample_match" in report.rule_ids
     assert not [issue for issue in report.issues if issue.rule_id == "addition_sample_match"]
+
+
+def test_workbook_qc_includes_addition_llm_issue(monkeypatch):
+    monkeypatch.setenv("FA_QC_LLM_API_KEY", "sk-test")
+    monkeypatch.setenv("FA_QC_LLM_ENABLED", "true")
+
+    from rules.models import QcIssue
+
+    ctx = WorkbookQcContext(
+        source_file="addition_llm_demo.xlsx",
+        fa_list=None,
+        summary=None,
+        lead=None,
+        rollforward=None,
+        addition_list=None,
+        addition_test=AdditionTestSheetDataset(
+            source_file="addition_llm_demo.xlsx",
+            source_sheet="K.02.1 新增测试",
+            waiver_note_text="No narrative support provided.",
+            waiver_note_rows=[12],
+        ),
+        addition_sample_output=None,
+        addition_execution_path=AdditionExecutionPathDataset(
+            path_kind="test_sheet_waiver_note",
+            recognition_confidence=0.9,
+            summary_status="waived",
+            summary_waiver_reason="below SAD",
+            summary_source_row=8,
+            addition_test_sheet="K.02.1 新增测试",
+            test_sheet_waiver_note="No narrative support provided.",
+            test_sheet_waiver_rows=[12],
+        ),
+        disposal_list=None,
+        structure=None,
+        reconciliations=[],
+    )
+
+    mock_issue = QcIssue(
+        asset_id=None,
+        rule_id="addition_semantic_review",
+        field="waiver_reason",
+        severity=Severity.WARN,
+        message="mock addition semantic issue",
+        suggestion="document waiver rationale",
+        procedure_code="K.02.1",
+        source_sheet="K.02.1 新增测试",
+        source_row=12,
+    )
+
+    monkeypatch.setattr("llm.addition_review.build_addition_llm_issues", lambda *args, **kwargs: [mock_issue])
+    monkeypatch.setattr(
+        "report.pipeline.enrich_report_with_llm",
+        lambda report, config, summary=None, workbook=None: report,
+    )
+    report = run_workbook_qc(ctx, llm=True)
+
+    assert any(i.rule_id == "addition_semantic_review" for i in report.issues)
+    assert "addition_semantic" in {d["key"] for d in report.runtime_timings["llm_details"]}

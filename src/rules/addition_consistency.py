@@ -316,6 +316,11 @@ def _is_replacement_sample(sample_type: str | None) -> bool:
 def _has_exception_note(addition_test: AdditionTestSheetDataset | None) -> bool:
     if addition_test is None:
         return False
+    if any(
+        assessment.module_key == "exception_summary" and assessment.status == "recognized"
+        for assessment in addition_test.module_assessments
+    ):
+        return True
     if addition_test.waiver_note_text:
         return True
     for sample in addition_test.tested_samples:

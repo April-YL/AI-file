@@ -280,6 +280,7 @@ def run_workbook_qc(
         if not source_sheet:
             source_sheet = ctx.lead.source_sheet
 
+    addition_llm_issues = []
     if ctx.addition_list:
         addition_issues = attach_rule_metadata(
             run_addition_rules(
@@ -291,6 +292,33 @@ def run_workbook_qc(
                 addition_execution_path=ctx.addition_execution_path,
             )
         )
+        if config.enabled:
+            llm_t0 = perf_counter()
+            from llm.addition_review import (
+                RULE_ID as ADDITION_LLM_RULE,
+                build_addition_llm_issues,
+            )
+
+            addition_llm_issues = attach_rule_metadata(
+                build_addition_llm_issues(
+                    config,
+                    addition_list=ctx.addition_list,
+                    addition_test=ctx.addition_test,
+                    addition_sample_output=ctx.addition_sample_output,
+                    addition_execution_path=ctx.addition_execution_path,
+                    prior_issues=addition_issues,
+                )
+            )
+            addition_issues.extend(addition_llm_issues)
+            if addition_llm_issues and ADDITION_LLM_RULE not in rule_ids:
+                rule_ids.append(ADDITION_LLM_RULE)
+            elapsed = perf_counter() - llm_t0
+            llm_seconds += elapsed
+            record_llm_detail(
+                "addition_semantic",
+                "K.02.1 addition semantic review",
+                elapsed,
+            )
         issues.extend(addition_issues)
         rule_ids.extend(list(ADDITION_RULE_IDS))
         addition_sheet_section = build_addition_sheet_section(
@@ -302,11 +330,42 @@ def run_workbook_qc(
         if not source_sheet:
             source_sheet = ctx.addition_list.source_sheet
     else:
+        addition_issues = []
+        if config.enabled and (
+            ctx.addition_test or ctx.addition_sample_output or ctx.addition_execution_path
+        ):
+            llm_t0 = perf_counter()
+            from llm.addition_review import (
+                RULE_ID as ADDITION_LLM_RULE,
+                build_addition_llm_issues,
+            )
+
+            addition_llm_issues = attach_rule_metadata(
+                build_addition_llm_issues(
+                    config,
+                    addition_list=None,
+                    addition_test=ctx.addition_test,
+                    addition_sample_output=ctx.addition_sample_output,
+                    addition_execution_path=ctx.addition_execution_path,
+                    prior_issues=[],
+                )
+            )
+            addition_issues.extend(addition_llm_issues)
+            issues.extend(addition_llm_issues)
+            if addition_llm_issues and ADDITION_LLM_RULE not in rule_ids:
+                rule_ids.append(ADDITION_LLM_RULE)
+            elapsed = perf_counter() - llm_t0
+            llm_seconds += elapsed
+            record_llm_detail(
+                "addition_semantic",
+                "K.02.1 addition semantic review",
+                elapsed,
+            )
         addition_sheet_section = build_addition_sheet_section(
             ctx.addition_test,
             ctx.addition_sample_output,
             ctx.addition_execution_path,
-            [],
+            addition_issues,
         )
 
     rollforward_sheet_section = None

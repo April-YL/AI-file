@@ -19,6 +19,7 @@ from ingest.lead_sheet import (
 from ingest.lead_sheet_blocks import LeadBlock, LeadBlockKind
 from llm.config import LlmConfig
 from llm.lead_adjustment_review import (
+    _LEAD017_ADDITIONAL_SYSTEM,
     RULE_LAYOUT,
     RULE_SEMANTIC,
     build_adjustment_review_payload,
@@ -131,6 +132,15 @@ def test_build_adjustment_review_payload_includes_grid_and_policy():
     assert payload["adjustment_grid"] == [["调整类型", "金额"], ["审计调整", "100"]]
     assert len(payload["guidance_adjustments"]) == 1
     assert "原值" in payload["ppe_direct_aliases"]
+
+
+def test_lead017_prompt_prevents_whole_journal_net_comparison():
+    prompt = _LEAD017_ADDITIONAL_SYSTEM
+    compact = " ".join(prompt.split())
+    assert "Do not compare the whole journal-entry net total" in prompt
+    assert "Only direct PPE rows may enter direct_ppe_net_amount" in prompt
+    assert "Counterparty accounts" in prompt
+    assert "do not create a direct mismatch from uncertain evidence" in compact
 
 
 def test_is_direct_ppe_account():

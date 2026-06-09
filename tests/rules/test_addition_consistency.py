@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 
 from ingest.addition_test_sheet import (
+    AdditionTestSheetDataset,
+    ModuleAssessment,
     load_addition_sample_output_from_workbook,
     load_addition_test_from_workbook,
 )
@@ -49,3 +51,29 @@ def test_b_company_addition_selected_sample_matches_tested_sample():
     assert preview.sample_method == "随机抽样 (Random)"
 
     assert check_addition_sample_match(addition_test, sample_output) == []
+
+
+def test_exception_summary_module_counts_as_note():
+    addition_test = AdditionTestSheetDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.1 新增测试",
+        tested_samples=[],
+        module_assessments=[
+            ModuleAssessment(
+                module_key="exception_summary",
+                module_name="异常说明与结论",
+                status="recognized",
+                confidence=0.9,
+                evidence=["无异常情况"],
+            )
+        ],
+    )
+    sample_output = load_addition_sample_output_from_workbook(
+        CASE_B,
+        sheet_name="K.02.1a 新增选样输出",
+        max_rows=120,
+    )
+
+    issues = check_addition_sample_match(addition_test, sample_output)
+
+    assert not [issue for issue in issues if issue.field == "exception_summary"]
