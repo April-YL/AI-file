@@ -8,9 +8,14 @@ from ingest.addition_test_sheet import (
     AdditionSampleOutputDataset,
     AdditionTestSheetDataset,
 )
+from ingest.disposal_test_sheet import (
+    DisposalExecutionPathDataset,
+    DisposalSampleOutputDataset,
+    DisposalTestSheetDataset,
+)
 from ingest.lead_sheet import LeadSheetDataset
 from ingest.reconciliation import ReconciliationCheck
-from ingest.records import FaListDataset
+from ingest.records import DisposalListSummary, FaListDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset
 from ingest.summary_sheet import SummarySheetDataset
 from ingest.workbook_ingest import load_workbook_ingest
@@ -31,6 +36,10 @@ class WorkbookQcContext:
     addition_sample_output: AdditionSampleOutputDataset | None = None
     addition_execution_path: AdditionExecutionPathDataset | None = None
     disposal_list: FaListDataset | None = None
+    disposal_list_summary: DisposalListSummary | None = None
+    disposal_test: DisposalTestSheetDataset | None = None
+    disposal_sample_output: DisposalSampleOutputDataset | None = None
+    disposal_execution_path: DisposalExecutionPathDataset | None = None
     structure: WorkbookStructure | None = None
     reconciliations: list[ReconciliationCheck] = field(default_factory=list)
 
@@ -68,6 +77,10 @@ def load_workbook_context(
         addition_sample_output=ing.addition_sample_output,
         addition_execution_path=ing.addition_execution_path,
         disposal_list=ing.disposal_list,
+        disposal_list_summary=ing.disposal_list_summary,
+        disposal_test=ing.disposal_test,
+        disposal_sample_output=ing.disposal_sample_output,
+        disposal_execution_path=ing.disposal_execution_path,
         structure=ing.structure,
         reconciliations=list(ing.reconciliations),
     )

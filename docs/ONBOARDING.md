@@ -37,6 +37,34 @@ PowerShell 一次查看前四份：
 Get-Content AGENTS.md, docs\handoff\latest.md, docs\progress.md, docs\PROJECT_STRUCTURE.md
 ```
 
+### 2.1 资料库固定入口
+
+做固定资产底稿开发时，先按这个顺序读资料库，避免每次重新搜索：
+
+1. `固定资产质检agent/资料库/K1 SWP 固定资产 202YMMDD XYZ公司.xlsx`：标准底稿模板
+2. `固定资产质检agent/资料库/FY26_SOP K1 SWP 固定资产.xlsx`：标准包 + SOP 说明
+3. `固定资产质检agent/资料库/固定资产程序执行方法指引.pdf`：程序执行方法
+4. `固定资产质检agent/资料库/K1 check list.xlsx`：质检 checklist
+5. `docs/audit-workflow.md`：把上述资料整理成可读的流程索引
+
+K.02 新增/处置开发时，优先看 `docs/audit-workflow.md` 和 `docs/planning/k02-disposal-qc-matrix.md`。
+
+### 2.2 通用 Excel 读取模板
+
+遇到任何本地 Excel 文件，先按这套方式读，避免中文路径和命令行编码来回试错：
+
+```powershell
+$p = (Get-ChildItem -LiteralPath 'E:\AI file\固定资产质检agent\资料库' | Where-Object Name -eq 'K1 SWP 固定资产 202YMMDD XYZ公司.xlsx').FullName
+& '.\.venv\Scripts\python.exe' .\scripts\inspect_workbook.py --path $p
+```
+
+原则很简单：
+
+1. 先拿真实全路径，再传给脚本。
+2. 中文文件名不要直接塞进很长的 `python -c` 字符串。
+3. 先只读看 sheet 名、维度、合并单元格和关键锚点，再决定要不要继续深入。
+4. 资料库、案例库、导出结果、测试 fixture 的 Excel 都按同一套方法读。
+
 ## 3. 快速看仓库状态
 
 ```powershell

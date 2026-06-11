@@ -43,9 +43,12 @@ FIELD_SYNONYMS: dict[str, list[str]] = {
         "净值", "账面净值", "资产净值", "账面价值", "2025年末净值", "处置净值",
     ],
     "addition_method": ["新增方式", "增加方式", "卡片来源", "取得方式", "资产来源", "新增类型", "来源"],
-    "disposal_date": ["处置日期", "报废日期", "减少日期", "业务日期"],
+    "disposal_date": [
+        "处置日期", "报废日期", "减少日期", "业务日期", "凭证日期", "过账日期",
+    ],
     "disposal_method": [
         "处置/报废", "减少方式", "处置方式", "报废方式", "处置情况", "变动方式",
+        "处置类别", "减少类别", "处置类型", "报废类型", "减少类型",
     ],
     "current_depreciation": [
         "本期计提折旧", "本期计提", "折旧费用", "本年折旧",
@@ -107,6 +110,8 @@ CONTENT_SIGNATURES: dict[SheetKind, set[str]] = {
         "disposal_date", "disposal_method", "net_value",
         "original_value", "accumulated_depreciation",
     },
+    SheetKind.DISPOSAL_TEST: set(),
+    SheetKind.DISPOSAL_SAMPLE_OUTPUT: set(),
     SheetKind.DEPRECIATION_TOD: {
         "current_depreciation", "original_value", "useful_life_months",
         "salvage_rate", "asset_id",

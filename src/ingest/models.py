@@ -29,6 +29,8 @@ class SheetKind(str, Enum):
     ADDITION_TEST = "addition_test"
     ADDITION_SAMPLE_OUTPUT = "addition_sample_output"
     DISPOSAL_LIST = "disposal_list"
+    DISPOSAL_TEST = "disposal_test"
+    DISPOSAL_SAMPLE_OUTPUT = "disposal_sample_output"
     DEPRECIATION_TOD = "depreciation_tod"
     DEPRECIATION_TOD_SAMPLE = "depreciation_tod_sample"
     LEAD = "lead"
@@ -56,6 +58,8 @@ class AssetRecord:
     impairment_provision: str | None = None
     net_value: str | None = None
     addition_method: str | None = None
+    disposal_date: str | None = None
+    disposal_method: str | None = None
 
     def identity(self) -> str:
         if self.asset_id and str(self.asset_id).strip():

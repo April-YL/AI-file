@@ -2,6 +2,24 @@
 
 > 每次收工前更新本文。新成员接手先读 `docs/ONBOARDING.md`，再读 `AGENTS.md` 和本文。
 
+## 固定资料入口
+
+以后查标准底稿、SOP 和程序执行方法，不再靠全仓搜索，统一先看这里：
+
+1. `固定资产质检agent/资料库/K1 SWP 固定资产 202YMMDD XYZ公司.xlsx`：标准底稿模板
+2. `固定资产质检agent/资料库/FY26_SOP K1 SWP 固定资产.xlsx`：带 SOP 说明的标准包
+3. `固定资产质检agent/资料库/固定资产程序执行方法指引.pdf`：程序执行方法
+4. `固定资产质检agent/资料库/K1 check list.xlsx`：质检 checklist
+5. `docs/audit-workflow.md`：把上面几份资料整理成了固定资产的流程索引
+
+建议阅读顺序：
+
+1. `docs/audit-workflow.md`
+2. `docs/qc-checklist.md`
+3. `docs/workpaper-fields.md`
+4. 标准底稿模板和 SOP 原文件
+5. 需要时再看案例库文件
+
 ## 项目终态（对齐）
 
 固定资产质检 Agent 的完整目标是：

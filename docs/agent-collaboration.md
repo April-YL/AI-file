@@ -18,6 +18,24 @@
 4. **默认不主动跑完整测试**：代码写好后，Agent 只说明建议验收命令，由用户自行测试；只有用户明确要求，或测试非常短且对确认修改必要时，才运行必要测试。
 5. **禁止长时间盲目试错**：不允许连续反复改代码、跑命令、看输出超过约 5 分钟；如果没有新证据，应先停下来重新评估方法。
 
+## 本地 Excel 读取规范
+
+读取任何本地 Excel 文件时，默认按固定模板执行，减少中文路径、编码和引号问题：
+
+1. **先取真实全路径**：用 PowerShell `Get-ChildItem ... | Select-Object -Expand FullName`，不要手写猜目录。
+2. **路径走参数**：让 Python / Node 通过参数接收路径，不把中文文件名直接塞进很长的命令字符串。
+3. **优先小脚本**：重复读取/解析逻辑尽量放在固定脚本里，不临时拼一条很长的 `-c` 命令。
+4. **先只读诊断**：先看 sheet 名、维度、合并单元格、关键表头和锚点，再决定是否修改代码。
+
+推荐模板：
+
+```powershell
+$p = (Get-ChildItem -LiteralPath 'E:\AI file\固定资产质检agent\资料库' | Where-Object Name -eq 'K1 SWP 固定资产 202YMMDD XYZ公司.xlsx').FullName
+& '.\.venv\Scripts\python.exe' .\scripts\inspect_workbook.py --path $p
+```
+
+如果当前没有现成脚本，也应当把路径作为 `argv` 传给临时 Python，而不是把中文路径写进长 `-c` 字符串里。
+
 ## 沟通语言
 
 项目使用者以审计专业人员为主，可能只有少量 IT 基础。Agent 回复时应默认使用通俗、业务可判断的表达：

@@ -14,10 +14,23 @@ from ingest.addition_test_sheet import (
     load_addition_sample_output_from_workbook,
     load_addition_test_from_workbook,
 )
+from ingest.disposal_test_sheet import (
+    DisposalExecutionPathDataset,
+    DisposalSampleOutputDataset,
+    DisposalTestSheetDataset,
+    build_disposal_execution_path,
+    load_disposal_sample_output_from_workbook,
+    load_disposal_test_from_workbook,
+)
 from ingest.lead_sheet import LeadSheetDataset, load_lead_from_workbook
 from ingest.models import SheetKind
 from ingest.reconciliation import ReconciliationCheck, run_workbook_reconciliations
-from ingest.records import FaListDataset, load_fa_list_from_workbook
+from ingest.records import (
+    DisposalListSummary,
+    FaListDataset,
+    build_disposal_list_summary,
+    load_fa_list_from_workbook,
+)
 from ingest.rollforward_sheet import RollforwardSheetDataset, load_rollforward_from_workbook
 from ingest.sheet_loader import load_all_sheets_of_kind, load_asset_sheet_from_workbook
 from ingest.summary_sheet import SummarySheetDataset, load_summary_from_workbook
@@ -39,7 +52,11 @@ class WorkbookIngestContext:
     addition_sample_output: AdditionSampleOutputDataset | None = None
     addition_execution_path: AdditionExecutionPathDataset | None = None
     disposal_list: FaListDataset | None = None
+    disposal_list_summary: DisposalListSummary | None = None
     disposal_lists: list[FaListDataset] = field(default_factory=list)
+    disposal_test: DisposalTestSheetDataset | None = None
+    disposal_sample_output: DisposalSampleOutputDataset | None = None
+    disposal_execution_path: DisposalExecutionPathDataset | None = None
     summary: SummarySheetDataset | None = None
     lead: LeadSheetDataset | None = None
     reconciliations: list[ReconciliationCheck] = field(default_factory=list)
@@ -62,6 +79,16 @@ class WorkbookIngestContext:
                 else None
             ),
             "disposal_list": _dataset_summary(self.disposal_list),
+            "disposal_list_summary": _disposal_list_summary(self.disposal_list_summary),
+            "disposal_test": _disposal_test_summary(self.disposal_test),
+            "disposal_sample_output": _disposal_sample_output_summary(
+                self.disposal_sample_output
+            ),
+            "disposal_execution_path": (
+                self.disposal_execution_path.to_dict()
+                if self.disposal_execution_path
+                else None
+            ),
             "summary": _summary_summary(self.summary),
             "lead": _lead_summary(self.lead),
             "reconciliations": [c.to_dict() for c in self.reconciliations],
@@ -76,6 +103,12 @@ def _dataset_summary(ds: FaListDataset | None) -> dict[str, Any] | None:
         "record_count": len(ds.records),
         "mapped_fields": [m.standard_field for m in ds.mapped_fields],
     }
+
+
+def _disposal_list_summary(ds: DisposalListSummary | None) -> dict[str, Any] | None:
+    if ds is None or not ds.source_sheet:
+        return None
+    return ds.to_dict()
 
 
 def _addition_test_summary(
@@ -105,6 +138,37 @@ def _addition_sample_output_summary(
         "amounts": {k: v.to_dict() for k, v in ds.amounts.items()},
         "selected_samples": [row.to_dict() for row in ds.selected_samples],
         "module_assessments": [m.to_dict() for m in ds.module_assessments],
+        "recognition_confidence": ds.recognition_confidence,
+        "notes": ds.notes,
+    }
+
+
+def _disposal_test_summary(
+    ds: DisposalTestSheetDataset | None,
+) -> dict[str, Any] | None:
+    if ds is None or not ds.source_sheet:
+        return None
+    return {
+        "source_sheet": ds.source_sheet,
+        "waiver_note_text": ds.waiver_note_text,
+        "waiver_note_rows": ds.waiver_note_rows,
+        "amounts": {k: v.to_dict() for k, v in ds.amounts.items()},
+        "tested_samples": [row.to_dict() for row in ds.tested_samples],
+        "recognition_confidence": ds.recognition_confidence,
+        "notes": ds.notes,
+    }
+
+
+def _disposal_sample_output_summary(
+    ds: DisposalSampleOutputDataset | None,
+) -> dict[str, Any] | None:
+    if ds is None or not ds.source_sheet:
+        return None
+    return {
+        "source_sheet": ds.source_sheet,
+        "parameters": {k: v.to_dict() for k, v in ds.parameters.items()},
+        "amounts": {k: v.to_dict() for k, v in ds.amounts.items()},
+        "selected_samples": [row.to_dict() for row in ds.selected_samples],
         "recognition_confidence": ds.recognition_confidence,
         "notes": ds.notes,
     }
@@ -247,6 +311,12 @@ def load_workbook_ingest(
     if not disposal_list.records and not disposal_list.mapped_fields:
         disposal_list = None
     disposal_lists = load_all_sheets_of_kind(path, SheetKind.DISPOSAL_LIST, max_rows=max_rows)
+    disposal_list_summary = build_disposal_list_summary(disposal_list)
+    disposal_test = load_disposal_test_from_workbook(path, max_rows=max_rows)
+    disposal_sample_output = load_disposal_sample_output_from_workbook(
+        path,
+        max_rows=max_rows,
+    )
 
     summary = load_summary_from_workbook(path, sheet_name=summary_sheet)
     if not summary.programs and not summary.header_row:
@@ -274,6 +344,12 @@ def load_workbook_ingest(
         addition_test=addition_test,
         addition_sample_output=addition_sample_output,
     )
+    disposal_execution_path = build_disposal_execution_path(
+        summary=summary,
+        disposal_list=disposal_list,
+        disposal_test=disposal_test,
+        disposal_sample_output=disposal_sample_output,
+    )
 
     return WorkbookIngestContext(
         source_file=str(path),
@@ -287,7 +363,11 @@ def load_workbook_ingest(
         addition_sample_output=addition_sample_output,
         addition_execution_path=addition_execution_path,
         disposal_list=disposal_list,
+        disposal_list_summary=disposal_list_summary,
         disposal_lists=disposal_lists,
+        disposal_test=disposal_test,
+        disposal_sample_output=disposal_sample_output,
+        disposal_execution_path=disposal_execution_path,
         summary=summary,
         lead=lead,
         reconciliations=reconciliations,

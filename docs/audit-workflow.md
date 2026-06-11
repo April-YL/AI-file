@@ -2,6 +2,8 @@
 
 本文沉淀资料库中固定资产标准底稿、SOP 和程序执行方法的核心流程，供固定资产质检 Agent 在设计规则、提示用户补充资料、生成报告时引用。
 
+读取资料库 Excel 时，统一按 `AGENTS.md` / `docs/agent-collaboration.md` 的通用 Excel 读取规范执行：先取真实 `FullName`，再把路径作为参数传给脚本，避免中文路径和长 `python -c` 字符串反复试错。
+
 资料来源：
 
 - `固定资产质检agent/资料库/FY26_SOP K1 SWP 固定资产.xlsx`
