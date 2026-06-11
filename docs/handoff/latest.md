@@ -547,3 +547,60 @@ B 公司已验证到的关键事实：
 
 - 新增测试 LLM 已进入 pipeline，但仍定位为“语义复核辅助”，不替代规则层的金额与样本判定。
 - 后续如果要继续扩展，可优先补充 K.02.1a 的样本选择、拒绝执行理由与跨表一致性案例库回归。
+
+## 2026-06-11 K.02.2 处置测试案例诊断：J / G
+
+本轮按“先案例诊断，再补规则”的顺序，只读检查了两个处置测试案例：
+
+- `K1 固定资产 20251231 J有限公司.xlsx`
+- `K1 SWP 固定资产 20251231 G科技.xlsx`
+
+### 诊断结论
+
+J 公司适合作为“完整执行处置测试”的正向案例：
+
+- 汇总页显示 `处置清单`、`K.02.2 处置测试` 均执行，且存在 `K.02.2a 处置选样输出`。
+- 处置清单可读 42 条明细，处置净值合计 `2,044,999.37`，全部归入出售/报废口径。
+- `K.02.2 处置测试` 可读到处置/报废总金额 `2,044,999.37`、Breakdown/K.01 金额 `2,044,999.37`、差异 `0`，并可读到 1 条测试样本。
+- `K.02.2a 处置选样输出` 可读到 TE `1,961,000.00`、CRA `最低`、样本池总体金额 `2,044,999.37`，并读到 1 条代表性样本和 1 条替换样本。
+- 规则机会点：选样输出中资产 `10300002409` 为“代表性样本”，但 K.02.2 实测页同一资产写为“关键项（key item）”；同时 K.02.2a 关键项数量为 0。应补充处置样本一致性规则，先以 `NEED_REVIEW` 提示样本分类不一致。
+
+G 科技适合作为“有处置清单但拒绝执行 K.02.2 详细测试”的案例：
+
+- 汇总页显示 `处置清单` 执行，`K.02.2 处置测试` 不执行；不执行理由为“实际处置金额小于TT，不进行本次测试”。
+- 工作簿没有 `K.02.2` / `K.02.2a` sheet，这与汇总页拒绝执行路径基本一致，不应误报程序包缺失。
+- 处置清单可读 10 条明细，总净值 `757,611.35`；其中出售/报废净值仅 `486.75`，其余 `757,124.60` 为“转入xxxxx”类其他减少。
+- 规则口径：处置测试总体应优先使用“出售/报废净值”，不能用处置清单总净值机械判断是否应执行 K.02.2。
+
+### 本轮待修复
+
+1. 读取稳定性：整本 `ingest` / 完整规则读取在 G 科技上偏慢，应跳过 `DS_INTERNAL_*` 等内部 sheet，并减少重复全量扫描。
+2. 处置样本一致性：补充 K.02.2a 已选样本与 K.02.2 实测样本之间的资产编号、净值、样本类型一致性检查。
+3. 处置执行路径：G 科技这类“汇总页明确不执行 K.02.2，且理由为实际处置金额小于 TT”的情况，不应触发程序包缺失提示。
+
+## 2026-06-11 LLM ingest review 项目级识别层接入
+
+本轮把 LLM 从“报告摘要/单点语义复核”继续前移到 **ingest 识别层**，定位为“读取结果复核员”：帮助发现 sheet 漏读、错分、字段/锚点可疑、Notes 归属风险；不计算金额，不改变 `rules` 的 `PASS/WARN/FAIL/NEED_REVIEW`。
+
+已完成：
+
+- `src/llm/ingest_review.py`：新增项目级 `ExpectedIngestObject` 清单和 `run_workbook_ingest_reviews()` 入口，覆盖所有核心程序对象：
+  - 汇总、K.00 Lead、K.01、FA list；
+  - K.02.1 新增清单 / 新增测试 / 新增选样输出；
+  - K.02.2 处置清单 / 处置测试 / 处置选样输出；
+  - K.03.1 SAP、K.03.2 折旧测试、K.03.3 折旧政策复核。
+- K.01 profile 保留为程序级增强：六区块、表3/表4/Notes 归属等专项提示，不再作为唯一接入对象。
+- `src/report/pipeline.py`：流水线按 `WorkbookQcContext` 与 `WorkbookStructure` 已识别对象判断缺失项，统一触发 LLM missing discovery；结果只进入 `ingest_review_section`，不生成普通 rule issue。
+- `src/report/export_annotated_workbook.py`：标注底稿新增 `LLM识别复核【归档前删除】` sheet，用于展示 LLM 读取层判断、候选 sheet、候选行、锚点证据和建议动作，与 Comments findings 分开展示。
+- 文档修正：`docs/planning/llm-ingest-review-framework.md`、`docs/planning/llm-ingest-profile-k01.md` 已明确“项目级识别层覆盖所有核心程序 sheet，程序级 profile 只是增强”。
+
+已验证：
+
+- `.\.venv\Scripts\pytest.exe tests\llm\test_ingest_review.py tests\report\test_workbook_pipeline.py tests\report\test_export_annotated_workbook.py -q --basetemp .pytest_tmp_llm_ingest_all`：`36 passed`
+- `ReadLints`：相关代码与测试无 linter errors。
+
+后续建议：
+
+- 用案例库/真实复测底稿启用 LLM 跑一次 UI，重点查看 `LLM识别复核【归档前删除】` 是否能帮助质检人员判断 Agent 是否读对底稿。
+- 逐步补 Lead、K.02.1、K.02.2、K.03 的程序级 profile；不要把 profile 完整度作为项目级 LLM ingest 兜底是否启用的前提。
+- 若 LLM 输出噪音偏多，优先调候选生成和触发阈值，不让 LLM 结果进入业务 findings。

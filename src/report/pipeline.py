@@ -4,7 +4,6 @@ from pathlib import Path
 from time import perf_counter
 
 from ingest.workbook_context import WorkbookQcContext, load_workbook_context
-from ingest.workbook_reader import list_workbook_sheet_titles
 from llm.config import load_llm_config
 from llm.review import enrich_report_with_llm
 from report.manual_review import build_manual_review_sections
@@ -22,6 +21,7 @@ from rules.delivery_completion import (
     DeliveryCompletionContext,
     check_delivery_completion,
 )
+from rules.disposal_runner import DISPOSAL_RULE_IDS, run_disposal_rules
 from rules.lead_runner import LEAD_RULE_IDS, run_lead_rules
 from rules.models import ColumnContext
 from rules.psp_completion import check_psp_completion
@@ -36,6 +36,7 @@ WORKBOOK_RULE_IDS = (
     "disposal_test_package_complete",
     "first_delivery_standard",
     "final_delivery_standard",
+    *DISPOSAL_RULE_IDS,
     *ADDITION_RULE_IDS,
     *LEAD_RULE_IDS,
     *ROLLFORWARD_RULE_IDS,
@@ -64,17 +65,19 @@ def run_workbook_qc(
     issues = []
     records = []
     rule_ids: list[str] = []
+    ingest_review_results: list[dict] = []
     source_sheet = ""
     sheet_titles: list[str] | None = None
     wb_for_semantic: str | None = None
 
     if Path(ctx.source_file).suffix.lower() in (".xlsx", ".xlsm", ".xlsb"):
         wb_for_semantic = ctx.source_file
-        try:
-            sheet_titles = list_workbook_sheet_titles(ctx.source_file)
-        except Exception:
-            sheet_titles = None
-            wb_for_semantic = None
+        if ctx.structure and ctx.structure.sheets_by_kind:
+            sheet_titles = [
+                sheet.sheet_name
+                for sheets in ctx.structure.sheets_by_kind.values()
+                for sheet in sheets
+            ]
 
     if ctx.fa_list:
         fa_ctx = ColumnContext(
@@ -166,6 +169,9 @@ def run_workbook_qc(
                 ctx.summary,
                 workbook_sheet_titles=sheet_titles,
                 workbook_path=ctx.source_file,
+                test_sheet_note=ctx.addition_test.waiver_note_text
+                if ctx.addition_test
+                else None,
             )
         )
         issues.extend(addition_package_issues)
@@ -175,6 +181,9 @@ def run_workbook_qc(
                 ctx.summary,
                 workbook_sheet_titles=sheet_titles,
                 workbook_path=ctx.source_file,
+                test_sheet_note=ctx.disposal_test.waiver_note_text
+                if ctx.disposal_test
+                else None,
             )
         )
         issues.extend(disposal_package_issues)
@@ -368,7 +377,48 @@ def run_workbook_qc(
             addition_issues,
         )
 
+    disposal_issues = attach_rule_metadata(
+        run_disposal_rules(
+            disposal_test=ctx.disposal_test,
+            disposal_sample_output=ctx.disposal_sample_output,
+            disposal_execution_path=ctx.disposal_execution_path,
+        )
+    )
+    issues.extend(disposal_issues)
+    rule_ids.extend(list(DISPOSAL_RULE_IDS))
+
     rollforward_sheet_section = None
+    if config.enabled:
+        llm_t0 = perf_counter()
+        from llm.ingest_review import run_workbook_ingest_reviews
+
+        for result in run_workbook_ingest_reviews(
+            config,
+            rollforward=ctx.rollforward,
+            workbook_path=ctx.source_file,
+            workbook_sheet_titles=sheet_titles,
+            recognized_sheet_kinds=_recognized_ingest_sheet_kinds(ctx),
+        ):
+            item = result.to_dict()
+            item.update(
+                {
+                    "procedure_code": item.get("procedure_code") or "WORKBOOK",
+                    "source_sheet": item.get("source_sheet") or item.get("candidate_sheet") or "",
+                    "review_type": item.get("review_type") or "ingest_review",
+                    "note": "读取结果复核提示，不等同于业务规则 finding。",
+                }
+            )
+            ingest_review_results.append(item)
+        elapsed = perf_counter() - llm_t0
+        llm_seconds += elapsed
+        if ingest_review_results:
+            record_llm_detail(
+                "ingest_review",
+                "读取结果复核",
+                elapsed,
+                calls=len(ingest_review_results),
+            )
+
     if ctx.rollforward:
         rollforward_raw_issues = run_rollforward_rules(
             ctx.rollforward,
@@ -446,6 +496,14 @@ def run_workbook_qc(
         lead_sheet_section=lead_sheet_section,
         rollforward_sheet_section=rollforward_sheet_section,
         addition_sheet_section=addition_sheet_section,
+        ingest_review_section=(
+            {
+                "description": "读取结果复核提示（LLM 辅助，不等同于业务规则 finding）。",
+                "reviews": ingest_review_results,
+            }
+            if ingest_review_results
+            else None
+        ),
     )
     report.manual_review_sections = build_manual_review_sections(ctx.lead)
 
@@ -482,6 +540,27 @@ def run_workbook_qc(
         }
     )
     return report
+
+
+def _recognized_ingest_sheet_kinds(ctx: WorkbookQcContext) -> dict[str, bool]:
+    """Sheet kinds already recognized by deterministic ingest or structure scan."""
+    recognized = {
+        "summary": ctx.summary is not None,
+        "lead": ctx.lead is not None,
+        "rollforward": ctx.rollforward is not None,
+        "fa_list": ctx.fa_list is not None,
+        "addition_list": ctx.addition_list is not None,
+        "addition_test": ctx.addition_test is not None,
+        "addition_sample_output": ctx.addition_sample_output is not None,
+        "disposal_list": ctx.disposal_list is not None,
+        "disposal_test": ctx.disposal_test is not None,
+        "disposal_sample_output": ctx.disposal_sample_output is not None,
+    }
+    if ctx.structure:
+        for kind, sheets in ctx.structure.sheets_by_kind.items():
+            if sheets:
+                recognized[kind] = True
+    return recognized
 
 
 def run_workbook_qc_from_path(

@@ -4,6 +4,16 @@ import openpyxl
 import pytest
 
 from ingest.addition_test_sheet import AdditionExecutionPathDataset, AdditionTestSheetDataset
+from ingest.disposal_test_sheet import (
+    DisposalExecutionPathDataset,
+    DisposalSampleOutputDataset,
+    DisposalSampleRow,
+    DisposalTestSheetDataset,
+    DisposalTestedSampleRow,
+    DisposalAmountItem,
+)
+from ingest.models import RollforwardLayoutProfile
+from ingest.rollforward_sheet import K01SectionRegion, RollforwardSheetDataset
 from ingest.workbook_context import WorkbookQcContext
 from report.pipeline import run_workbook_qc, run_workbook_qc_from_path
 from rules.delivery_completion import DeliveryCompletionContext
@@ -155,3 +165,195 @@ def test_workbook_qc_includes_addition_llm_issue(monkeypatch):
 
     assert any(i.rule_id == "addition_semantic_review" for i in report.issues)
     assert "addition_semantic" in {d["key"] for d in report.runtime_timings["llm_details"]}
+
+
+def test_workbook_qc_includes_disposal_sample_issue():
+    ctx = WorkbookQcContext(
+        source_file="disposal_demo.xlsx",
+        fa_list=None,
+        summary=None,
+        lead=None,
+        rollforward=None,
+        addition_list=None,
+        addition_test=None,
+        addition_sample_output=None,
+        addition_execution_path=None,
+        disposal_list=None,
+        disposal_sample_output=DisposalSampleOutputDataset(
+            source_file="disposal_demo.xlsx",
+            source_sheet="K.02.2a 处置选样输出",
+            amounts={
+                "key_item_count": DisposalAmountItem(
+                    label="关键项数量",
+                    amount="0",
+                    source_row=50,
+                    source_column=6,
+                )
+            },
+            selected_samples=[
+                DisposalSampleRow(
+                    source_row=102,
+                    sample_type="代表性样本",
+                    asset_id="FA-D-001",
+                    asset_name="旧设备A",
+                    net_value="300",
+                )
+            ],
+        ),
+        disposal_test=DisposalTestSheetDataset(
+            source_file="disposal_demo.xlsx",
+            source_sheet="K.02.2 处置测试",
+            tested_samples=[
+                DisposalTestedSampleRow(
+                    source_row=69,
+                    sample_type="关键项（key item）",
+                    asset_id="FA-D-001",
+                    asset_name="旧设备A",
+                    net_value="300",
+                )
+            ],
+        ),
+        disposal_execution_path=DisposalExecutionPathDataset(
+            path_kind="executed_package_complete",
+            recognition_confidence=0.9,
+            summary_status="yes",
+            disposal_list_sheet="处置清单",
+            disposal_test_sheet="K.02.2 处置测试",
+            disposal_sample_output_sheet="K.02.2a 处置选样输出",
+        ),
+        structure=None,
+        reconciliations=[],
+    )
+
+    report = run_workbook_qc(ctx, llm=False)
+    assert any(issue.rule_id == "disposal_sample_match" for issue in report.issues)
+
+
+def test_workbook_qc_includes_k01_ingest_review_section(monkeypatch):
+    monkeypatch.setenv("FA_QC_LLM_API_KEY", "sk-test")
+    monkeypatch.setenv("FA_QC_LLM_ENABLED", "true")
+
+    ctx = WorkbookQcContext(
+        source_file="k01_ingest_review_demo.xlsx",
+        fa_list=None,
+        summary=None,
+        lead=None,
+        rollforward=RollforwardSheetDataset(
+            source_file="k01_ingest_review_demo.xlsx",
+            source_sheet="K.01 Agree SL to GL",
+            header_row=None,
+            mapped_fields=[],
+            layout_profile=RollforwardLayoutProfile.HYBRID,
+            section_presence={
+                "b1_bkd_main_table": True,
+                "b2_movement_tb_reconciliation": True,
+                "b3_table2_fa_summary": False,
+                "b4_table3_check_with_table1": False,
+                "b5_table4_depreciation_pl": True,
+                "b6_notes_investigation_routing": True,
+            },
+            section_regions={
+                "b1_bkd_main_table": K01SectionRegion(
+                    section_id="b1_bkd_main_table",
+                    anchor_row=12,
+                    evidence=["表1", "固定资产类别"],
+                ),
+                "b5_table4_depreciation_pl": K01SectionRegion(
+                    section_id="b5_table4_depreciation_pl",
+                    anchor_row=82,
+                    evidence=["表4", "折旧费用与利润表"],
+                ),
+            },
+            section_conflicts=["duplicate_anchor:b4_table3_check_with_table1"],
+            recognition_confidence=0.58,
+        ),
+        addition_list=None,
+        disposal_list=None,
+        structure=None,
+        reconciliations=[],
+    )
+
+    mock_result = {
+        "assessment": "suspicious",
+        "risk_level": "high",
+        "risk_area": "missing_module",
+        "suspected_object": "b4_table3_check_with_table1",
+        "candidate_sheet": "K.01 Agree SL to GL",
+        "candidate_rows": [82],
+        "evidence_anchors": ["表4", "折旧费用与利润表"],
+        "rationale": "mock k01 ingest risk",
+        "suggested_action": "review K.01 section boundaries",
+        "should_retry_deterministic_ingest": True,
+        "manual_review_focus": "人工核对 K.01 表3/表4边界。",
+    }
+
+    monkeypatch.setattr("llm.ingest_review.chat_completion_json", lambda *args, **kwargs: mock_result)
+    monkeypatch.setattr(
+        "report.pipeline.enrich_report_with_llm",
+        lambda report, config, summary=None, workbook=None: report,
+    )
+
+    report = run_workbook_qc(ctx, llm=True)
+    data = report.to_dict()
+
+    assert "ingest_review_section" in data
+    reviews = data["ingest_review_section"]["reviews"]
+    assert reviews[0]["assessment"] == "suspicious"
+    assert reviews[0]["procedure_code"] == "K.01"
+    assert reviews[0]["source_sheet"] == "K.01 Agree SL to GL"
+    assert not [issue for issue in report.issues if issue.rule_id == "llm_ingest_review"]
+    assert "ingest_review" in {d["key"] for d in report.runtime_timings["llm_details"]}
+
+
+def test_workbook_qc_reviews_missing_k01_candidate(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("FA_QC_LLM_API_KEY", "sk-test")
+    monkeypatch.setenv("FA_QC_LLM_ENABLED", "true")
+
+    path = tmp_path / "missing_k01_candidate.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K01 SL-GL"
+    ws.append(["表1", "固定资产类别", "年初余额", "年末余额", "审定数"])
+    ws.append(["表2 check with 表1", "差异", "Notes"])
+    wb.save(path)
+    wb.close()
+
+    ctx = WorkbookQcContext(
+        source_file=str(path),
+        fa_list=None,
+        summary=None,
+        lead=None,
+        rollforward=None,
+        addition_list=None,
+        disposal_list=None,
+        structure=None,
+        reconciliations=[],
+    )
+
+    mock_result = {
+        "assessment": "suspicious",
+        "risk_level": "high",
+        "risk_area": "missing_sheet",
+        "suspected_object": "K.01 Agree SL to GL",
+        "candidate_sheet": "K01 SL-GL",
+        "candidate_rows": [1],
+        "evidence_anchors": ["表1", "固定资产类别"],
+        "rationale": "mock missing K.01 ingest risk",
+        "suggested_action": "review candidate K.01 sheet",
+        "should_retry_deterministic_ingest": True,
+        "manual_review_focus": "人工核对 K01 SL-GL 是否为 K.01。",
+    }
+    monkeypatch.setattr("llm.ingest_review.chat_completion_json", lambda *args, **kwargs: mock_result)
+    monkeypatch.setattr(
+        "report.pipeline.enrich_report_with_llm",
+        lambda report, config, summary=None, workbook=None: report,
+    )
+
+    report = run_workbook_qc(ctx, llm=True)
+    data = report.to_dict()
+
+    reviews = data["ingest_review_section"]["reviews"]
+    assert reviews[0]["assessment"] == "suspicious"
+    assert reviews[0]["risk_area"] == "missing_sheet"
+    assert reviews[0]["source_sheet"] == "K01 SL-GL"
+    assert not [issue for issue in report.issues if issue.rule_id == "llm_ingest_review"]

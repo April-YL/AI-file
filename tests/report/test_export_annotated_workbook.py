@@ -7,9 +7,11 @@ import pytest
 from report.export_annotated_workbook import (
     COMMENTS_SHEET_NAME,
     FA_LIST_COMMENTS_SHEET_NAME,
+    LLM_INGEST_REVIEW_SHEET_NAME,
     LOCATOR_SHEET_NAME,
     build_comments_rows,
     build_fa_list_detail_rows,
+    build_llm_ingest_review_rows,
     build_locator_rows,
     build_main_comments_rows,
     export_annotated_workbook,
@@ -58,6 +60,28 @@ def test_main_rows_fewer_than_fa_detail_when_many_fa_dupes():
         assert len(main_rows) < len(fa) + len(other)
 
 
+def test_fa_list_summary_includes_representative_detail():
+    issue = QcIssue(
+        asset_id="FA-TEST-001",
+        rule_id="fa_list_recalc",
+        dict_rule_code="FA-RC-003",
+        field="net_value",
+        severity=Severity.FAIL,
+        message="净值勾稽不一致：原值 100，累计折旧 40，减值 0，净值 50，差异 10。",
+        suggestion="核对净值公式。",
+        procedure_code="FA_LIST",
+        source_sheet="FA list",
+        source_row=10,
+    )
+
+    rows = build_main_comments_rows([], [issue])
+
+    assert len(rows) == 1
+    assert "共 1 条同类问题" in rows[0][3]
+    assert "代表性问题" in rows[0][3]
+    assert "差异 10" in rows[0][3]
+
+
 def test_export_two_comment_sheets(tmp_path: Path):
     src = FIXTURES / "workbook_with_lead.xlsx"
     if not src.is_file():
@@ -69,9 +93,72 @@ def test_export_two_comment_sheets(tmp_path: Path):
     assert wb.sheetnames[0] == COMMENTS_SHEET_NAME
     assert wb.sheetnames[1] == FA_LIST_COMMENTS_SHEET_NAME
     assert wb.sheetnames[2] == LOCATOR_SHEET_NAME
+    assert wb.sheetnames[3] == LLM_INGEST_REVIEW_SHEET_NAME
     assert wb[COMMENTS_SHEET_NAME].cell(1, 1).value == "EY Ref."
     assert wb[LOCATOR_SHEET_NAME].cell(1, 1).value == "EY Ref."
     wb.close()
+
+
+def test_export_llm_ingest_review_sheet(tmp_path: Path):
+    src = tmp_path / "source.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K01 SL-GL"
+    ws["A1"] = "表1"
+    wb.save(src)
+    wb.close()
+
+    report = QcReport(
+        source_file=str(src),
+        source_sheet="workbook",
+        procedure_code="WORKBOOK",
+        rule_ids=[],
+        issues=[],
+        asset_results=[],
+        summary=ReportSummary(
+            total_records=0,
+            pass_count=0,
+            warn_count=0,
+            fail_count=0,
+            need_review_count=0,
+            overall_severity=Severity.PASS,
+        ),
+        ingest_review_section={
+            "description": "读取结果复核提示（LLM 辅助，不等同于业务规则 finding）。",
+            "reviews": [
+                {
+                    "procedure_code": "K.01",
+                    "review_type": "k01_ingest_review",
+                    "assessment": "suspicious",
+                    "risk_level": "high",
+                    "risk_area": "missing_sheet",
+                    "candidate_sheet": "K01 SL-GL",
+                    "candidate_rows": [1],
+                    "evidence_anchors": ["表1", "固定资产类别"],
+                    "rationale": "候选 sheet 出现后推锚点。",
+                    "suggested_action": "人工核对是否为 K.01。",
+                    "manual_review_focus": "打开候选 sheet 第1行附近。",
+                    "note": "读取结果复核提示，不等同于业务规则 finding。",
+                }
+            ],
+        },
+    )
+
+    rows = build_llm_ingest_review_rows(report)
+    assert rows[0][1] == "K.01"
+    assert rows[0][3] == "suspicious"
+
+    out = tmp_path / "out.xlsx"
+    export_annotated_workbook(report, src, out)
+
+    wb2 = openpyxl.load_workbook(out)
+    ws2 = wb2[LLM_INGEST_REVIEW_SHEET_NAME]
+    assert ws2.cell(1, 1).value == "序号"
+    assert ws2.cell(2, 4).value == "suspicious"
+    assert ws2.cell(2, 7).value == "K01 SL-GL"
+    assert ws2.cell(2, 8).hyperlink is not None
+    assert ws2.cell(2, 8).hyperlink.location == "'K01 SL-GL'!B1"
+    wb2.close()
 
 
 def test_main_comments_cell_ref_has_internal_hyperlink(tmp_path: Path):
@@ -178,6 +265,52 @@ def test_external_link_workbook_gets_ooxml_cell_comment(tmp_path: Path):
         assert any(n.startswith("xl/drawings/vmlDrawing") for n in names)
 
 
+def test_merged_cell_comment_anchors_to_top_left(tmp_path: Path):
+    src = tmp_path / "merged_source.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.02.1 addition test"
+    ws.merge_cells("B15:F15")
+    ws["B15"] = "merged header"
+    wb.save(src)
+    wb.close()
+
+    issue = QcIssue(
+        asset_id=None,
+        rule_id="addition_semantic_review",
+        field="sample_selection",
+        severity=Severity.WARN,
+        message="样本选择依据不足",
+        suggestion="补充样本选择依据",
+        procedure_code="K.02.1",
+        source_sheet="K.02.1 addition test",
+        source_row=15,
+    )
+    report = QcReport(
+        source_file=str(src),
+        source_sheet="K.02.1 addition test",
+        procedure_code="K.02.1",
+        rule_ids=["addition_semantic_review"],
+        issues=[issue],
+        asset_results=[],
+        summary=ReportSummary(
+            total_records=0,
+            pass_count=0,
+            warn_count=1,
+            fail_count=0,
+            need_review_count=0,
+            overall_severity=Severity.WARN,
+        ),
+    )
+    out = tmp_path / "merged_out.xlsx"
+    export_annotated_workbook(report, src, out)
+
+    wb2 = openpyxl.load_workbook(out)
+    assert wb2["K.02.1 addition test"]["B15"].comment is not None
+    assert "样本选择依据不足" in wb2["K.02.1 addition test"]["B15"].comment.text
+    wb2.close()
+
+
 def test_answer_blank_agent_ref_in_last_column():
     issue = QcIssue(
         asset_id=None,
@@ -270,7 +403,7 @@ def test_main_comment_rows_order_summary_then_lead_then_other():
     assert tabs == ["汇总", "K.00 Lead Sheet", "K.01 Agree SL to GL"]
 
 
-def test_question_comment_is_compact():
+def test_question_comment_is_not_truncated_with_ellipsis():
     issue = QcIssue(
         asset_id=None,
         rule_id="psp_completion",
@@ -289,7 +422,7 @@ def test_question_comment_is_compact():
     question = rows[0][3]
     assert question.startswith("[WARN] psp_completion ")
     assert "模型提示" not in question
-    assert len(question) <= 90
+    assert "..." not in question
 
 
 def test_question_comment_uses_short_title_mapping():
