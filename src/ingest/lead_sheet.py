@@ -1146,20 +1146,17 @@ def load_lead_from_workbook(
     max_rows: int | None = _DEFAULT_MAX_ROWS,
 ) -> LeadSheetDataset:
     path = Path(path)
-    candidates = find_lead_sheets(path, max_rows=max_rows)
 
     if sheet_name:
-        match = next((c for c in candidates if c[0] == sheet_name), None)
-        if match is None:
-            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-            try:
-                ws = wb[sheet_name]
-                rows = read_worksheet_rows(ws, max_rows=max_rows)
-            finally:
-                wb.close()
-            return parse_lead_sheet_rows(rows, source_file=str(path), source_sheet=sheet_name)
-        name, _, rows = match
-        return parse_lead_sheet_rows(rows, source_file=str(path), source_sheet=name)
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            ws = wb[sheet_name]
+            rows = read_worksheet_rows(ws, max_rows=max_rows)
+        finally:
+            wb.close()
+        return parse_lead_sheet_rows(rows, source_file=str(path), source_sheet=sheet_name)
+
+    candidates = find_lead_sheets(path, max_rows=max_rows)
 
     if candidates:
         chosen = choose_sheet_candidate(

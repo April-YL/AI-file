@@ -134,6 +134,23 @@ def test_build_adjustment_review_payload_includes_grid_and_policy():
     assert "原值" in payload["ppe_direct_aliases"]
 
 
+def test_build_adjustment_review_payload_defaults_to_reconciliation_hints():
+    lead = _minimal_lead_with_adjustment_block()
+    payload = build_adjustment_review_payload(
+        lead,
+        adjustment_grid={"grid": [["调整类型", "金额"], ["审计调整", "100"]]},
+    )
+
+    direct_checks = [
+        hint for hint in payload["deterministic_hints"]
+        if hint.get("kind") == "direct_ppe_amount_check"
+    ]
+    assert direct_checks
+    assert direct_checks[0]["main"]["source_row"] == 49
+    assert direct_checks[0]["summary"]["source_row"] == 66
+    assert direct_checks[0]["summary"]["difference"] == "0"
+
+
 def test_lead017_prompt_prevents_whole_journal_net_comparison():
     prompt = _LEAD017_ADDITIONAL_SYSTEM
     compact = " ".join(prompt.split())
@@ -141,6 +158,8 @@ def test_lead017_prompt_prevents_whole_journal_net_comparison():
     assert "Only direct PPE rows may enter direct_ppe_net_amount" in prompt
     assert "Counterparty accounts" in prompt
     assert "do not create a direct mismatch from uncertain evidence" in compact
+    assert "direct_ppe_amount_check" in prompt
+    assert "主表行、汇总表行、折算方式、差异来源" in prompt
 
 
 def test_is_direct_ppe_account():

@@ -377,6 +377,37 @@ def test_adjustment_internal_consistency_warns_when_summary_has_no_main_adjustme
     )
 
 
+def test_adjustment_internal_consistency_passes_when_direct_ppe_row_matches_net_zero_entry():
+    lead = LeadSheetDataset(
+        source_file="t.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        movement_rows=[
+            LeadMovementRow(
+                account_label="累计折旧",
+                sheet_ref="K.01",
+                values={"book_adjustment": None, "audit_adjustment": "59355.9378298611"},
+                source_row=50,
+            )
+        ],
+        adjustment_rows=[
+            AdjustmentSummaryRow(
+                adjustment_type="2025PRC AA#4",
+                source_row=67,
+                raw_cells=["2025PRC AA#4", "累计折旧", "-59355.9378298611"],
+            ),
+            AdjustmentSummaryRow(
+                adjustment_type="2025PRC AA#4",
+                source_row=68,
+                raw_cells=["2025PRC AA#4", "期初未分配利润", "59355.9378298611"],
+            ),
+        ],
+    )
+
+    issues = check_lead_adjustment_internal_consistency(lead)
+
+    assert not any(i.rule_id == "lead_adjustment_internal_consistency" for i in issues)
+
+
 def test_adjustment_internal_consistency_ignores_no_adjustment_conclusion():
     lead = LeadSheetDataset(
         source_file="t.xlsx",

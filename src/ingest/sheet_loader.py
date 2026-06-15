@@ -10,7 +10,7 @@ import openpyxl
 
 from ingest.models import SheetKind
 from ingest.records import FaListDataset, parse_fa_list_rows
-from ingest.sheet_classifier import classify_sheet
+from ingest.sheet_classifier import classify_sheet, score_by_name
 from ingest.sheet_period_routing import choose_sheet_candidate, sort_sheet_candidates
 from ingest.workbook_reader import read_worksheet_rows
 
@@ -34,9 +34,17 @@ def find_sheets_by_kind(
     candidates: list[SheetLoadCandidate] = []
     try:
         for ws in wb.worksheets:
-            rows = read_worksheet_rows(ws, max_rows=max_rows)
-            detected, confidence, *_ = classify_sheet(ws.title, rows)
+            name_kind, *_ = score_by_name(ws.title)
+            if name_kind == SheetKind.SKIP:
+                continue
+            preview_rows = read_worksheet_rows(ws, max_rows=max_rows)
+            detected, confidence, *_ = classify_sheet(ws.title, preview_rows)
             if detected == kind:
+                rows = (
+                    read_worksheet_rows(ws, max_rows=None)
+                    if kind == SheetKind.ADDITION_LIST
+                    else preview_rows
+                )
                 candidates.append(
                     SheetLoadCandidate(
                         sheet_name=ws.title,
@@ -64,25 +72,23 @@ def load_asset_sheet_from_workbook(
 ) -> FaListDataset:
     """读取指定类型的资产清单 sheet，输出统一 FaListDataset / AssetRecord。"""
     path = Path(path)
+    if sheet_name:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            ws = wb[sheet_name]
+            rows = read_worksheet_rows(ws, max_rows=max_rows)
+        finally:
+            wb.close()
+        return parse_fa_list_rows(
+            rows,
+            source_file=str(path),
+            source_sheet=sheet_name,
+            sheet_kind=kind,
+        )
+
     candidates = find_sheets_by_kind(path, kind, max_rows=max_rows or 100)
 
-    if sheet_name:
-        match = next((c for c in candidates if c.sheet_name == sheet_name), None)
-        if match is None:
-            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-            try:
-                ws = wb[sheet_name]
-                rows = read_worksheet_rows(ws, max_rows=max_rows)
-            finally:
-                wb.close()
-            return parse_fa_list_rows(
-                rows,
-                source_file=str(path),
-                source_sheet=sheet_name,
-                sheet_kind=kind,
-            )
-        chosen = match
-    elif candidates:
+    if candidates:
         chosen = choose_sheet_candidate(
             candidates,
             name=lambda c: c.sheet_name,

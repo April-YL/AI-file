@@ -491,24 +491,18 @@ def load_summary_from_workbook(
     max_rows: int | None = 200,
 ) -> SummarySheetDataset:
     path = Path(path)
-    candidates = find_summary_sheets(path, max_rows=max_rows)
 
     if sheet_name:
-        wanted = _norm_sheet_name(sheet_name)
-        match = next((c for c in candidates if _norm_sheet_name(c[0]) == wanted), None)
-        if match is None:
-            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-            try:
-                real_name = _resolve_sheet_name(wb.sheetnames, sheet_name)
-                ws = wb[real_name]
-                rows = read_worksheet_rows(ws, max_rows=max_rows)
-            finally:
-                wb.close()
-            return parse_summary_rows(
-                rows, source_file=str(path), source_sheet=real_name
-            )
-        name, _, rows = match
-        return parse_summary_rows(rows, source_file=str(path), source_sheet=name)
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            real_name = _resolve_sheet_name(wb.sheetnames, sheet_name)
+            ws = wb[real_name]
+            rows = read_worksheet_rows(ws, max_rows=max_rows)
+        finally:
+            wb.close()
+        return parse_summary_rows(rows, source_file=str(path), source_sheet=real_name)
+
+    candidates = find_summary_sheets(path, max_rows=max_rows)
 
     if candidates:
         chosen = choose_sheet_candidate(

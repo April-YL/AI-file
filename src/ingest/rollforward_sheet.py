@@ -413,7 +413,7 @@ def _sum_row_transaction_amounts(
     if len(non_zero) <= 1:
         return non_zero[0] if non_zero else numeric[0][1]
 
-    total = Decimal("0")
+    group_amounts: list[Decimal] = []
     idx = numeric[0][0]
     end = numeric[-1][0]
     while idx <= end:
@@ -425,9 +425,17 @@ def _sum_row_transaction_amounts(
             if amt is not None:
                 group.append(amt)
         if group:
-            total += group[-1]
+            group_amounts.append(group[-1])
         idx += 3
-    return total
+    if not group_amounts:
+        return None
+    if len(group_amounts) > 1:
+        prior_total = sum(group_amounts[:-1], Decimal("0"))
+        # Some K.01 rows include a final total group after category groups.
+        # If it equals the category subtotal, do not add it a second time.
+        if abs(prior_total - group_amounts[-1]) <= Decimal("0.01"):
+            return prior_total
+    return sum(group_amounts, Decimal("0"))
 
 
 def _amount_for_transaction_row(

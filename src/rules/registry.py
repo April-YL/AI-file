@@ -1050,7 +1050,8 @@ def _specs() -> list[RuleSpec]:
             qc_checkpoint="Y-审计基础程序",
             k1_ref="K1 CheckList 第28条",
             agent_priority=AgentPriority.P3,
-            implementation=ImplementationStatus.PLANNED,
+            implementation=ImplementationStatus.IMPLEMENTED,
+            notes="检查 K.02.2a 已选处置样本与 K.02.2 实测样本的资产编号、净值和样本类型一致性；替换样本作为备选样本，不强制要求进入实测。",
         ),
         RuleSpec(
             dict_code="K02-002",

@@ -11,7 +11,9 @@ from ingest.constants import (
     REQUIRED_BY_KIND,
 )
 from ingest.field_mapping_policy import (
+    BLOCKED_HEADER_FIELD_BY_KIND,
     DISALLOWED_FIELDS_BY_KIND,
+    SHEET_FIELD_HEADER_PRIORITIES,
     SHEET_FIELD_SYNONYM_EXTRAS,
     SHORT_SYNONYM_MAX_LEN,
     USEFUL_LIFE_HEADER_BLOCK_TOKENS,
@@ -30,6 +32,17 @@ def _field_allowed(field: str, sheet_kind: SheetKind | None) -> bool:
     if blocked and field in blocked:
         return False
     return True
+
+
+def _header_field_blocked(raw_header: str, field: str, sheet_kind: SheetKind | None) -> bool:
+    if sheet_kind is None:
+        return False
+    blocked_by_field = BLOCKED_HEADER_FIELD_BY_KIND.get(sheet_kind, {})
+    blocked_headers = blocked_by_field.get(field)
+    if not blocked_headers:
+        return False
+    n_header = _norm(raw_header)
+    return any(_norm(header) == n_header for header in blocked_headers)
 
 
 def _useful_life_blocked(raw_header: str, synonym: str) -> bool:
@@ -81,6 +94,8 @@ def match_standard_field(
     for field in FIELD_SYNONYMS:
         if not _field_allowed(field, sheet_kind):
             continue
+        if _header_field_blocked(raw, field, sheet_kind):
+            continue
         for syn in _synonyms_for_field(field):
             ns = _norm(syn)
             if not _synonym_matches_header(n, ns, raw, field, syn):
@@ -92,6 +107,19 @@ def match_standard_field(
     return best
 
 
+def _mapping_priority(text: str, field: str, sheet_kind: SheetKind | None) -> int:
+    if sheet_kind is None:
+        return 0
+    priorities = SHEET_FIELD_HEADER_PRIORITIES.get(sheet_kind, {}).get(field, ())
+    if not priorities:
+        return 0
+    n_text = _norm(text)
+    for index, header in enumerate(priorities):
+        if _norm(header) == n_text:
+            return len(priorities) - index
+    return 0
+
+
 def map_headers(
     header_cells: list[tuple[int, str]],
     sheet_kind: SheetKind | None = None,
@@ -101,12 +129,19 @@ def map_headers(
     unmapped: list[str] = []
     for col, text in header_cells:
         field = match_standard_field(text, sheet_kind)
-        if field and field not in mapped:
-            mapped[field] = FieldMapping(
+        if field:
+            candidate = FieldMapping(
                 standard_field=field,
                 source_header=text.strip(),
                 column_index=col,
             )
+            existing = mapped.get(field)
+            if existing is None or _mapping_priority(
+                candidate.source_header,
+                field,
+                sheet_kind,
+            ) > _mapping_priority(existing.source_header, field, sheet_kind):
+                mapped[field] = candidate
         elif text.strip() and not field:
             if len(text.strip()) <= 80 and not text.strip().startswith("获取"):
                 unmapped.append(text.strip())

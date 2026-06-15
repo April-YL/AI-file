@@ -12,7 +12,7 @@ import openpyxl
 from ingest.field_mapping import map_headers
 from ingest.header_detection import scan_rows_for_headers
 from ingest.models import AssetRecord, FieldMapping, SheetKind
-from ingest.sheet_classifier import classify_sheet
+from ingest.sheet_classifier import classify_sheet, score_by_name
 from ingest.sheet_period_routing import choose_sheet_candidate, sort_sheet_candidates
 from ingest.workbook_reader import read_worksheet_rows
 
@@ -384,6 +384,9 @@ def find_fa_list_sheets(
     candidates: list[FaListSheetCandidate] = []
     try:
         for ws in wb.worksheets:
+            name_kind, *_ = score_by_name(ws.title)
+            if name_kind == SheetKind.SKIP:
+                continue
             rows = read_worksheet_rows(ws, max_rows=max_rows)
             kind, confidence, *_ = classify_sheet(ws.title, rows)
             if kind == SheetKind.FA_LIST:
@@ -412,24 +415,22 @@ def load_fa_list_from_workbook(
 ) -> FaListDataset:
     """从 Excel 底稿读取 FA list 工作表并解析为 AssetRecord 列表。"""
     path = Path(path)
+    if sheet_name:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            ws = wb[sheet_name]
+            rows = read_worksheet_rows(ws, max_rows=max_rows)
+        finally:
+            wb.close()
+        return parse_fa_list_rows(
+            rows,
+            source_file=str(path),
+            source_sheet=sheet_name,
+        )
+
     candidates = find_fa_list_sheets(path, max_rows=max_rows)
 
-    if sheet_name:
-        match = next((c for c in candidates if c.sheet_name == sheet_name), None)
-        if match is None:
-            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-            try:
-                ws = wb[sheet_name]
-                rows = read_worksheet_rows(ws, max_rows=max_rows)
-            finally:
-                wb.close()
-            return parse_fa_list_rows(
-                rows,
-                source_file=str(path),
-                source_sheet=sheet_name,
-            )
-        chosen = match
-    elif candidates:
+    if candidates:
         chosen = choose_sheet_candidate(
             candidates,
             name=lambda c: c.sheet_name,

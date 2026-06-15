@@ -604,3 +604,34 @@ G 科技适合作为“有处置清单但拒绝执行 K.02.2 详细测试”的�
 - 用案例库/真实复测底稿启用 LLM 跑一次 UI，重点查看 `LLM识别复核【归档前删除】` 是否能帮助质检人员判断 Agent 是否读对底稿。
 - 逐步补 Lead、K.02.1、K.02.2、K.03 的程序级 profile；不要把 profile 完整度作为项目级 LLM ingest 兜底是否启用的前提。
 - 若 LLM 输出噪音偏多，优先调候选生成和触发阈值，不让 LLM 结果进入业务 findings。
+
+## 2026-06-11 整本底稿性能与启动界面首轮修复
+
+本轮针对 J / G 两个处置测试案例中暴露的“整本 Excel 反复扫描、启动界面首次运行偏慢”问题做了首轮修复。结论是：可以明显降低重复读取，但 J 公司底稿仍偏重，后续若继续优化，应进入“单次打开 workbook、多 sheet 共用读取结果”的较大改造。
+
+已完成：
+
+- `src/ingest/workbook_ingest.py`：整本 ingest 先使用 `analyze_workbook_structure()` 的识别结果，再把已识别出的 sheet 名传给各加载器，减少后续模块重复全工作簿扫描。
+- 候选 sheet 选择改为按识别置信度排序，修复 J 公司一度误选 `For Disclosure` 作为 K.01 后推表的问题；当前 J / G 均能正确选到 `K.01 Agree SL to GL`。
+- `src/ingest/sheet_loader.py`、`src/ingest/records.py`、`src/ingest/summary_sheet.py`、`src/ingest/lead_sheet.py`：当调用方已提供 sheet 名时，直接读取该 sheet，不再先扫描全工作簿。
+- `src/rules/addition_test_package.py`、`src/report/pipeline.py`：K.02 程序包完整性检查复用已读出的测试页 waiver/limited note，减少为了查说明文字再次打开 workbook。
+- `src/report/ui_app.py`：递增 `_QC_CACHE_VERSION` 为 `20260611-disposal-performance`，避免 Streamlit 界面沿用旧缓存。
+
+已验证：
+
+- `.\.venv\Scripts\pytest.exe tests\rules\test_addition_test_package.py tests\ingest\test_workbook_ingest.py tests\ingest\test_disposal_list.py tests\report\test_workbook_pipeline.py -q --basetemp .pytest_tmp_perf_fix4`：`42 passed`
+- G 科技完整报告入口（不含导出标注）：约 `18.30s`，`ingest_seconds=10.706`，`rules_seconds=7.59`，issues `109`
+- J 有限公司完整报告入口（不含导出标注）：约 `90.64s`，`ingest_seconds=43.347`，`rules_seconds=47.288`，issues `20`，其中 `disposal_sample_match` issues `2`
+- J 有限公司报告 + 标注副本导出：约 `114.54s`，其中报告约 `105.54s`、标注导出约 `9.01s`
+
+当前判断：
+
+- 启动界面与 CLI 使用同一条 `run_input_qc` / `run_workbook_qc_from_path` 流水线，因此本轮优化同样作用于启动界面首轮运行。
+- J 公司已从原先 120 秒超时改善为可完成，但离 120 秒边界仍近；如叠加 LLM、机器负载或更大底稿，仍可能超时。
+- 本轮未改业务规则含义，主要改读取路径、候选 sheet 复用和 UI 缓存版本；原始案例底稿未被修改。
+
+后续建议：
+
+- 下一轮性能优化优先做“单次打开 workbook，共享多 sheet 行数据”的 ingest cache，而不是继续在单个规则里零散修补。
+- 对 J 公司 rules 阶段约 47 秒的耗时继续拆分，重点看 `build_report`、手工复核区、K.01/Lead section 构建是否存在重复遍历大对象。
+- UI 侧可考虑增加更明确的阶段提示：读取底稿、执行规则、导出标注分别显示耗时；暂不建议为了快而默认跳过标注，因为“质检报告 + 底稿标注”仍是必交付项。

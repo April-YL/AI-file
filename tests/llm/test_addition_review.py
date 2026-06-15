@@ -72,9 +72,9 @@ def _sample_output() -> AdditionSampleOutputDataset:
 
 def test_addition_prompt_sets_semantic_only_boundaries():
     prompt = SYSTEM_PROMPT
-    assert "You review only semantic sufficiency" in prompt
-    assert "Do not calculate or conclude whether amounts agree" in prompt
-    assert "Do not change or override any FAIL/WARN/NEED_REVIEW from rules" in prompt
+    assert "你只复核文字说明是否充分" in prompt
+    assert "不计算、不判断金额是否相符" in prompt
+    assert "不要自行补事实" in prompt
     assert "sample_selection" in prompt
     assert "special_addition_source" in prompt
 
@@ -118,7 +118,7 @@ def test_run_addition_review_disabled_returns_empty():
     assert review is None
 
 
-def test_run_addition_review_maps_insufficient_to_warn():
+def test_run_addition_review_skips_sample_selection_findings():
     mock_review = {
         "topics": [
             {
@@ -138,11 +138,7 @@ def test_run_addition_review_maps_insufficient_to_warn():
         )
 
     assert review == mock_review
-    assert len(issues) == 1
-    assert issues[0].rule_id == RULE_ID
-    assert issues[0].severity == Severity.WARN
-    assert issues[0].field == "sample_selection"
-    assert issues[0].procedure_code == "K.02.1"
+    assert issues == []
 
 
 def test_run_addition_review_maps_unclear_to_need_review():

@@ -34,7 +34,7 @@ st.set_page_config(
 )
 
 # 规则/ingest 变更时递增，避免 @st.cache_data 返回旧质检结果。
-_QC_CACHE_VERSION = "20260608-delivery-completion"
+_QC_CACHE_VERSION = "20260611-disposal-performance"
 
 
 def _inject_style() -> None:

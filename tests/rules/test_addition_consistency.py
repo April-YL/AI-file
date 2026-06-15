@@ -3,7 +3,9 @@ from pathlib import Path
 import pytest
 
 from ingest.addition_test_sheet import (
+    AdditionSampleOutputDataset,
     AdditionTestSheetDataset,
+    AdditionTestedSampleRow,
     ModuleAssessment,
     load_addition_sample_output_from_workbook,
     load_addition_test_from_workbook,
@@ -72,6 +74,31 @@ def test_exception_summary_module_counts_as_note():
         CASE_B,
         sheet_name="K.02.1a 新增选样输出",
         max_rows=120,
+    )
+
+    issues = check_addition_sample_match(addition_test, sample_output)
+
+    assert not [issue for issue in issues if issue.field == "exception_summary"]
+
+
+def test_exception_summary_recognition_is_not_a_finding():
+    addition_test = AdditionTestSheetDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.1",
+        tested_samples=[
+            AdditionTestedSampleRow(
+                source_row=20,
+                asset_id="FA-TEST-001",
+                asset_name="Asset",
+                original_value="100",
+                evidence_amount="90",
+                amount_difference="10",
+            )
+        ],
+    )
+    sample_output = AdditionSampleOutputDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.1a",
     )
 
     issues = check_addition_sample_match(addition_test, sample_output)

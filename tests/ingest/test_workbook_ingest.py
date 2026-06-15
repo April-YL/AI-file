@@ -86,6 +86,29 @@ def test_workbook_structure_core_sheets(reconciliation_workbook: Path):
     assert not missing_core
 
 
+def test_workbook_structure_skips_internal_storage_sheet(tmp_path: Path):
+    path = tmp_path / "internal_skip.xlsx"
+    wb = openpyxl.Workbook()
+    ws_sum = wb.active
+    ws_sum.title = "汇总"
+    ws_sum.append(["程序", "工作表", "是否执行"])
+    ws_sum.append(["K.01", "K.01", "是"])
+
+    ws_internal = wb.create_sheet("DS_INTERNAL_DOCUMENT_STORAGE")
+    ws_internal.append(["固定资产编号", "原值", "累计折旧", "净值", "处置日期", "处置方式"])
+    ws_internal.append(["FA-TEST-001", 100, 10, 90, "2025-01-01", "报废"])
+    wb.save(path)
+    wb.close()
+
+    structure = analyze_workbook_structure(path)
+
+    assert "disposal_list" not in structure.sheets_by_kind
+    assert not any(
+        item["sheet_name"] == "DS_INTERNAL_DOCUMENT_STORAGE"
+        for item in structure.program_flow
+    )
+
+
 def test_rollforward_total_row():
     rows = [
         ("固定资产类别", "原值", "累计折旧", "净值"),

@@ -10,6 +10,7 @@ from ingest.records import (
     load_fa_list_from_workbook,
     parse_fa_list_rows,
 )
+from ingest.sheet_loader import load_asset_sheet_from_workbook
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -104,3 +105,70 @@ def test_parse_addition_list_keeps_addition_method():
         "original_value",
         "addition_method",
     }
+
+
+def test_parse_addition_list_uses_ending_original_value_not_opening():
+    rows = [
+        ("编码", "名称", "期初原值", "期末原值", "新增方式"),
+        ("FA-TEST-001", "设备A", 0, 500, "购置"),
+    ]
+    dataset = parse_fa_list_rows(
+        rows,
+        source_file="dummy.xlsx",
+        source_sheet="新增清单",
+        sheet_kind=SheetKind.ADDITION_LIST,
+    )
+    assert dataset.records[0].original_value == "500"
+
+
+def test_parse_addition_list_uses_added_original_value_not_opening():
+    rows = [
+        ("编码", "名称", "原值原币", "原值本币", "期初原值", "新增原值", "变动方式"),
+        ("FA-TEST-001", "设备A", 1000, 1000, 900, 300, "购置"),
+    ]
+    dataset = parse_fa_list_rows(
+        rows,
+        source_file="dummy.xlsx",
+        source_sheet="新增清单",
+        sheet_kind=SheetKind.ADDITION_LIST,
+    )
+    assert dataset.records[0].original_value == "300"
+    assert dataset.records[0].addition_method == "购置"
+
+
+def test_parse_addition_list_skips_subtotal_and_total_rows():
+    rows = [
+        ("新增方式", "固定资产编号", "固定资产名称", "资产类别", "原值"),
+        ("外购", "FA-TEST-001", "设备A", "机器设备", 100),
+        ("外购-小计", None, None, None, 100),
+        ("在建转固", "FA-TEST-002", "设备B", "机器设备", 200),
+        (None, None, None, "合计", 300),
+        (None, None, None, None, 300),
+    ]
+    dataset = parse_fa_list_rows(
+        rows,
+        source_file="dummy.xlsx",
+        source_sheet="新增清单",
+        sheet_kind=SheetKind.ADDITION_LIST,
+    )
+    assert [r.asset_id for r in dataset.records] == ["FA-TEST-001", "FA-TEST-002"]
+
+
+def test_load_addition_list_keeps_rows_after_preview_limit(tmp_path: Path):
+    xlsx = tmp_path / "addition_after_preview_limit.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "新增清单"
+    ws.append(("新增方式", "固定资产编号", "固定资产名称", "固定资产类别", "原值"))
+    for index in range(1, 105):
+        ws.append(("在建工程转入", f"FA-WIP-{index:03d}", "设备A", "机器设备", 100))
+    ws.append(("购置", "FA-BUY-001", "设备B", "机器设备", 386061.06))
+    wb.save(xlsx)
+    wb.close()
+
+    dataset = load_asset_sheet_from_workbook(xlsx, SheetKind.ADDITION_LIST, max_rows=100)
+
+    purchase_records = [r for r in dataset.records if r.addition_method == "购置"]
+    assert len(dataset.records) == 105
+    assert purchase_records[0].asset_id == "FA-BUY-001"
+    assert purchase_records[0].original_value == "386061.06"

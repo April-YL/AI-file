@@ -27,6 +27,16 @@ def test_name_addition_test_and_sample_output():
     assert s2 >= 0.85
 
 
+def test_name_disposal_test_and_sample_output():
+    k, s, _ = score_by_name("K.02.2 处置测试")
+    assert k == SheetKind.DISPOSAL_TEST
+    assert s >= 0.85
+
+    k2, s2, _ = score_by_name("K.02.2a 处置选样输出")
+    assert k2 == SheetKind.DISPOSAL_SAMPLE_OUTPUT
+    assert s2 >= 0.85
+
+
 def test_addition_test_name_wins_over_asset_table_content():
     rows = [
         ("样本类型", "固定资产编号", "固定资产名称", "资产原价"),
@@ -44,6 +54,26 @@ def test_addition_sample_output_name_wins_over_asset_table_content():
     ]
     kind, confidence, *_ = classify_sheet("K.02.1a 新增选样输出", rows)
     assert kind == SheetKind.ADDITION_SAMPLE_OUTPUT
+    assert confidence >= 0.8
+
+
+def test_disposal_test_name_wins_over_asset_table_content():
+    rows = [
+        ("样本类型", "固定资产编号", "固定资产名称", "净值", "处置日期", "减少方式"),
+        ("代表性样本", "FA-D-001", "旧设备A", 300, "2025-06-01", "出售"),
+    ]
+    kind, confidence, *_ = classify_sheet("K.02.2 处置测试", rows)
+    assert kind == SheetKind.DISPOSAL_TEST
+    assert confidence >= 0.8
+
+
+def test_disposal_sample_output_name_wins_over_asset_table_content():
+    rows = [
+        ("源样本#", "抽样ID", "样本类型", "固定资产编号", "固定资产名称", "净值", "减少方式"),
+        (1, 260, "代表性样本", "FA-D-001", "旧设备A", 300, "出售"),
+    ]
+    kind, confidence, *_ = classify_sheet("K.02.2a 处置选样输出", rows)
+    assert kind == SheetKind.DISPOSAL_SAMPLE_OUTPUT
     assert confidence >= 0.8
 
 

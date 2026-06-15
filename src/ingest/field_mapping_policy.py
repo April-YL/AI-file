@@ -48,6 +48,9 @@ DISALLOWED_FIELDS_BY_KIND: dict[SheetKind, frozenset[str]] = {
             "current_depreciation",
         )}
     ),
+    SheetKind.DISPOSAL_LIST: frozenset(
+        {"addition_method", "current_depreciation", "fully_depreciated_flag", "fully_depreciated_date"}
+    ),
 }
 
 # 表头含下列片段时，勿将「使用寿命」等短同义词映射为 useful_life_months（多为日期列）
@@ -60,5 +63,98 @@ SHORT_SYNONYM_MAX_LEN = 3
 SHEET_FIELD_SYNONYM_EXTRAS: dict[SheetKind, dict[str, list[str]]] = {
     SheetKind.ADDITION_LIST: {
         "addition_method": ["变动方式", "取得方式", "资产来源", "新增类型"],
+        "original_value": [
+            "新增原值",
+            "本期新增原值",
+            "本期新增金额",
+            "新增金额",
+            "期末原值",
+            "原值本币",
+            "原值原币",
+            "购进原值",
+        ],
+    },
+    SheetKind.DISPOSAL_LIST: {
+        "original_value": [
+            "处置原值",
+            "原值本币",
+            "原值原币",
+            "减少原值",
+            "本期减少原值",
+        ],
+        "accumulated_depreciation": [
+            "处置累计折旧",
+            "减少累计折旧",
+            "本期减少累计折旧",
+        ],
+        "net_value": ["处置净值", "减少净值", "本期减少净值", "账面净值"],
+        "disposal_date": ["业务日期", "凭证日期", "过账日期"],
+        "disposal_method": [
+            "变动方式",
+            "处置类别",
+            "减少类别",
+            "处置类型",
+            "报废类型",
+            "减少类型",
+        ],
+    },
+}
+
+# 按 sheet 类型屏蔽特定“表头 -> 标准字段”的组合。新增清单里“期初原值”
+# 反映年初/切换日余额，不代表本期新增金额。
+BLOCKED_HEADER_FIELD_BY_KIND: dict[SheetKind, dict[str, frozenset[str]]] = {
+    SheetKind.ADDITION_LIST: {
+        "original_value": frozenset({"期初原值", "年初原值", "上期原值"}),
+    },
+    SheetKind.DISPOSAL_LIST: {
+        "original_value": frozenset({"期初原值", "年初原值", "上期原值", "期末原值", "2025年末原值"}),
+        "accumulated_depreciation": frozenset(
+            {"期初累计折旧", "年初累计折旧", "2025年末累计折旧"}
+        ),
+        "net_value": frozenset({"期初净值", "2025年末净值"}),
+    },
+}
+
+# 同一标准字段出现多个候选列时，按表头业务含义选择更适合该 sheet 的列。
+SHEET_FIELD_HEADER_PRIORITIES: dict[SheetKind, dict[str, tuple[str, ...]]] = {
+    SheetKind.ADDITION_LIST: {
+        "original_value": (
+            "新增原值",
+            "本期新增原值",
+            "本期新增金额",
+            "新增金额",
+            "期末原值",
+            "原值本币",
+            "原值原币",
+            "购进原值",
+            "原值",
+        ),
+    },
+    SheetKind.DISPOSAL_LIST: {
+        "original_value": (
+            "处置原值",
+            "减少原值",
+            "本期减少原值",
+            "原值本币",
+            "原值原币",
+            "原值",
+        ),
+        "accumulated_depreciation": (
+            "处置累计折旧",
+            "减少累计折旧",
+            "本期减少累计折旧",
+            "累计折旧",
+        ),
+        "net_value": ("处置净值", "减少净值", "本期减少净值", "净值", "账面净值"),
+        "disposal_date": ("处置日期", "业务日期", "减少日期", "报废日期", "凭证日期"),
+        "disposal_method": (
+            "减少方式",
+            "处置/报废",
+            "处置方式",
+            "处置情况",
+            "变动方式",
+            "处置类别",
+            "减少类别",
+        ),
     },
 }

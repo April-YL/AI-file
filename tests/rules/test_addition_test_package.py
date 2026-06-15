@@ -185,6 +185,20 @@ def test_disposal_package_does_not_run_when_not_executed():
     assert issues == []
 
 
+def test_disposal_package_g_case_waived_with_list_only():
+    summary = _summary_with_disposal(status="否")
+    summary.programs[0].waiver_reason = "实际处置金额小于TT，不进行本次测试"
+
+    issues = check_disposal_test_package(
+        summary,
+        workbook_sheet_titles=[
+            "汇总 ",
+            "处置清单",
+        ],
+    )
+    assert issues == []
+
+
 def test_disposal_package_documented_limited_on_test_sheet(tmp_path: Path):
     path = tmp_path / "wb.xlsx"
     wb = openpyxl.Workbook()

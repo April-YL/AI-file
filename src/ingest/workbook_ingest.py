@@ -32,7 +32,7 @@ from ingest.records import (
     load_fa_list_from_workbook,
 )
 from ingest.rollforward_sheet import RollforwardSheetDataset, load_rollforward_from_workbook
-from ingest.sheet_loader import load_all_sheets_of_kind, load_asset_sheet_from_workbook
+from ingest.sheet_loader import load_asset_sheet_from_workbook
 from ingest.summary_sheet import SummarySheetDataset, load_summary_from_workbook
 from ingest.workbook_structure import WorkbookStructure, analyze_workbook_structure
 
@@ -258,6 +258,60 @@ def _lead_summary(lead: LeadSheetDataset | None) -> dict[str, Any] | None:
     }
 
 
+def _candidate_sheet_names(structure: WorkbookStructure, kind: SheetKind) -> list[str]:
+    sheets = sorted(
+        structure.sheets_by_kind.get(kind.value, []),
+        key=lambda s: s.confidence,
+        reverse=True,
+    )
+    return [s.sheet_name for s in sheets]
+
+
+def _first_sheet_name(
+    structure: WorkbookStructure,
+    kind: SheetKind,
+    explicit_name: str | None = None,
+) -> str | None:
+    if explicit_name:
+        return explicit_name
+    names = _candidate_sheet_names(structure, kind)
+    return names[0] if names else None
+
+
+def _load_fa_list_candidate_sheets(
+    path: Path,
+    structure: WorkbookStructure,
+    *,
+    max_rows: int,
+) -> list[FaListDataset]:
+    datasets: list[FaListDataset] = []
+    for name in _candidate_sheet_names(structure, SheetKind.FA_LIST):
+        dataset = load_fa_list_from_workbook(path, sheet_name=name, max_rows=max_rows)
+        if dataset.records or dataset.mapped_fields:
+            datasets.append(dataset)
+    return datasets
+
+
+def _load_asset_candidate_sheets(
+    path: Path,
+    structure: WorkbookStructure,
+    kind: SheetKind,
+    *,
+    max_rows: int,
+) -> list[FaListDataset]:
+    datasets: list[FaListDataset] = []
+    for name in _candidate_sheet_names(structure, kind):
+        dataset = load_asset_sheet_from_workbook(
+            path,
+            kind,
+            sheet_name=name,
+            max_rows=max_rows,
+        )
+        if dataset.records or dataset.mapped_fields:
+            datasets.append(dataset)
+    return datasets
+
+
 def load_workbook_ingest(
     path: str | Path,
     *,
@@ -272,11 +326,32 @@ def load_workbook_ingest(
     path = Path(path)
     structure = analyze_workbook_structure(path, max_rows=max_rows)
 
+    fa_sheet = _first_sheet_name(structure, SheetKind.FA_LIST, fa_sheet)
+    summary_sheet = _first_sheet_name(structure, SheetKind.SUMMARY, summary_sheet)
+    lead_sheet = _first_sheet_name(structure, SheetKind.LEAD, lead_sheet)
+    rollforward_sheet = _first_sheet_name(
+        structure, SheetKind.ROLLFORWARD, rollforward_sheet
+    )
+    addition_sheet = _first_sheet_name(structure, SheetKind.ADDITION_LIST, addition_sheet)
+    addition_test_sheet = _first_sheet_name(structure, SheetKind.ADDITION_TEST)
+    addition_sample_output_sheet = _first_sheet_name(
+        structure, SheetKind.ADDITION_SAMPLE_OUTPUT
+    )
+    disposal_sheet = _first_sheet_name(structure, SheetKind.DISPOSAL_LIST, disposal_sheet)
+    disposal_test_sheet = _first_sheet_name(structure, SheetKind.DISPOSAL_TEST)
+    disposal_sample_output_sheet = _first_sheet_name(
+        structure, SheetKind.DISPOSAL_SAMPLE_OUTPUT
+    )
+
     fa_list = load_fa_list_from_workbook(path, sheet_name=fa_sheet, max_rows=max_rows)
     if not fa_list.records and not fa_list.mapped_fields:
         fa_list = None
 
-    fa_list_sheets = load_all_sheets_of_kind(path, SheetKind.FA_LIST, max_rows=max_rows)
+    fa_list_sheets = (
+        [fa_list]
+        if fa_list is not None
+        else _load_fa_list_candidate_sheets(path, structure, max_rows=max_rows)
+    )
 
     rollforward = load_rollforward_from_workbook(
         path,
@@ -286,36 +361,88 @@ def load_workbook_ingest(
     if not rollforward.source_sheet:
         rollforward = None
 
-    addition_list = load_asset_sheet_from_workbook(
-        path,
-        SheetKind.ADDITION_LIST,
-        sheet_name=addition_sheet,
-        max_rows=max_rows,
+    addition_list = (
+        load_asset_sheet_from_workbook(
+            path,
+            SheetKind.ADDITION_LIST,
+            sheet_name=addition_sheet,
+            max_rows=max_rows,
+        )
+        if addition_sheet
+        else None
     )
-    if not addition_list.records and not addition_list.mapped_fields:
+    if addition_list and not addition_list.records and not addition_list.mapped_fields:
         addition_list = None
-    addition_lists = load_all_sheets_of_kind(path, SheetKind.ADDITION_LIST, max_rows=max_rows)
-
-    addition_test = load_addition_test_from_workbook(path, max_rows=max_rows)
-    addition_sample_output = load_addition_sample_output_from_workbook(
-        path,
-        max_rows=max_rows,
+    addition_lists = (
+        [addition_list]
+        if addition_list is not None
+        else _load_asset_candidate_sheets(
+            path,
+            structure,
+            SheetKind.ADDITION_LIST,
+            max_rows=max_rows,
+        )
     )
 
-    disposal_list = load_asset_sheet_from_workbook(
-        path,
-        SheetKind.DISPOSAL_LIST,
-        sheet_name=disposal_sheet,
-        max_rows=max_rows,
+    addition_test = (
+        load_addition_test_from_workbook(
+            path,
+            sheet_name=addition_test_sheet,
+            max_rows=max_rows,
+        )
+        if addition_test_sheet
+        else None
     )
-    if not disposal_list.records and not disposal_list.mapped_fields:
+    addition_sample_output = (
+        load_addition_sample_output_from_workbook(
+            path,
+            sheet_name=addition_sample_output_sheet,
+            max_rows=max_rows,
+        )
+        if addition_sample_output_sheet
+        else None
+    )
+
+    disposal_list = (
+        load_asset_sheet_from_workbook(
+            path,
+            SheetKind.DISPOSAL_LIST,
+            sheet_name=disposal_sheet,
+            max_rows=max_rows,
+        )
+        if disposal_sheet
+        else None
+    )
+    if disposal_list and not disposal_list.records and not disposal_list.mapped_fields:
         disposal_list = None
-    disposal_lists = load_all_sheets_of_kind(path, SheetKind.DISPOSAL_LIST, max_rows=max_rows)
+    disposal_lists = (
+        [disposal_list]
+        if disposal_list is not None
+        else _load_asset_candidate_sheets(
+            path,
+            structure,
+            SheetKind.DISPOSAL_LIST,
+            max_rows=max_rows,
+        )
+    )
     disposal_list_summary = build_disposal_list_summary(disposal_list)
-    disposal_test = load_disposal_test_from_workbook(path, max_rows=max_rows)
-    disposal_sample_output = load_disposal_sample_output_from_workbook(
-        path,
-        max_rows=max_rows,
+    disposal_test = (
+        load_disposal_test_from_workbook(
+            path,
+            sheet_name=disposal_test_sheet,
+            max_rows=max_rows,
+        )
+        if disposal_test_sheet
+        else None
+    )
+    disposal_sample_output = (
+        load_disposal_sample_output_from_workbook(
+            path,
+            sheet_name=disposal_sample_output_sheet,
+            max_rows=max_rows,
+        )
+        if disposal_sample_output_sheet
+        else None
     )
 
     summary = load_summary_from_workbook(path, sheet_name=summary_sheet)

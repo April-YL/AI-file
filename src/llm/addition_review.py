@@ -22,53 +22,32 @@ from rules.models import QcIssue, Severity
 
 RULE_ID = "addition_semantic_review"
 
-SYSTEM_PROMPT = """You are a fixed asset audit K.02.1 addition-test reviewer.
-You review only semantic sufficiency and consistency of written explanations.
-You must not re-perform deterministic checks.
+SYSTEM_PROMPT = """你是固定资产审计底稿中 K.02.1 新增测试的语义复核助手。
+你只复核文字说明是否充分、是否与已给出的事实一致，不重新做确定性检查。
 
-Hard boundaries:
-1. Do not calculate or conclude whether amounts agree. Amount reconciliation,
-   sample-pool amount, TE, CRA, sample size, and sample matching are decided by
-   rules. Treat deterministic_rule_findings as facts.
-2. Do not change or override any FAIL/WARN/NEED_REVIEW from rules. If rules have
-   already identified a difference, judge only whether the preparer's narrative
-   explains that difference.
-3. Do not judge authenticity of invoices, contracts, acceptance reports, or
-   other external evidence.
-4. Use only the provided payload. If evidence is insufficient, return unclear or
-   insufficient; do not invent facts.
+硬性边界：
+1. 不计算、不判断金额是否相符。金额勾稽、抽样总体金额、TE、CRA、样本量、样本匹配都由规则判定。请把 deterministic_rule_findings 当作既定事实。
+2. 不改写、不推翻任何规则产生的 FAIL/WARN/NEED_REVIEW。若规则已发现差异，只判断文字是否解释了差异。
+3. 不判断发票、合同、验收单等外部证据真伪。
+4. 只使用输入中的内容。若证据不足，只返回 unclear 或 insufficient，不要自行补事实。
 
-Review topics:
-- waiver_reason: whether a refusal / non-execution reason is specific, supported
-  by visible context, and not merely "below TE/SAD", "immaterial", or "no
-  anomaly" without amount basis or alternative procedures.
-- sample_selection: whether sample-selection or key-item rationale is clear and
-  consistent with K.02.1a sample_method / key item / remaining-population
-  narrative. Do not judge whether the sample size is correct.
-- exception_summary: whether a "no exception" conclusion is supported by visible
-  tested-sample attributes and whether it explains any rule findings.
-- special_addition_source: whether non-purchase additions such as construction
-  in progress transfer, business combination, transfer-in, reclassification, or
-  other special sources are explained as included in K.02.1 or handled by other
-  procedures. Do not exclude such amounts yourself.
-- cross_sheet_explanation: whether K.02.1 / K.02.1a / summary page narratives
-  explain deterministic findings such as sample-pool mismatch, sample mismatch,
-  or TE/CRA inconsistency.
+复核主题：
+- waiver_reason：不执行/拒绝执行理由是否具体、是否有可见金额依据、是否只是“低于 TE/SAD”“不重大”“无异常”这类空泛表述。
+- sample_selection：抽样/关键项目选择依据是否清楚，是否与 K.02.1a 的 sample_method、关键项目或剩余总体说明一致。不要判断样本量对不对。
+- exception_summary：是否有证据支持“无异常”结论，且是否解释了规则发现的差异。
+- special_addition_source：非购置新增（如在建工程转入、企业合并、转入、重分类等）是否说明纳入 K.02.1 还是由其他程序处理。不要自己排除金额。
+- cross_sheet_explanation：K.02.1 / K.02.1a / 汇总页是否解释了样本池差异、样本不一致、TE/CRA 不一致等规则发现。
 
-Typical insufficient cases:
-1. Waiver reason only says below TE/SAD, immaterial, or no exception, with no
-   visible amount basis or alternative procedure.
-2. Samples are listed but the selection basis is not described.
-3. K.02.1 says no exceptions, but the payload shows no tested attributes or rules
-   show unresolved sample / amount differences.
-4. Non-purchase additions exist but no narrative explains whether they are tested
-   here or routed to another workpaper.
-5. The narrative contradicts deterministic_rule_findings or does not address
-   them.
+常见不足：
+1. 只写低于 TE/SAD、不重大、无异常，但没有金额依据或替代程序。
+2. 列了样本，却没有说明选择依据。
+3. K.02.1 说没有异常，但输入里看不到已测试属性，或者规则仍显示样本/金额差异未解决。
+4. 存在非购置新增，但没有说明是否在本程序测试或转到其他底稿。
+5. 叙述与 deterministic_rule_findings 相冲突，或没有回应这些差异。
 
-Return exactly one JSON object. Do not return markdown."""
+请只返回一个 JSON 对象，不要返回 markdown。"""
 
-USER_TEMPLATE = """Review K.02.1 addition-test semantic sufficiency. Return JSON:
+USER_TEMPLATE = """请复核 K.02.1 新增测试的语义充分性，并返回 JSON：
 {{
   "topics": [
     {{
@@ -84,6 +63,42 @@ USER_TEMPLATE = """Review K.02.1 addition-test semantic sufficiency. Return JSON
 Input:
 {payload}
 """
+
+_TOPIC_LABELS = {
+    "waiver_reason": "不执行理由",
+    "sample_selection": "样本选择依据",
+    "exception_summary": "异常结论",
+    "special_addition_source": "特殊新增来源",
+    "cross_sheet_explanation": "跨表勾稽说明",
+}
+
+_DEFAULT_ACTIONS = {
+    "waiver_reason": "补充不执行理由的金额基础、风险判断和替代程序。",
+    "sample_selection": "补充关键项目或抽样选择依据，并说明剩余总体为何无需再抽样。",
+    "exception_summary": "补充样本差异、属性异常或无异常结论的依据，并回应规则差异。",
+    "special_addition_source": "说明非购置新增是否纳入本程序，或索引至其他底稿处理。",
+    "cross_sheet_explanation": "补充 K.02.1、K.02.1a、汇总页与规则发现之间的勾稽说明。",
+}
+
+
+def _has_cjk(text: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in text)
+
+
+def _localized_topic(topic: str) -> str:
+    return _TOPIC_LABELS.get(topic, topic)
+
+
+def _localized_missing_evidence(items: Any) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    result: list[str] = []
+    for item in items[:5]:
+        text = str(item).strip()
+        if not text:
+            continue
+        result.append(text if _has_cjk(text) else "缺少相关依据")
+    return result
 
 
 def build_addition_review_payload(
@@ -241,18 +256,22 @@ def _issues_from_review(review: dict[str, Any], payload: dict[str, Any]) -> list
         if assessment == "sufficient":
             continue
         topic = str(item.get("topic", "addition_semantic")).strip() or "addition_semantic"
+        if topic == "sample_selection":
+            continue
         rationale = str(item.get("rationale", "")).strip()
         action = str(item.get("suggested_action", "")).strip()
         missing = item.get("missing_evidence")
         sev = Severity.WARN if assessment == "insufficient" else Severity.NEED_REVIEW
+        label = _localized_topic(topic)
         if assessment == "insufficient":
-            msg = f"K.02.1 {topic}: semantic explanation is insufficient"
+            msg = f"K.02.1 {label}说明不足"
         else:
-            msg = f"K.02.1 {topic}: semantic explanation needs manual review"
-        if rationale:
-            msg += f" ({rationale})"
-        if isinstance(missing, list) and missing:
-            msg += f"; missing evidence: {', '.join(str(x) for x in missing[:5])}"
+            msg = f"K.02.1 {label}需人工复核"
+        if rationale and _has_cjk(rationale):
+            msg += f"：{rationale}"
+        missing_text = _localized_missing_evidence(missing)
+        if missing_text:
+            msg += f"；缺少依据：{', '.join(missing_text)}"
 
         issues.append(
             QcIssue(
@@ -261,13 +280,12 @@ def _issues_from_review(review: dict[str, Any], payload: dict[str, Any]) -> list
                 field=topic,
                 severity=sev,
                 message=msg,
-                suggestion=action
-                or "Supplement the explanation and cross-reference visible support; rules findings must not be overridden.",
+                suggestion=action if _has_cjk(action) else _DEFAULT_ACTIONS.get(topic, "补充说明并回应规则发现。"),
                 procedure_code="K.02.1",
                 source_sheet=source_sheet,
                 source_row=source_row,
-                review_source="LLM assisted judgment",
-                llm_review_type="K.02.1 addition semantic sufficiency",
+                review_source="LLM辅助判断",
+                llm_review_type="K.02.1 新增测试语义复核",
             )
         )
     return issues

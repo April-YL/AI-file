@@ -15,7 +15,13 @@
     {"header": "资本开始折旧的日期 （即使用寿命开始时间）", "sheet_kind": "depreciation_tod", "expect": null},
     {"header": "业务日期", "sheet_kind": "disposal_list", "expect": "disposal_date"},
     {"header": "单据编号", "sheet_kind": "disposal_list", "expect": null},
+    {"header": "单据类型", "sheet_kind": "disposal_list", "expect": null},
     {"header": "处置情况", "sheet_kind": "disposal_list", "expect": "disposal_method"},
+    {"header": "处置类别", "sheet_kind": "disposal_list", "expect": "disposal_method"},
+    {"header": "卡片编码", "sheet_kind": "disposal_list", "expect": "asset_id"},
+    {"header": "处置原值", "sheet_kind": "disposal_list", "expect": "original_value"},
+    {"header": "处置净值", "sheet_kind": "disposal_list", "expect": "net_value"},
+    {"header": "未税成本", "sheet_kind": "disposal_list", "expect": "original_value"},
     {"header": "变动方式", "sheet_kind": "addition_list", "expect": "addition_method"},
     {"header": "变动方式", "sheet_kind": "disposal_list", "expect": "disposal_method"}
   ]

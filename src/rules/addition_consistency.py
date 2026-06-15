@@ -120,6 +120,9 @@ def check_addition_sample_match(
         return []
 
     issues: list[QcIssue] = []
+    # Exception-summary recognition is diagnostic only for K.02.1; it should
+    # not create a finding unless another rule identifies a concrete mismatch.
+    preview.exception_flags = []
 
     if preview.selected_count and preview.matched_count < preview.selected_count:
         issues.append(

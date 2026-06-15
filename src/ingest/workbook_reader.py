@@ -64,6 +64,26 @@ def diagnose_workbook(path: str | Path, max_rows: int = 100) -> WorkbookDiagnost
 
     for ws in wb.worksheets:
         title = ws.title
+        name_kind, name_score, name_hint = score_by_name(title)
+        if name_kind == SheetKind.SKIP:
+            diag.sheets.append(
+                SheetClassification(
+                    sheet_name=title,
+                    kind=SheetKind.SKIP,
+                    confidence=1.0,
+                    name_score=round(name_score, 3),
+                    content_score=0.0,
+                    name_hint=name_hint,
+                    header_row=None,
+                    mapped_fields=[],
+                    missing_required=[],
+                    missing_recommended=[],
+                    unmapped_headers=[],
+                    notes=[],
+                )
+            )
+            continue
+
         rows = _read_sheet_rows(ws, max_rows=max_rows)
 
         kind, confidence, name_score, content_score, name_hint, header_row = classify_sheet(
@@ -72,8 +92,7 @@ def diagnose_workbook(path: str | Path, max_rows: int = 100) -> WorkbookDiagnost
 
         notes: list[str] = []
         if kind != SheetKind.SKIP:
-            name_kind, ns, _ = score_by_name(title)
-            if name_kind != kind and ns >= 0.7 and kind != SheetKind.UNCLASSIFIED:
+            if name_kind != kind and name_score >= 0.7 and kind != SheetKind.UNCLASSIFIED:
                 notes.append(
                     f"name_content_mismatch: name->{name_kind.value}, selected->{kind.value}"
                 )

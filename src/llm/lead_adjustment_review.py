@@ -10,6 +10,7 @@ from ingest.lead_adjustment_grid import load_adjustment_grid_for_lead
 from ingest.lead_sheet import LeadSheetDataset
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
+from rules.lead_adjustment_internal_consistency import build_adjustment_reconciliation_hints
 from rules.lead_adjustment_gating import PPE_DIRECT_ACCOUNT_ALIASES
 from rules.lead_common import parse_threshold_amount
 from rules.models import QcIssue, Severity
@@ -30,6 +31,7 @@ _SYSTEM_COMBINED = """你是固定资产审计 K.00 Lead「调整汇总表」复
 6. indirect 行：不要求与 PPE 行金额相等；检查原因、计算过程、Refer 是否闭环（SOP【04】易错：其他科目调整仅索引）。
 7. cross_account_policy=flag_not_fail：跨科目不得单独判金额 FAIL 语义；用 cross_account_flags 列出。
 8. 声明无调整但存在非零 signed_amount → assessment=insufficient。
+9. 如果 deterministic_hints 已给出 direct_ppe_amount_check，请在 rationale 中明确写出主表行、汇总表行、折算方式、差异来源；不要只给笼统结论。
 只输出一个 JSON 对象，不要 markdown。"""
 
 _USER_COMBINED_TEMPLATE = """请完成调整汇总表复核，返回 JSON：
@@ -129,7 +131,11 @@ def build_adjustment_review_payload(
             "比对时使用 signed_amount，注意借贷方向可能与单列符号相反。"
         ),
         "ppe_direct_aliases": list(PPE_DIRECT_ACCOUNT_ALIASES),
-        "deterministic_hints": deterministic_hints or [],
+        "deterministic_hints": (
+            deterministic_hints
+            if deterministic_hints is not None
+            else build_adjustment_reconciliation_hints(lead)
+        ),
         "cross_account_policy": "flag_not_fail",
         "workbook_context": workbook_context or {},
     }
@@ -164,6 +170,9 @@ Additional LEAD-017 instructions:
 5. If Dr/Cr direction, sign convention, or account classification is unclear, set
    ppe_impact=unclear and assessment=unclear; do not create a direct mismatch from
    uncertain evidence.
+6. If deterministic_hints contains direct_ppe_amount_check, explain the main row,
+   summary row, sign-normalization mode, and difference source in rationale
+   （主表行、汇总表行、折算方式、差异来源）.
 """
 
 

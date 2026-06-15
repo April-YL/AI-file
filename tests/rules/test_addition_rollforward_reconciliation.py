@@ -10,6 +10,7 @@ from ingest.records import FaListDataset
 from ingest.rollforward_sheet import (
     MovementTransactionAmount,
     RollforwardSheetDataset,
+    _sum_row_transaction_amounts,
     get_movement_transaction_amount,
     parse_rollforward_rows,
 )
@@ -97,6 +98,40 @@ def test_rollforward_ingest_sums_matrix_category_purchase_amounts():
         measure="original_value",
     )
     assert amount == Decimal("25746.67") + Decimal("774300")
+
+
+def test_rollforward_ingest_does_not_double_count_matrix_total_group():
+    row = (
+        "",
+        "",
+        "璐疆",
+        "K.02.1",
+        0,
+        "",
+        0,
+        Decimal("25746.67"),
+        "",
+        Decimal("25746.67"),
+        Decimal("774300"),
+        "",
+        Decimal("774300"),
+        Decimal("6500"),
+        "",
+        Decimal("6500"),
+        Decimal("60000"),
+        "",
+        Decimal("60000"),
+        "",
+        "",
+        0,
+        "",
+        "",
+        0,
+        Decimal("866546.67"),
+        0,
+        Decimal("866546.67"),
+    )
+    assert _sum_row_transaction_amounts(row, label_col_idx=2) == Decimal("866546.67")
 
 
 def test_reconciliation_pass_when_amounts_match():

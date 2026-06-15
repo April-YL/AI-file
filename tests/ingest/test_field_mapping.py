@@ -43,6 +43,39 @@ def test_addition_list_取得方式():
     assert match_standard_field("取得方式", SheetKind.ADDITION_LIST) == "addition_method"
 
 
+def test_addition_list_blocks_opening_original_value():
+    assert match_standard_field("期初原值", SheetKind.ADDITION_LIST) is None
+
+
+def test_addition_list_prefers_ending_original_value_over_opening():
+    mapped, _ = map_headers(
+        [
+            (8, "期初原值"),
+            (11, "期末原值"),
+            (12, "新增方式"),
+        ],
+        SheetKind.ADDITION_LIST,
+    )
+    by_field = {m.standard_field: m for m in mapped}
+    assert by_field["original_value"].source_header == "期末原值"
+    assert by_field["original_value"].column_index == 11
+
+
+def test_addition_list_prefers_added_original_value_over_original_currency():
+    mapped, _ = map_headers(
+        [
+            (19, "原值原币"),
+            (20, "原值本币"),
+            (23, "期初原值"),
+            (25, "新增原值"),
+        ],
+        SheetKind.ADDITION_LIST,
+    )
+    by_field = {m.standard_field: m for m in mapped}
+    assert by_field["original_value"].source_header == "新增原值"
+    assert by_field["original_value"].column_index == 25
+
+
 def test_disposal_处置情况():
     assert match_standard_field("处置情况", SheetKind.DISPOSAL_LIST) == "disposal_method"
 

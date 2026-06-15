@@ -25,6 +25,7 @@ def check_addition_test_package(
     *,
     workbook_sheet_titles: Sequence[str] | None,
     workbook_path: str | Path | None = None,
+    test_sheet_note: str | None = None,
 ) -> list[QcIssue]:
     """检查新增测试执行时是否形成新增清单/测试表/抽样输出三表链条。"""
     if summary is None or not summary.programs or not workbook_sheet_titles:
@@ -33,6 +34,7 @@ def check_addition_test_package(
         summary,
         workbook_sheet_titles=workbook_sheet_titles,
         workbook_path=workbook_path,
+        test_sheet_note=test_sheet_note,
         kind="addition",
     )
 
@@ -42,6 +44,7 @@ def check_disposal_test_package(
     *,
     workbook_sheet_titles: Sequence[str] | None,
     workbook_path: str | Path | None = None,
+    test_sheet_note: str | None = None,
 ) -> list[QcIssue]:
     """检查处置测试执行时是否形成处置清单/测试表/抽样输出三表链条。"""
     if summary is None or not summary.programs or not workbook_sheet_titles:
@@ -50,6 +53,7 @@ def check_disposal_test_package(
         summary,
         workbook_sheet_titles=workbook_sheet_titles,
         workbook_path=workbook_path,
+        test_sheet_note=test_sheet_note,
         kind="disposal",
     )
 
@@ -59,6 +63,7 @@ def _check_k02_package(
     *,
     workbook_sheet_titles: Sequence[str],
     workbook_path: str | Path | None,
+    test_sheet_note: str | None,
     kind: str,
 ) -> list[QcIssue]:
     spec = _package_spec(kind)
@@ -67,6 +72,7 @@ def _check_k02_package(
         kind=kind,
         workbook_path=workbook_path,
         workbook_sheet_titles=list(workbook_sheet_titles),
+        test_sheet_note=test_sheet_note,
     )
     if gate.scope is K02ExecutionScope.WAIVED:
         return []
@@ -136,13 +142,13 @@ def _resolve_execution_scope(
     kind: str,
     workbook_path: str | Path | None,
     workbook_sheet_titles: list[str],
+    test_sheet_note: str | None = None,
 ) -> _GateContext:
     if not _test_marked_executed(programs, kind=kind):
         return _GateContext(scope=K02ExecutionScope.WAIVED)
 
     summary_note = _collect_summary_limited_note(programs, kind=kind)
-    test_sheet_note: str | None = None
-    if workbook_path:
+    if not test_sheet_note and workbook_path:
         test_sheet_note = read_k02_limited_execution_note(
             workbook_path,
             workbook_sheet_titles,
