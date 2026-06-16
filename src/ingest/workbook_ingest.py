@@ -153,8 +153,13 @@ def _disposal_test_summary(
         "waiver_note_text": ds.waiver_note_text,
         "waiver_note_rows": ds.waiver_note_rows,
         "amounts": {k: v.to_dict() for k, v in ds.amounts.items()},
+        "reconciliation_matrix": (
+            ds.reconciliation_matrix.to_dict() if ds.reconciliation_matrix else None
+        ),
         "tested_samples": [row.to_dict() for row in ds.tested_samples],
+        "module_assessments": [m.to_dict() for m in ds.module_assessments],
         "recognition_confidence": ds.recognition_confidence,
+        "usable_for_rules": ds.usable_for_rules,
         "notes": ds.notes,
     }
 
@@ -169,7 +174,9 @@ def _disposal_sample_output_summary(
         "parameters": {k: v.to_dict() for k, v in ds.parameters.items()},
         "amounts": {k: v.to_dict() for k, v in ds.amounts.items()},
         "selected_samples": [row.to_dict() for row in ds.selected_samples],
+        "module_assessments": [m.to_dict() for m in ds.module_assessments],
         "recognition_confidence": ds.recognition_confidence,
+        "usable_for_rules": ds.usable_for_rules,
         "notes": ds.notes,
     }
 
@@ -282,7 +289,7 @@ def _load_fa_list_candidate_sheets(
     path: Path,
     structure: WorkbookStructure,
     *,
-    max_rows: int,
+    max_rows: int | None,
 ) -> list[FaListDataset]:
     datasets: list[FaListDataset] = []
     for name in _candidate_sheet_names(structure, SheetKind.FA_LIST):
@@ -297,7 +304,7 @@ def _load_asset_candidate_sheets(
     structure: WorkbookStructure,
     kind: SheetKind,
     *,
-    max_rows: int,
+    max_rows: int | None,
 ) -> list[FaListDataset]:
     datasets: list[FaListDataset] = []
     for name in _candidate_sheet_names(structure, kind):
@@ -343,14 +350,16 @@ def load_workbook_ingest(
         structure, SheetKind.DISPOSAL_SAMPLE_OUTPUT
     )
 
-    fa_list = load_fa_list_from_workbook(path, sheet_name=fa_sheet, max_rows=max_rows)
+    # Lists feed population-level rules and must never be truncated by the
+    # workpaper-module parsing budget.
+    fa_list = load_fa_list_from_workbook(path, sheet_name=fa_sheet, max_rows=None)
     if not fa_list.records and not fa_list.mapped_fields:
         fa_list = None
 
     fa_list_sheets = (
         [fa_list]
         if fa_list is not None
-        else _load_fa_list_candidate_sheets(path, structure, max_rows=max_rows)
+        else _load_fa_list_candidate_sheets(path, structure, max_rows=None)
     )
 
     rollforward = load_rollforward_from_workbook(
@@ -366,7 +375,7 @@ def load_workbook_ingest(
             path,
             SheetKind.ADDITION_LIST,
             sheet_name=addition_sheet,
-            max_rows=max_rows,
+            max_rows=None,
         )
         if addition_sheet
         else None
@@ -380,7 +389,7 @@ def load_workbook_ingest(
             path,
             structure,
             SheetKind.ADDITION_LIST,
-            max_rows=max_rows,
+            max_rows=None,
         )
     )
 
@@ -408,7 +417,7 @@ def load_workbook_ingest(
             path,
             SheetKind.DISPOSAL_LIST,
             sheet_name=disposal_sheet,
-            max_rows=max_rows,
+            max_rows=None,
         )
         if disposal_sheet
         else None
@@ -422,7 +431,7 @@ def load_workbook_ingest(
             path,
             structure,
             SheetKind.DISPOSAL_LIST,
-            max_rows=max_rows,
+            max_rows=None,
         )
     )
     disposal_list_summary = build_disposal_list_summary(disposal_list)

@@ -49,11 +49,6 @@ def check_addition_rollforward_reconciliation(
             )
         ]
 
-    rf_amount, rf_row = get_movement_transaction_amount(
-        rollforward,
-        transaction_key="purchase",
-        measure="original_value",
-    )
     if rollforward is None or not rollforward.source_sheet:
         return [
             QcIssue(
@@ -71,6 +66,11 @@ def check_addition_rollforward_reconciliation(
             )
         ]
 
+    rf_amount, rf_row = get_movement_transaction_amount(
+        rollforward,
+        transaction_key="purchase",
+        measure="original_value",
+    )
     if rf_amount is None:
         return [
             QcIssue(

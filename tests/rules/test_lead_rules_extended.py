@@ -7,7 +7,8 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-from ingest.lead_sheet import load_lead_from_workbook
+from ingest.lead_sheet import LeadMovementRow, LeadSheetDataset, load_lead_from_workbook
+from ingest.models import RollforwardColumnBinding, RollforwardPeriodRole
 from ingest.rollforward_sheet import RollforwardSheetDataset, parse_rollforward_rows
 from rules.lead_expectation_analysis import check_lead_expectation_analysis
 from rules.lead_movement_rows_complete import check_lead_movement_rows_complete
@@ -309,14 +310,57 @@ def test_rollforward_reconciliation_prefers_k01_check_column(tmp_path: Path):
     )
 
     issues = check_lead_rollforward_tb_reconciliation(lead, rf)
-    assert len(issues) == 2
-    assert {i.field for i in issues} == {
-        "table1_check|original_value",
-        "table1_check|net_value",
-    }
+    assert len(issues) == 1
+    assert issues[0].field == "期末|original_value"
+    assert "并导致净值差异" in issues[0].message
     assert {i.source_sheet for i in issues} == {"K.01 Agree SL to GL"}
     assert {i.procedure_code for i in issues} == {"K.01"}
-    assert {i.source_row for i in issues} == {18, 32}
+    assert {i.source_row for i in issues} == {18}
+
+
+def test_rollforward_reconciliation_checks_opening_and_merges_derived_net():
+    lead = LeadSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        movement_rows=[
+            LeadMovementRow("原值", "K.01", {"py_audited": "1000", "audited_ending": "1100"}, 10),
+            LeadMovementRow("累计折旧", "K.01", {"py_audited": "300", "audited_ending": "350"}, 11),
+            LeadMovementRow("减值准备", "K.01", {"py_audited": "0", "audited_ending": "0"}, 12),
+            LeadMovementRow("净值", None, {"py_audited": "700", "audited_ending": "750"}, 13),
+        ],
+    )
+    rf = RollforwardSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.01 Agree SL to GL",
+        header_row=1,
+        mapped_fields=[],
+        amount_column_bindings=[
+            RollforwardColumnBinding(
+                measure="original_value",
+                period_role=RollforwardPeriodRole.OPENING,
+                source_header="期初原值",
+                column_index=2,
+            )
+        ],
+        opening_totals={
+            "original_value": Decimal("1000"),
+            "accumulated_depreciation": Decimal("290"),
+            "impairment_provision": Decimal("0"),
+            "net_value": Decimal("710"),
+        },
+        ending_totals={
+            "original_value": Decimal("1100"),
+            "accumulated_depreciation": Decimal("350"),
+            "impairment_provision": Decimal("0"),
+            "net_value": Decimal("750"),
+        },
+    )
+
+    issues = check_lead_rollforward_tb_reconciliation(lead, rf)
+
+    assert len(issues) == 1
+    assert issues[0].field == "期初|accumulated_depreciation"
+    assert "并导致净值差异" in issues[0].message
 
 
 def test_run_lead_rules_attaches_metadata(swp_lead_xlsx: Path):

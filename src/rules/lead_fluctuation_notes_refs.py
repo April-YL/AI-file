@@ -19,6 +19,7 @@ _INVESTIGATE_ROLES = ("investigate_quantitative", "investigate_qualitative")
 _NOTE_PATTERNS = (
     re.compile(r"\b(?:note|nb|n)\s*[:#-]?\s*(\d{1,3})\b", re.IGNORECASE),
     re.compile(r"(?:注|说明|备注)\s*[:#-]?\s*(\d{1,3})"),
+    re.compile(r"\[([A-Za-z]{1,3})\]"),
 )
 
 
@@ -41,7 +42,8 @@ def _note_refs(text: str | None) -> set[str]:
     refs: set[str] = set()
     for pattern in _NOTE_PATTERNS:
         for match in pattern.finditer(str(text)):
-            refs.add(str(int(match.group(1))))
+            ref = match.group(1)
+            refs.add(str(int(ref)) if ref.isdigit() else ref.upper())
     return refs
 
 

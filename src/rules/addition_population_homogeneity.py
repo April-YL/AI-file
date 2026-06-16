@@ -9,9 +9,6 @@ from rules.parsing import is_blank, record_is_empty_data_row
 
 RULE_ID = "addition_population_homogeneity"
 _SPECIAL_TERMS = (
-    "在建工程",
-    "转固",
-    "转入",
     "企业合并",
     "合并增加",
     "调拨",

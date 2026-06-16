@@ -167,6 +167,23 @@ def test_rollforward_opening_ending_bindings_and_totals():
     assert rf.ending_totals.get("net_value") == Decimal("960")
 
 
+def test_workbook_ingest_does_not_truncate_addition_list(tmp_path: Path):
+    path = tmp_path / "long_addition.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "新增清单"
+    ws.append(["固定资产编号", "原值", "新增方式"])
+    for idx in range(300):
+        ws.append([f"FA-TEST-{idx:03d}", 1, "购置"])
+    wb.save(path)
+    wb.close()
+
+    ctx = load_workbook_ingest(path, max_rows=150)
+
+    assert ctx.addition_list is not None
+    assert len(ctx.addition_list.records) == 300
+
+
 def test_rollforward_detects_k01_sections_six_blocks():
     rows = [
         ("K.01 Agree SL to GL",),

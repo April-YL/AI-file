@@ -104,3 +104,42 @@ def test_exception_summary_recognition_is_not_a_finding():
     issues = check_addition_sample_match(addition_test, sample_output)
 
     assert not [issue for issue in issues if issue.field == "exception_summary"]
+
+
+def test_unactivated_replacement_sample_is_not_required_in_detailed_test():
+    from ingest.addition_test_sheet import AdditionSampleRow
+
+    addition_test = AdditionTestSheetDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.1",
+        tested_samples=[
+            AdditionTestedSampleRow(
+                source_row=20,
+                asset_id="FA-TEST-001",
+                asset_name="Primary",
+                original_value="100",
+            )
+        ],
+    )
+    sample_output = AdditionSampleOutputDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.1a",
+        selected_samples=[
+            AdditionSampleRow(
+                source_row=30,
+                sample_type="代表性样本",
+                asset_id="FA-TEST-001",
+                asset_name="Primary",
+                original_value="100",
+            ),
+            AdditionSampleRow(
+                source_row=31,
+                sample_type="替换样本",
+                asset_id="FA-TEST-R01",
+                asset_name="Reserve",
+                original_value="80",
+            ),
+        ],
+    )
+
+    assert check_addition_sample_match(addition_test, sample_output) == []

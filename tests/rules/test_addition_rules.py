@@ -64,7 +64,7 @@ def test_addition_population_homogeneity_flags_non_purchase_methods():
     )
     assert len(issues) == 1
     assert issues[0].severity == Severity.NEED_REVIEW
-    assert "在建工程转入" in issues[0].message
+    assert "在建工程转入" not in issues[0].message
     assert "企业合并增加" in issues[0].message
 
 
@@ -93,9 +93,6 @@ def test_addition_runner_uses_dataset_metadata():
         ],
     )
     issues = run_addition_rules(dataset)
-    assert {i.rule_id for i in issues} == {
-        "addition_population_homogeneity",
-        "addition_rollforward_reconciliation",
-    }
+    assert {i.rule_id for i in issues} == {"addition_rollforward_reconciliation"}
     recon = next(i for i in issues if i.rule_id == "addition_rollforward_reconciliation")
     assert recon.severity == Severity.NEED_REVIEW

@@ -635,3 +635,193 @@ G 科技适合作为“有处置清单但拒绝执行 K.02.2 详细测试”的�
 - 下一轮性能优化优先做“单次打开 workbook，共享多 sheet 行数据”的 ingest cache，而不是继续在单个规则里零散修补。
 - 对 J 公司 rules 阶段约 47 秒的耗时继续拆分，重点看 `build_report`、手工复核区、K.01/Lead section 构建是否存在重复遍历大对象。
 - UI 侧可考虑增加更明确的阶段提示：读取底稿、执行规则、导出标注分别显示耗时；暂不建议为了快而默认跳过标注，因为“质检报告 + 底稿标注”仍是必交付项。
+
+## 2026-06-15 K.02.2 处置测试 ingest 增强：总体核对矩阵、锚点分块与置信度门控
+
+本轮在完善处置 rules 前，先补强 K.02.2 处置测试的结构化读取准确性。开发口径已与业务确认：
+
+- 处置清单中的程序说明和清单编制说明可在实际底稿中删除，不作为必要保留项；处置清单字段名称允许变体，继续复用 FA list / 新增清单的字段映射与动态表头识别机制。
+- K.02.2 和 K.02.2a 的行列位置均不固定，不得按固定行列读取。
+- K.02.2“处置/报废总金额”来源于处置清单；“Breakdown 中处置/报废金额”来源于 K.01 后推明细表。
+- K.01 后推明细表不直接包含净值项；净值必须由 `原值 - 累计折旧 - 减值准备`计算。处置清单可能含净值列，但仍应使用另外三项重新计算并核对。
+
+已完成：
+
+- `src/ingest/disposal_test_sheet.py`：新增 K.02.2 总体核对矩阵结构，按语义和上下文识别以下行项目及金额维度，不绑定固定行列：
+  - 行项目：处置清单总金额、K.01 Breakdown 金额、差异、是否需要进一步调查。
+  - 金额维度：原值、累计折旧、减值准备、计算净值。
+  - 每个金额保存值、公式、来源行列和单元格坐标。
+- 公式来源检查：
+  - 处置/报废总金额的原值、累计折旧、减值公式应引用处置清单。
+  - Breakdown 金额的对应公式应引用 K.01。
+  - 净值公式应引用同一行的原值、累计折旧和减值准备。
+- 锚点分块增强：
+  - 候选金额表头附近必须同时出现处置总金额、Breakdown、差异/调查等总体核对行项目。
+  - SOP 指引、易错点等长段说明文字不作为业务金额锚点。
+  - 详细测试样本表即使同样包含原值、累计折旧、减值和净值列，也不会被误判为总体核对模块。
+- 置信度兜底增强：
+  - K.02.2 总体核对矩阵输出 `recognition_confidence`、`recognition_evidence`、`missing_components`、`ambiguous_candidates` 和 `usable_for_rules`。
+  - K.02.2 与 K.02.2a 输出模块级 `module_assessments` 和 sheet 级 `usable_for_rules`。
+  - 公式来源未确认、候选模块冲突或结构缺失时，`usable_for_rules=False`，后续确定性 rules 不应直接据此判 FAIL。
+- `src/ingest/workbook_ingest.py`：整本 ingest 摘要已展示总体核对矩阵、模块评估和规则可用门控。
+- `tests/ingest/test_disposal_test_sheet.py`：新增动态行列、SOP 同名文字干扰、错误公式来源和模块评估测试。
+
+已验证：
+
+- `.\.venv\Scripts\pytest.exe tests\ingest\test_disposal_test_sheet.py tests\ingest\test_disposal_list.py tests\report\test_workbook_pipeline.py::test_workbook_qc_includes_disposal_sample_issue tests\rules\test_disposal_consistency.py -q --basetemp .pytest_tmp_disposal_ingest_final`：`18 passed`
+- FY26 SOP 示例包 `K.02.2 处置测试 ` 实测：
+  - 总体核对模块识别为第 13–17 行；详细测试样本表未被误识别。
+  - 四个金额维度及处置清单/K.01 公式来源识别正确。
+  - 净值公式关系识别正确。
+  - 总体核对矩阵置信度 `1.0`，`usable_for_rules=True`。
+
+下一步建议：
+
+- 基于 `reconciliation_matrix.usable_for_rules` 开发 P0 `disposal_rollforward_reconciliation`，核对处置清单、K.02.2 与 K.01 的原值、累计折旧、减值准备及计算净值。
+- 处置清单净值列存在时，与重新计算净值核对；不存在时不直接判缺失。
+- 当总体核对模块低置信度或公式来源未确认时，规则应输出 `NEED_REVIEW`，不得直接判 `FAIL`。
+
+## 2026-06-15 K.02.2 处置测试 rules 阶段 1–5：总体勾稽、清单、选样、详细测试与 LLM 语义复核
+
+本轮在处置测试 ingest 增强完成后，同时完成了阶段 1“总体金额勾稽”和阶段 2“处置清单确定性规则”。实现顺序仍按“先总体核对、再清单规则、最后联合回归”执行，避免混淆读取问题与规则口径问题。
+
+已完成的总体核对规则：
+
+- `disposal_reconciliation_readability`：K.02.2 总体核对模块未达到确定性规则执行条件时，仅输出 `NEED_REVIEW`。
+- `disposal_reconciliation_formula_source`：检查处置/报废总金额是否引用处置清单、Breakdown 金额是否引用 K.01；来源错误为 `FAIL`，无法确认时为 `NEED_REVIEW`。
+- `disposal_net_value_recalculation`：检查 K.02.2 总体核对模块中净值是否等于原值减累计折旧减减值准备。
+- `disposal_rollforward_reconciliation`：核对处置清单、K.02.2 总体核对模块和 K.01 后推处置行的原值、累计折旧、减值准备及计算净值。
+- `disposal_difference_investigation`：差异超过 Lead SAD 时，检查对应金额维度是否标记需要进一步调查。
+
+已完成的处置清单规则：
+
+- `disposal_required_fields`：检查处置清单资产身份、原值、累计折旧、减值准备、处置日期和减少方式；净值列允许缺失。
+- `disposal_list_net_value_recalculation`：处置清单存在净值列时，使用原值、累计折旧和减值准备重新计算并核对。
+- `disposal_method_classification`：减少方式无法归类为出售、报废或其他减少时，输出 `NEED_REVIEW`；未分类金额不得直接纳入处置测试总体。
+- `disposal_other_reduction_over_tt`：其他减少与出售/报废性质不同；金额超过 TT 或未读取到 TT 时，提示人工确认是否需要单独总体和其他审计程序。
+
+已完成的选样输出规则（阶段 3）：
+
+- `disposal_sample_pool_amount_match`：将 K.02.2a 样本池总体金额与处置清单中出售/报废净值核对，不使用包含其他减少的清单总减少金额。
+- `disposal_sampling_te_cra_consistency`：检查 K.02.2a 使用的 TE、CRA 是否与 Lead 一致。
+- `disposal_sample_replacement_reason`：存在替换样本但未说明替换原因时，输出 `NEED_REVIEW`。
+- K.02.2a 行列位置不固定；选样输出已识别但 `usable_for_rules=False` 时，仅提示读取复核，不直接产生确定性差异结论。
+
+已完成的 K.02.2 详细测试规则（阶段 4）：
+
+- `disposal_test_attributes_complete`：检查 K.02.2 三个固定测试属性是否完整执行。
+- `disposal_test_amount_recalculation`：检查净值、处置损益及售价差异的重算关系；净值使用原值、累计折旧和减值准备确认，不要求后推明细表直接提供净值。
+- `disposal_sale_evidence_complete`：出售样本检查支持性证据金额和证据描述；报废样本不机械要求售价。
+- `disposal_exception_followup`：测试属性为否、存在非零差异或其他异常但未记录后续处理时，输出 `NEED_REVIEW`。
+
+已完成的 LLM 语义复核（阶段 5）：
+
+- `src/llm/disposal_review.py`：围绕不执行理由、样本选择说明、证据描述、异常跟进和其他减少处理执行语义复核。
+- LLM 仅辅助评价文字说明是否充分，不负责计算金额、匹配样本或覆盖确定性规则产生的 `FAIL` / `WARN`。
+- LLM 处置语义复核已接入整本底稿流水线；未启用 LLM 时不影响确定性规则执行。
+
+关键业务口径：
+
+- 汇总页明确拒绝执行处置测试时，不运行处置总体金额规则和处置清单规则，避免对允许不编制的底稿误报。
+- K.01 后推明细表不直接含净值项；K.01 净值仅由原值、累计折旧和减值准备计算。
+- 处置清单净值列不是必需字段；存在时必须与重新计算净值一致。
+- 累计折旧兼容正数和负数展示口径，净值重算使用累计折旧和减值准备的绝对值。
+- 总体勾稽仅使用出售/报废减少；其他减少与未分类减少不混入 K.02.2 出售/报废测试总体。
+- K.02.2 总体核对模块 `usable_for_rules=False` 时，只输出读取复核提示，不继续产生确定性金额差异结论。
+
+接入情况：
+
+- `src/rules/disposal_reconciliation.py`：阶段 1 总体核对规则。
+- `src/rules/disposal_list_rules.py`：阶段 2 处置清单规则。
+- `src/rules/disposal_sampling_output.py`：阶段 3 选样输出规则。
+- `src/rules/disposal_detailed_test.py`：阶段 4 K.02.2 详细测试规则。
+- `src/llm/disposal_review.py`：阶段 5 处置语义复核。
+- `src/rules/disposal_runner.py`：按执行路径门控并统一编排总体核对、清单、选样输出、详细测试和样本一致性规则。
+- `src/report/pipeline.py`：向处置规则传入处置清单、清单汇总、K.01 和 Lead，并在启用 LLM 时执行处置语义复核。
+- `src/rules/registry.py`：新增规则均已注册为 implemented。
+
+已验证：
+
+- `.\.venv\Scripts\pytest.exe tests\rules\test_disposal_reconciliation.py tests\rules\test_disposal_list_rules.py tests\rules\test_disposal_consistency.py tests\rules\test_addition_test_package.py tests\report\test_workbook_pipeline.py tests\rules\test_registry.py -q --basetemp .pytest_tmp_disposal_rules_final`：`37 passed`
+- `.\.venv\Scripts\pytest.exe tests\rules\test_disposal_sampling_output.py tests\rules\test_disposal_detailed_test.py tests\rules\test_disposal_consistency.py tests\rules\test_disposal_reconciliation.py tests\rules\test_disposal_list_rules.py tests\llm\test_disposal_review.py tests\report\test_workbook_pipeline.py tests\rules\test_registry.py -q --basetemp .pytest_tmp_disposal_stage345_final3`：`35 passed`
+- FY26 SOP 示例包实测：处置规则输出 `0 issues`。
+- 已验证汇总页明确拒绝执行时，即使工作簿残留处置清单，也不会触发处置清单或总体金额规则。
+
+后续建议：
+
+1. 使用更多实际处置底稿回归阶段 1–5，重点覆盖动态行列、字段名称变体、出售与报废混合、其他减少占比较高以及替换样本场景。
+2. 继续验证 K.02.2a 已选样本与 K.02.2 实测样本之间的资产编号、净值和样本类型一致性边界，避免因底稿表述差异产生误报。
+3. 结合实际 LLM 输出复核触发阈值和提示质量；LLM 结论继续保持辅助性质，不覆盖确定性规则结论。
+## 2026-06-16 FAQC J 案例复测修复沉淀：新增测试与 Lead/K.01 误报收敛
+
+本轮基于 `E:\FAQC\待优化0615.txt` 以及 `E:\AI file\固定资产质检agent\质检测试结果\待分析` 中 J 公司最新复测结果，重点处理“此前已矫正问题再次大规模误报”的风险。结论是：本次问题不是单一规则错误，而是读取层截断、业务口径误解、LLM 兜底越界、K.01 期初识别不稳共同叠加导致。
+
+### 已修复问题
+
+1. 新增清单被截断
+   - 问题：整本 ingest 的 `max_rows` 参数被传入新增清单、处置清单、FA list 等资产级总体清单，导致 J 公司新增清单只读到前部记录，后续规则基于不完整总体判断，产生大量错误。
+   - 修复：程序页仍可限行读取，但资产级总体清单改为完整读取，不再受程序页 `max_rows` 截断。
+   - 验证：J 公司新增清单可读到 1006 条记录；购置新增金额恢复为 `5,852,456.94`，购置记录数为 588。
+
+2. 新增测试总体口径被混淆
+   - 问题：新增清单为完整性目的包含全部新增，包括购置和在建工程转入；但固定资产 K.02.1 新增测试默认测试购置新增。此前一度把“清单全部新增”误当作“新增测试总体”，使在建工程转入被错误纳入 K.02.1 异常判断。
+   - 修复：K.02.1 Breakdown 购置金额继续取 K.01 后推明细表购置行；购置总金额继续取新增清单中的购置新增；选样输出样本池按购置总体核对。
+   - 业务口径：在建工程转入默认在在建工程底稿测试，除非未开在建工程底稿且转固金额重大，否则不在固定资产新增测试中直接作为异常。
+
+3. 新增 LLM 识别越界
+   - 问题：LLM 识别层在看到“在建工程转入/转固”等非购置方式时，可能把完整性清单中的正常项目提示为特殊新增来源问题。
+   - 修复：当非购置来源仅为默认在建工程转入/转固类项目时，LLM 不再输出 `special_addition_source` 类提示；LLM 仅作为兜底复核，不扩大 SOP 口径，不覆盖确定性规则结论。
+
+4. Lead/K.01 期初识别误报
+   - 问题：J 公司 Lead 中期初数可通过关键锚点定位，但 K.01 后推表内没有足够可靠的期初语义锚点。此前把泛化的“账面数”列误当作 K.01 期初列，导致期初原值、累计折旧、净值出现大额假差异。
+   - 修复：K.01 期初勾稽只在识别到明确期初锚点时执行，例如年初、期初、上期末等语义；不按固定行列读取，也不把普通“账面数”默认视为期初。
+   - 注意：用户确认的 `L64/L65、2023/12/31、审定数` 是 Lead 侧关键锚点信息，后续如要增强 K.01 期初识别，也必须通过锚点语义识别，不能硬编码行列。
+
+5. Lead/K.01 差异展示收敛
+   - 问题：同一底层差异可能同时触发累计折旧差异和派生净值差异，导致报告看起来像多个独立错误。
+   - 修复：当原值、累计折旧、减值准备等组件差异已经存在时，净值差异作为派生影响合并展示，不再重复单独报错。
+
+6. A3 与 Diff 类问题合并
+   - 问题：Check with A3 与 Diff 相关问题在同一科目下可能重复展示。
+   - 修复：同一科目的 A3/Diff/缺少说明合并为一个 issue，便于质检人员一次性复核。
+
+### 本次暴露的关键教训
+
+- `ingest` 读取底稿并整理字段时，程序说明页可以限行，但资产总体清单不能限行；否则规则读到的是不完整总体。
+- 清单完整性口径和测试总体口径必须分开：新增清单可以包含全部新增，但 K.02.1 默认测试购置新增。
+- 锚点识别必须优先于固定行列；即使用户指出某案例的行列位置，也只能作为理解样例，不能写成固定位置规则。
+- LLM 兜底层应帮助发现“读错、漏读、语义可疑”，不能替代 SOP，也不能把正常业务口径扩大成异常。
+- 大规模误报时，应优先建立案例最小回归基线，再修复明确根因，避免反复局部补丁。
+
+### 当前验证结果
+
+- 核心回归命令：
+  - `.\.venv\Scripts\pytest.exe tests\ingest\test_workbook_ingest.py tests\rules\test_addition_rules.py tests\rules\test_addition_rollforward_reconciliation.py tests\rules\test_addition_sampling_output.py tests\rules\test_lead_rules_extended.py tests\rules\test_lead_check_with_a3_row.py tests\llm\test_addition_review.py -q --basetemp .pytest_tmp_stage12_final6`
+- 结果：`59 passed`，仅有 pytest cache 权限类 warning，不影响规则结果。
+- J 公司新增测试侧：新增清单完整读取后，购置总体与 K.01 购置行口径恢复一致，新增测试相关误报已明显收敛。
+- Lead/K.01 侧：期初差异不再在缺少 K.01 明确期初锚点时强行判断；期末累计折旧差异及其派生净值影响合并展示。
+
+### 待解决问题
+
+1. 需要继续补充 J 案例完整回归
+   - 当前已完成核心规则回归和关键读取验证，但仍建议用 J 公司完整流水线再跑一次报告和标注输出，确认 UI/报告层没有残留重复 issue。
+
+2. 需要优化报告与标注层展示
+   - 多个底层 issue 在报告中仍可能显得偏散，应继续做 finding 合并、批注定位去重、Question/Comment 文案压缩。
+   - `QC_Locator` 等技术定位信息应隐藏或移至内部列，避免干扰审计人员阅读。
+
+3. 需要继续完善日期与截止性规则
+   - 新增资本化日期、处置日期、期后/期前截止等检查仍待补齐。
+
+4. 需要继续完善控制转移证据复核
+   - 对处置销售、报废、其他减少的支持性证据充分性，目前仍有较多需要 `NEED_REVIEW` 的人工判断场景。
+
+5. 需要补强 K.01 期初锚点变体识别
+   - 后续可增加对更多可靠期初锚点组合的识别，但原则仍是名称 + 内容 + 上下文锚点，不按固定行列。
+
+6. 需要扩大案例层回归
+   - J 公司只是本轮最小回归基线；后续应增加 G 科技、SOP 修改版、标准模板及更多实际底稿，形成新增、处置、Lead/K.01 的组合回归集。
+
+### 下一步建议
+
+优先顺序建议为：先跑 J 公司完整流水线确认报告和标注层残留问题，再处理报告展示去重与文案压缩，随后补充日期/截止性规则和 K.01 期初锚点变体。LLM 继续保持“兜底复核”定位，只在确定性规则无法判断或读取可疑时辅助提示，不进入金额勾稽主判断。

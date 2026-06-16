@@ -26,7 +26,7 @@ from rules.lead_tt_gam_range import check_lead_tt_gam_range
 from rules.lead_tt_overall_min import check_lead_tt_overall_min
 from rules.lead_volatility_threshold_link import check_lead_volatility_threshold_link
 from rules.materiality_consistency import check_materiality_consistency
-from rules.models import QcIssue
+from rules.models import QcIssue, Severity
 from rules.risk_threshold_consistency import check_risk_threshold_consistency
 from rules.unexpected_movement_investigation import check_unexpected_movement_investigation
 
@@ -61,6 +61,19 @@ def run_lead_rules(
     adjustment_extracted_rows: list[dict] | None = None,
 ) -> list[QcIssue]:
     """执行全部 Lead 相关规则（不含 attach_rule_metadata）。"""
+    if not lead.usable_for_rules:
+        return [
+            QcIssue(
+                asset_id=None,
+                rule_id="lead_ingest_readability",
+                field="movement_table",
+                severity=Severity.NEED_REVIEW,
+                message="Lead movement table ingest is unreliable; dependent checks were paused.",
+                suggestion="Review account rows, amount columns, Check with A3 / Diff, and Notes boundaries.",
+                procedure_code="K.00",
+                source_sheet=lead.source_sheet,
+            )
+        ]
     issues: list[QcIssue] = []
     issues.extend(check_lead_required_fields(lead))
     issues.extend(check_lead_analysis_date_after_period_end(lead))

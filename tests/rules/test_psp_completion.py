@@ -801,3 +801,26 @@ def test_dep_tod_name_only_without_content_does_not_count_as_executed(tmp_path):
     )
     assert any(i.field == "waiver_reason" and i.source_row in (18, 19) for i in issues)
     assert not any(i.field == "execution_status_consistency" for i in issues)
+
+
+def test_swp_group_headers_sample_output_and_placeholder_index_are_skipped():
+    rows = [
+        PspProgramRow("K.02 K.02.2 处置测试", "程序页", None, "不执行的原因", None, 10, False),
+        PspProgramRow("K.02.2a 处置选样输出", "K.02.2a 处置选样输出", None, None, None, 13, False),
+        PspProgramRow(
+            "减值测试",
+            "项目组自行填写底稿索引",
+            "是",
+            None,
+            None,
+            19,
+            True,
+        ),
+    ]
+
+    issues = check_psp_completion(
+        _dataset(rows),
+        workbook_sheet_titles=["K.02.2 处置测试", "K.02.2a 处置选样输出"],
+    )
+
+    assert issues == []

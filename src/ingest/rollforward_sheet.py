@@ -913,7 +913,13 @@ def _extract_side_by_side_table2_table3(
 def _extract_b1_matrix_totals_and_checks(
     rows: list[tuple[Any, ...]],
     region: K01SectionRegion | None,
-) -> tuple[dict[str, Decimal | None], dict[str, Decimal | None], dict[str, int], int | None]:
+) -> tuple[
+    dict[str, Decimal | None],
+    dict[str, Decimal | None],
+    dict[str, Decimal | None],
+    dict[str, int],
+    int | None,
+]:
     """读取 SOP/Hybrid 表1的合计期末数和 CHECK 列。
 
     标准 K.01 中表1按资产类别横向展开，最后一组为“合计”，通常包含
@@ -921,7 +927,7 @@ def _extract_b1_matrix_totals_and_checks(
     check 差异不能作为 K.01 期末合计。
     """
     if region is None or not region.start_row or not region.end_row:
-        return {}, {}, {}, None
+        return {}, {}, {}, {}, None
 
     start_idx = region.start_row - 1
     end_idx = min(region.end_row, len(rows))
@@ -934,7 +940,7 @@ def _extract_b1_matrix_totals_and_checks(
                 total_label_col = c_idx + 1
                 total_header_row = r_idx + 1
     if total_label_col is None:
-        return {}, {}, {}, None
+        return {}, {}, {}, {}, None
 
     subheader_row: tuple[Any, ...] | None = None
     subheader_row_no: int | None = None
@@ -955,7 +961,7 @@ def _extract_b1_matrix_totals_and_checks(
             text = _cell_str(subheader_row[col_no - 1]) or ""
             if "审定数" in text:
                 ending_col = col_no
-            elif "账面数" in text and opening_col is None:
+            elif any(token in text for token in ("年初", "期初", "上期末")) and opening_col is None:
                 opening_col = col_no
             elif text.upper() == "CHECK":
                 check_col = col_no
@@ -963,8 +969,6 @@ def _extract_b1_matrix_totals_and_checks(
     # 若未找到子表头，按标准三列组兜底：合计账面数/调整/审定数/check。
     if ending_col is None:
         ending_col = total_label_col + 2
-    if opening_col is None:
-        opening_col = total_label_col
     if check_col is None and subheader_row_no is not None:
         for col_no in range(ending_col + 1, min(ending_col + 4, len(subheader_row or ())) + 1):
             if (_cell_str((subheader_row or ())[col_no - 1]) or "").upper() == "CHECK":
@@ -995,7 +999,8 @@ def _extract_b1_matrix_totals_and_checks(
             continue
 
         ending[current_measure] = _amount_at_col(row, ending_col)
-        opening[current_measure] = _amount_at_col(row, opening_col)
+        if opening_col is not None:
+            opening[current_measure] = _amount_at_col(row, opening_col)
         if check_col is not None:
             checks[current_measure] = _amount_at_col(row, check_col)
             check_rows[current_measure] = row_no
@@ -1003,7 +1008,7 @@ def _extract_b1_matrix_totals_and_checks(
     total_row = None
     if ending:
         total_row = max(check_rows.values()) if check_rows else None
-    return ending, checks, check_rows, total_row
+    return opening, ending, checks, check_rows, total_row
 
 
 def _text_cells_in_region(
@@ -1621,10 +1626,12 @@ def parse_rollforward_rows(
         for b in bindings
     ):
         notes.append("period_labels_applied")
-    table1_ending, table1_checks, table1_check_rows, table1_total_row = _extract_b1_matrix_totals_and_checks(
+    table1_opening, table1_ending, table1_checks, table1_check_rows, table1_total_row = _extract_b1_matrix_totals_and_checks(
         rows,
         section_regions.get("b1_bkd_main_table"),
     )
+    if _binding_totals_have_values(table1_opening):
+        opening = table1_opening
     if _binding_totals_have_values(table1_ending):
         ending = table1_ending
         total_row = table1_total_row

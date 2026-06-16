@@ -202,6 +202,30 @@ def test_match_movement_role_py_audited_header():
     from ingest.lead_sheet import _match_movement_role
 
     assert _match_movement_role("上期末审定数") == "py_audited"
+
+
+def test_lead_movement_duplicate_audited_headers_and_notes_in_other_column():
+    from ingest.lead_sheet import _match_movement_role
+
+    rows = [
+        ("", "", "科目名称", "索引", "账面数", "", "", "账面未审数", "", "", "审定数", "审定数", "金额", "百分比", "注", "进一步调查？", "进一步调查？"),
+        ("", 2240, "原值", "K.01", 100, "", "", 100, "", "", 100, 90, 10, "11%", "", "否", "否"),
+        ("", 2241, "累计折旧", "K.01", 30, "", "", 30, "", "", 30, 20, 10, "50%", "[A]", "是", "否"),
+        ("", 2242, "减值准备", "K.01", 0, "", "", 0, "", "", 0, 0, 0, "0%", ""),
+        ("", "", "净值", "", 70, "", "", 70, "", "", 70, 70, 0, "0%", ""),
+        ("", "", "check with A3", "", 70, "", "", 70, "", "", 70, 70),
+        ("", "", "Diff", "", 0, "", "", 0, "", "", 0, 0),
+        ("", "Notes:"),
+        ("", "[A] 累计折旧变动已执行合理性测试，未见异常。"),
+    ]
+
+    ds = parse_lead_sheet_rows(rows)
+
+    assert "py_audited" in {binding.role for binding in ds.movement_bindings}
+    assert {"investigate_quantitative", "investigate_qualitative"} <= {
+        binding.role for binding in ds.movement_bindings
+    }
+    assert ds.fluctuation_notes and "[A]" in ds.fluctuation_notes
     assert _match_movement_role("期末审定数") == "audited_ending"
     assert _match_movement_role("基于波动幅度判断，是否进一步调查？") == "investigate_quantitative"
     assert _match_movement_role("基于定性考虑判断，是否进一步调查？") == "investigate_qualitative"

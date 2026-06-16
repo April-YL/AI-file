@@ -10,6 +10,8 @@ from ingest.addition_test_sheet import (
     AdditionTestedSampleRow,
     AdditionTestSheetDataset,
 )
+from ingest.models import AssetRecord
+from ingest.records import FaListDataset
 from llm.addition_review import (
     RULE_ID,
     SYSTEM_PROMPT,
@@ -163,3 +165,30 @@ def test_run_addition_review_maps_unclear_to_need_review():
     assert len(issues) == 1
     assert issues[0].severity == Severity.NEED_REVIEW
     assert issues[0].field == "cross_sheet_explanation"
+
+
+def test_addition_review_skips_cip_transfer_special_source_by_default():
+    mock_review = {
+        "topics": [
+            {
+                "topic": "special_addition_source",
+                "assessment": "insufficient",
+                "rationale": "在建工程转入未说明测试安排",
+                "missing_evidence": [],
+                "suggested_action": "补充说明",
+            }
+        ]
+    }
+    addition_list = FaListDataset(
+        source_file="case.xlsx",
+        source_sheet="新增清单",
+        mapped_fields=[],
+        records=[
+            AssetRecord(addition_method="购置"),
+            AssetRecord(addition_method="在建工程转入"),
+        ],
+    )
+    with patch("llm.addition_review.chat_completion_json", return_value=mock_review):
+        issues, _ = run_addition_llm_review(_config(), addition_list=addition_list)
+
+    assert issues == []

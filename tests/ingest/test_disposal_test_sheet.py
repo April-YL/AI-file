@@ -192,3 +192,125 @@ def test_disposal_execution_path_test_sheet_waiver_note(tmp_path: Path):
     assert ctx.disposal_execution_path is not None
     assert ctx.disposal_execution_path.path_kind == "test_sheet_waiver_note"
     assert ctx.disposal_execution_path.missing_components == []
+
+
+def test_disposal_reconciliation_matrix_uses_dynamic_layout_and_formula_sources(tmp_path: Path):
+    path = tmp_path / "disposal_dynamic_matrix.xlsx"
+    wb = _base_workbook(path)
+    ws = wb["K.02.2 处置测试"]
+    ws.insert_rows(1, 20)
+    for row in ws.iter_rows(min_row=33, max_row=37, min_col=1, max_col=12):
+        for cell in row:
+            cell.value = None
+    ws["A5"] = "基础操作指引：处置/报废总金额、Breakdown中处置/报废金额及差异。"
+    ws["F27"] = "账面净值"
+    ws["H27"] = "原值"
+    ws["J27"] = "累计折旧"
+    ws["L27"] = "减值准备"
+    ws["C28"] = "处置/报废总金额"
+    ws["F28"] = "=H28-J28-L28"
+    ws["H28"] = "='处置清单'!E50"
+    ws["J28"] = "='处置清单'!F50"
+    ws["L28"] = "='处置清单'!G50"
+    ws["C29"] = "Breakdown中处置/报废金额"
+    ws["F29"] = "=H29-J29-L29"
+    ws["H29"] = "=-'K.01 Agree SL to GL'!AI15"
+    ws["J29"] = "=-'K.01 Agree SL to GL'!AI21"
+    ws["L29"] = "=-'K.01 Agree SL to GL'!AI27"
+    ws["C30"] = "差异"
+    ws["F30"] = "=F28-F29"
+    ws["H30"] = "=H28-H29"
+    ws["J30"] = "=J28-J29"
+    ws["L30"] = "=L28-L29"
+    ws["C31"] = "差异是否需要进一步调查？"
+    ws["F31"] = '=IF(ABS(F30)>100,"是","否")'
+    ws["H31"] = '=IF(ABS(H30)>100,"是","否")'
+    ws["J31"] = '=IF(ABS(J30)>100,"是","否")'
+    ws["L31"] = '=IF(ABS(L30)>100,"是","否")'
+    wb.save(path)
+    wb.close()
+
+    ctx = load_workbook_ingest(path)
+    matrix = ctx.disposal_test.reconciliation_matrix
+
+    assert matrix is not None
+    assert matrix.header_row == 27
+    assert matrix.measure_columns == {
+        "net_value": 6,
+        "original_value": 8,
+        "accumulated_depreciation": 10,
+        "impairment_provision": 12,
+    }
+    assert matrix.rows["disposal_list"].source_row == 28
+    assert matrix.rows["rollforward"].source_row == 29
+    assert matrix.rows["disposal_list"].measures["original_value"].formula == "='处置清单'!E50"
+    assert "K.01 Agree SL to GL" in matrix.rows["rollforward"].measures["original_value"].formula
+    assert "disposal_list_formula_source=recognized" in matrix.recognition_evidence
+    assert "rollforward_formula_source=recognized" in matrix.recognition_evidence
+    assert "net_formula_relationship=recognized" in matrix.recognition_evidence
+    assert matrix.ambiguous_candidates == []
+    assert matrix.usable_for_rules is True
+    assert ctx.disposal_test.usable_for_rules is True
+
+
+def test_disposal_reconciliation_matrix_blocks_wrong_formula_source(tmp_path: Path):
+    path = tmp_path / "disposal_wrong_source.xlsx"
+    wb = _base_workbook(path)
+    ws = wb["K.02.2 处置测试"]
+    ws["E13"] = "账面净值"
+    ws["G13"] = "原值"
+    ws["I13"] = "累计折旧"
+    ws["K13"] = "减值准备"
+    ws["B14"] = "处置/报废总金额"
+    ws["E14"] = "=G14-I14-K14"
+    ws["G14"] = "=1000"
+    ws["I14"] = "=700"
+    ws["K14"] = "=0"
+    ws["B15"] = "Breakdown中处置/报废金额"
+    ws["E15"] = "=G15-I15-K15"
+    ws["G15"] = "=1000"
+    ws["I15"] = "=700"
+    ws["K15"] = "=0"
+    wb.save(path)
+    wb.close()
+
+    ctx = load_workbook_ingest(path)
+    matrix = ctx.disposal_test.reconciliation_matrix
+
+    assert matrix is not None
+    assert matrix.rows["disposal_list"].source_row == 14
+    assert "disposal_list_formula_source=unconfirmed" in matrix.recognition_evidence
+    assert "rollforward_formula_source=unconfirmed" in matrix.recognition_evidence
+    assert matrix.usable_for_rules is False
+    assert ctx.disposal_test.usable_for_rules is False
+
+
+def test_disposal_modules_and_sample_output_confidence_are_exposed(tmp_path: Path):
+    path = tmp_path / "disposal_modules.xlsx"
+    wb = _base_workbook(path)
+    wb.save(path)
+    wb.close()
+
+    ctx = load_workbook_ingest(path)
+    test_modules = {m.module_key: m for m in ctx.disposal_test.module_assessments}
+    sample_modules = {m.module_key: m for m in ctx.disposal_sample_output.module_assessments}
+
+    assert set(test_modules) == {
+        "population_definition",
+        "amount_reconciliation",
+        "key_item_representation",
+        "test_attributes",
+        "sample_table",
+        "exception_summary",
+    }
+    assert test_modules["sample_table"].status == "recognized"
+    assert test_modules["amount_reconciliation"].status == "partial"
+    assert set(sample_modules) == {
+        "sampling_prerequisites",
+        "source_data_summary",
+        "sampling_strategy",
+        "accounting_reconciliation",
+        "selected_samples",
+    }
+    assert sample_modules["selected_samples"].status == "recognized"
+    assert ctx.disposal_sample_output.usable_for_rules is True

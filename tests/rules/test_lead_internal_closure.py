@@ -62,6 +62,16 @@ def test_fluctuation_notes_refs_warn_when_main_ref_missing_from_notes_block():
     assert any(i.rule_id == "lead_fluctuation_notes_refs" and i.severity == Severity.WARN for i in issues)
 
 
+def test_fluctuation_notes_refs_accepts_bracketed_letter_reference():
+    lead = _lead_with_notes()
+    lead.movement_rows[0].values["notes"] = "[A]"
+    lead.fluctuation_notes = "[A] 本期新增较多，已检查新增清单和合同。"
+
+    issues = check_lead_fluctuation_notes_refs(lead)
+
+    assert not any(i.field in {"movement_notes", "notes:原值"} for i in issues)
+
+
 def test_lead_reference_rules_include_source_rows_for_comments():
     lead = LeadSheetDataset(
         source_file="t.xlsx",

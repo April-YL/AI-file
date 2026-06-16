@@ -17,7 +17,7 @@ from ingest.rollforward_sheet import K01SectionRegion, RollforwardSheetDataset
 from ingest.workbook_context import WorkbookQcContext
 from report.pipeline import run_workbook_qc, run_workbook_qc_from_path
 from rules.delivery_completion import DeliveryCompletionContext
-from rules.models import Severity
+from rules.models import QcIssue, Severity
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 CASE_B = (
@@ -227,6 +227,39 @@ def test_workbook_qc_includes_disposal_sample_issue():
 
     report = run_workbook_qc(ctx, llm=False)
     assert any(issue.rule_id == "disposal_sample_match" for issue in report.issues)
+
+
+def test_workbook_qc_includes_disposal_llm_issue(monkeypatch):
+    ctx = WorkbookQcContext(
+        source_file="disposal_llm_demo.xlsx",
+        fa_list=None,
+        summary=None,
+        lead=None,
+        disposal_test=DisposalTestSheetDataset(
+            source_file="disposal_llm_demo.xlsx",
+            source_sheet="K.02.2 处置测试",
+        ),
+    )
+    mock_issue = QcIssue(
+        asset_id=None,
+        rule_id="disposal_semantic_review",
+        field="evidence_description",
+        severity=Severity.NEED_REVIEW,
+        message="处置证据描述需复核",
+        suggestion="补充具体证据索引",
+        procedure_code="K.02.2",
+        source_sheet="K.02.2 处置测试",
+        review_source="LLM辅助判断",
+    )
+    monkeypatch.setattr("report.pipeline.load_llm_config", lambda cli_enabled=None: type("Config", (), {"enabled": True})())
+    monkeypatch.setattr("llm.disposal_review.build_disposal_llm_issues", lambda *args, **kwargs: [mock_issue])
+    monkeypatch.setattr("llm.ingest_review.run_workbook_ingest_reviews", lambda *args, **kwargs: [])
+    monkeypatch.setattr("report.pipeline.enrich_report_with_llm", lambda report, config, **kwargs: report)
+
+    report = run_workbook_qc(ctx)
+
+    assert any(issue.rule_id == "disposal_semantic_review" for issue in report.issues)
+    assert "disposal_semantic" in {d["key"] for d in report.runtime_timings["llm_details"]}
 
 
 def test_workbook_qc_includes_k01_ingest_review_section(monkeypatch):

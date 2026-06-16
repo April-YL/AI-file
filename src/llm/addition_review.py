@@ -258,6 +258,8 @@ def _issues_from_review(review: dict[str, Any], payload: dict[str, Any]) -> list
         topic = str(item.get("topic", "addition_semantic")).strip() or "addition_semantic"
         if topic == "sample_selection":
             continue
+        if topic == "special_addition_source" and _only_default_cip_nonpurchase(payload):
+            continue
         rationale = str(item.get("rationale", "")).strip()
         action = str(item.get("suggested_action", "")).strip()
         missing = item.get("missing_evidence")
@@ -289,6 +291,25 @@ def _issues_from_review(review: dict[str, Any], payload: dict[str, Any]) -> list
             )
         )
     return issues
+
+
+def _only_default_cip_nonpurchase(payload: dict[str, Any]) -> bool:
+    addition_list = payload.get("addition_list")
+    if not isinstance(addition_list, dict):
+        return False
+    methods = addition_list.get("addition_methods")
+    if not isinstance(methods, dict) or not methods:
+        return False
+    nonpurchase = []
+    for method in methods:
+        text = str(method).strip().lower()
+        if any(term in text for term in ("购置", "采购", "购买", "外购", "purchase", "acquisition")):
+            continue
+        nonpurchase.append(text)
+    return bool(nonpurchase) and all(
+        any(term in method for term in ("在建工程", "转固", "cip"))
+        for method in nonpurchase
+    )
 
 
 def _source_sheet(payload: dict[str, Any]) -> str:

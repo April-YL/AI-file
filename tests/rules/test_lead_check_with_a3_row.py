@@ -151,7 +151,9 @@ def test_nonzero_diff_without_notes_fails(tmp_path: Path):
         i.rule_id == "lead_check_with_a3_row" and i.severity == Severity.FAIL
         for i in issues
     )
-    assert any(i.field == "notes" for i in issues)
+    assert len(issues) == 1
+    assert issues[0].field == "check_with_a3_diff:净值"
+    assert "未识别到Notes说明" in issues[0].message
 
 
 def test_missing_a3_rows_warns(tmp_path: Path):

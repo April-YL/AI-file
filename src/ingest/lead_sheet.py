@@ -247,6 +247,7 @@ class LeadSheetDataset:
     notes: list[str] = field(default_factory=list)
     """Lead 版式：``no_cra_te_volatility`` = 无 CRA/TT 区且波动幅度金额取自 TE（案例 A）。"""
     layout_variant: Literal["standard", "no_cra_te_volatility"] | None = None
+    usable_for_rules: bool = True
 
     def has_materiality_data(self) -> bool:
         return any(c.workpaper_value or c.canvas_value for c in self.materiality)
@@ -721,12 +722,20 @@ def _collect_notes_after_diff(
     for r in range(start_r, min(start_r + 8, len(scope))):
         row = scope[r]
         label = _get_cell(scope, r, label_col)
+        notes_label_col = next(
+            (
+                c
+                for c, value in enumerate(row)
+                if value is not None and _is_notes_row_label(str(value))
+            ),
+            None,
+        )
         if label and (_is_check_with_a3_label(label) or _is_diff_row_label(label)):
             continue
-        if label and _is_notes_row_label(label):
+        if notes_label_col is not None:
             notes_row = r
             for c in range(len(row)):
-                if c == label_col:
+                if c == notes_label_col:
                     continue
                 text = _cell_str(row[c]) if c < len(row) else None
                 if text and len(text) > 2:
@@ -851,6 +860,51 @@ def _extract_movement_table(
             bindings.append(
                 LeadMovementColumnBinding(role=role, source_header=text, column_index=c + 1)
             )
+
+    audited_cols = [
+        c for c, text in enumerate(header_cells) if text and _norm(text) == _norm("审定数")
+    ]
+    if len(audited_cols) >= 2 and "py_audited" not in role_cols:
+        prior_col = audited_cols[-1]
+        role_cols["py_audited"] = prior_col
+        bindings.append(
+            LeadMovementColumnBinding(
+                role="py_audited",
+                source_header=header_cells[prior_col] or "审定数",
+                column_index=prior_col + 1,
+            )
+        )
+
+    investigate_cols = [
+        c
+        for c, text in enumerate(header_cells)
+        if text and "进一步调查" in text
+    ]
+    for role, col in zip(
+        ("investigate_quantitative", "investigate_qualitative"),
+        investigate_cols[:2],
+    ):
+        if role in role_cols:
+            continue
+        role_cols[role] = col
+        bindings.append(
+            LeadMovementColumnBinding(
+                role=role,
+                source_header=header_cells[col] or "进一步调查",
+                column_index=col + 1,
+            )
+        )
+
+    for c, text in enumerate(header_cells):
+        if text and "\u79d1\u76ee\u540d\u79f0" in text:
+            role_cols["account_label"] = c
+            bindings = [b for b in bindings if b.role != "account_label"]
+            bindings.append(
+                LeadMovementColumnBinding(
+                    role="account_label", source_header=text, column_index=c + 1
+                )
+            )
+            break
 
     data_rows: list[LeadMovementRow] = []
     check_with_a3: LeadCheckWithA3 | None = None
@@ -1057,6 +1111,9 @@ def parse_lead_sheet_rows(
         rows, mov_block
     )
     fluctuation_notes = _extract_fluctuation_notes(rows, fluc_block)
+    if not fluctuation_notes and check_with_a3 and check_with_a3.notes_text:
+        fluctuation_notes = check_with_a3.notes_text
+        notes.append("Lead fluctuation notes recovered from the movement-table Notes row.")
     adjustment_rows = _extract_adjustment_summary(rows, adj_block)
 
     if not basic_info_fields:
@@ -1092,6 +1149,17 @@ def parse_lead_sheet_rows(
     )
     notes.extend(vol_notes)
 
+    movement_labels = {_norm(row.account_label) for row in movement_rows}
+    expected_movement_labels = {_norm(label) for label in _ACCOUNT_MOVEMENT_LABELS}
+    usable_for_rules = bool(
+        len(movement_labels & expected_movement_labels) >= 3
+        and not any(len(row.account_label) > 80 for row in movement_rows)
+    )
+    if mov_block is not None and not usable_for_rules:
+        notes.append(
+            "Lead movement table ingest is unreliable; dependent deterministic rules were paused."
+        )
+
     return LeadSheetDataset(
         source_file=source_file,
         source_sheet=source_sheet,
@@ -1108,6 +1176,7 @@ def parse_lead_sheet_rows(
         adjustment_rows=adjustment_rows,
         notes=notes,
         layout_variant=layout_variant,
+        usable_for_rules=usable_for_rules,
     )
 
 

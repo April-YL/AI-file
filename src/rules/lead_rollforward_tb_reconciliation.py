@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from ingest.lead_sheet import LeadSheetDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset
+from ingest.models import RollforwardPeriodRole
 from rules.lead_common import (
     amounts_close,
     lead_book_balance,
     movement_field_key,
+    parse_threshold_amount,
 )
 from rules.models import QcIssue, Severity
 
@@ -27,7 +29,7 @@ def _check_from_k01_check_column(
     if not checks:
         return None
 
-    issues: list[QcIssue] = []
+    differences: dict[str, tuple[object, int | None]] = {}
     rows = getattr(rollforward, "table1_check_rows", None) or {}
     for field_key in (
         "original_value",
@@ -38,24 +40,13 @@ def _check_from_k01_check_column(
         diff = checks.get(field_key)
         if diff is None or amounts_close(diff, 0, ref=max(abs(diff), 1)):
             continue
-        label = _FIELD_LABELS.get(field_key, field_key)
-        issues.append(
-            QcIssue(
-                asset_id=None,
-                rule_id=RULE_ID,
-                field=f"table1_check|{field_key}",
-                severity=Severity.FAIL,
-                message=(
-                    f"K.01 表1 CHECK 显示「{label}」与 Lead 不一致，"
-                    f"差异={diff}"
-                ),
-                suggestion="请在 K.01 表1 CHECK 列核对后推表与 Lead 的链接和取数公式。",
-                procedure_code="K.01",
-                source_sheet=rollforward.source_sheet,
-                source_row=rows.get(field_key),
-            )
-        )
-    return issues
+        differences[field_key] = (diff, rows.get(field_key))
+    return _group_period_differences(
+        differences,
+        period_label="期末",
+        source_sheet=rollforward.source_sheet,
+        procedure_code="K.01",
+    )
 
 
 def check_lead_rollforward_tb_reconciliation(
@@ -65,37 +56,87 @@ def check_lead_rollforward_tb_reconciliation(
     """引导表期末账面数与 K.01 后推 TB 合计一致。"""
     if lead is None or not lead.source_sheet:
         return []
-    if rollforward is None or not rollforward.ending_totals:
+    if rollforward is None or not (rollforward.ending_totals or rollforward.opening_totals):
         return []
 
+    issues: list[QcIssue] = []
     k01_check_issues = _check_from_k01_check_column(rollforward)
     if k01_check_issues is not None:
-        return k01_check_issues
+        issues.extend(k01_check_issues)
+    else:
+        issues.extend(_direct_period_check(lead, rollforward, period="ending"))
 
-    issues: list[QcIssue] = []
+    if any(
+        binding.period_role == RollforwardPeriodRole.OPENING
+        for binding in rollforward.amount_column_bindings
+    ):
+        issues.extend(_direct_period_check(lead, rollforward, period="opening"))
+    return issues
+
+
+def _direct_period_check(
+    lead: LeadSheetDataset,
+    rollforward: RollforwardSheetDataset,
+    *,
+    period: str,
+) -> list[QcIssue]:
+    totals = rollforward.opening_totals if period == "opening" else rollforward.ending_totals
+    value_role = "py_audited" if period == "opening" else "audited_ending"
+    differences: dict[str, tuple[object, int | None]] = {}
     for row in lead.movement_rows:
         field_key = movement_field_key(row.account_label)
         if field_key is None:
             continue
-        lead_amt = lead_book_balance(row.values)
-        rf_amt = rollforward.ending_totals.get(field_key)
+        lead_amt = (
+            parse_threshold_amount(row.values.get(value_role))
+            if period == "opening"
+            else lead_book_balance(row.values)
+        )
+        rf_amt = totals.get(field_key)
         if lead_amt is None or rf_amt is None:
             continue
         if not amounts_close(lead_amt, rf_amt, ref=max(abs(lead_amt), abs(rf_amt))):
-            issues.append(
-                QcIssue(
-                    asset_id=None,
-                    rule_id=RULE_ID,
-                    field=f"{field_key}|{row.account_label}",
-                    severity=Severity.FAIL,
-                    message=(
-                        f"Lead「{row.account_label}」期末数（{lead_amt}）与 K.01 后推"
-                        f"（{rf_amt}）不一致"
-                    ),
-                    suggestion="核对引导表 link 与后推 TB 列公式",
-                    procedure_code="K.00",
-                    source_sheet=lead.source_sheet,
-                    source_row=row.source_row,
-                )
-            )
-    return issues
+            differences[field_key] = (lead_amt - rf_amt, row.source_row)
+    return _group_period_differences(
+        differences,
+        period_label="期初" if period == "opening" else "期末",
+        source_sheet=lead.source_sheet,
+        procedure_code="K.00",
+    )
+
+
+def _group_period_differences(
+    differences: dict[str, tuple[object, int | None]],
+    *,
+    period_label: str,
+    source_sheet: str,
+    procedure_code: str,
+) -> list[QcIssue]:
+    if not differences:
+        return []
+    component_keys = [
+        key
+        for key in ("original_value", "accumulated_depreciation", "impairment_provision")
+        if key in differences
+    ]
+    report_keys = component_keys or ["net_value"]
+    parts = [
+        f"{_FIELD_LABELS.get(key, key)}差异={differences[key][0]}"
+        for key in report_keys
+    ]
+    if component_keys and "net_value" in differences:
+        parts.append(f"并导致净值差异={differences['net_value'][0]}")
+    first_key = report_keys[0]
+    return [
+        QcIssue(
+            asset_id=None,
+            rule_id=RULE_ID,
+            field=f"{period_label}|{'|'.join(report_keys)}",
+            severity=Severity.FAIL,
+            message=f"Lead 与 K.01 {period_label}数不一致：" + "；".join(parts),
+            suggestion=f"请核对 Lead 与 K.01 {period_label}四项金额的链接、取数公式及差异原因。",
+            procedure_code=procedure_code,
+            source_sheet=source_sheet,
+            source_row=differences[first_key][1],
+        )
+    ]

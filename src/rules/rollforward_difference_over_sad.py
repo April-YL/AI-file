@@ -102,6 +102,27 @@ def check_rollforward_difference_over_sad(
         return []
 
     max_diff = max(material_diffs, key=lambda d: abs(d))
+    related_notes_present = rollforward.tb_notes_text_present or bool(
+        rollforward.table3_notes_text_present
+        and rollforward.table3_notes_text
+        and "差异" in rollforward.table3_notes_text
+    )
+    related_notes_row = rollforward.tb_notes_row or rollforward.table3_notes_row
+    if related_notes_present:
+        return [
+            _issue(
+                rollforward=rollforward,
+                severity=Severity.NEED_REVIEW,
+                field="tb_notes_text",
+                source_row=related_notes_row or rollforward.tb_difference_row,
+                message=(
+                    "K.01 TB check 存在超过 SAD 的差异，底稿已有 Notes，"
+                    f"最大差异={max_diff}，SAD={sad}"
+                ),
+                suggestion="请质检人员复核 Notes 是否说明差异原因、处理结论及是否需要进一步审计程序。",
+            )
+        ]
+
     material_details = _material_difference_details(rollforward, sad)
     details_without_note = [d for d in material_details if not d.get("note_marker")]
     if details_without_note:
@@ -123,21 +144,6 @@ def check_rollforward_difference_over_sad(
                     "请在差异单元格相邻位置添加 Note/NB 标识，并在 TB check 区域或对应 Notes "
                     "中说明差异原因、处理结论及是否需要进一步审计程序。"
                 ),
-            )
-        ]
-
-    if rollforward.tb_notes_text_present:
-        return [
-            _issue(
-                rollforward=rollforward,
-                severity=Severity.NEED_REVIEW,
-                field="tb_notes_text",
-                source_row=rollforward.tb_notes_row or rollforward.tb_difference_row,
-                message=(
-                    "K.01 TB check 存在超过 SAD 的差异，底稿已有 Notes，"
-                    f"最大差异={max_diff}，SAD={sad}"
-                ),
-                suggestion="请质检人员复核 Notes 是否说明差异原因、处理结论及是否需要进一步审计程序。",
             )
         ]
 

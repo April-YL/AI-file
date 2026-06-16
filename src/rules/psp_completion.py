@@ -88,9 +88,16 @@ def _rule_review_waiver_reason(row: PspProgramRow) -> WaiverSemanticReview | Non
 
 def _should_skip_row(row: PspProgramRow) -> bool:
     name = (row.procedure_name or "").strip()
+    sheet_ref = (row.sheet_ref or "").strip()
     if not name or name in _SKIP_PROCEDURE_NAMES:
         return True
     if name.startswith("返回"):
+        return True
+    if sheet_ref == "\u7a0b\u5e8f\u9875":
+        return True
+    if not (row.execution_status or "").strip() and re.search(
+        r"[kK]\.02\.[12]a\b", sheet_ref or name
+    ):
         return True
     return False
 
@@ -147,6 +154,8 @@ def _check_yes_program_sheet(
         label = f"{label} ({row.sheet_ref})"
 
     ref = _ref_for_sheet_match(row)
+    if ref and "\u9879\u76ee\u7ec4\u81ea\u884c\u586b\u5199\u5e95\u7a3f\u7d22\u5f15" in ref:
+        return issues
     if not ref:
         issues.append(
             QcIssue(
@@ -493,7 +502,7 @@ def check_psp_completion(
     if enforce_template_completeness and dataset.layout == "swp":
         issues.extend(
             _check_template_program_completeness(
-                programs,
+                dataset.programs,
                 dataset.source_sheet or "汇总",
                 workbook_sheet_titles=workbook_sheet_titles,
             )
@@ -541,7 +550,9 @@ def _check_template_program_completeness(
     workbook_sheet_titles: Sequence[str] | None,
 ) -> list[QcIssue]:
     issues: list[QcIssue] = []
-    present_rows = [p for p in programs if not _should_skip_row(p)]
+    # Group headers and sample-output reference rows are not executable
+    # program rows, but they still evidence that the template module exists.
+    present_rows = programs
     for _, expected_refs in _EXPECTED_TEMPLATE_PROGRAMS:
         has_row = any(
             _row_matches_expected(row, expected_ref)

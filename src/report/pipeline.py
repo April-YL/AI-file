@@ -382,8 +382,44 @@ def run_workbook_qc(
             disposal_test=ctx.disposal_test,
             disposal_sample_output=ctx.disposal_sample_output,
             disposal_execution_path=ctx.disposal_execution_path,
+            disposal_list=ctx.disposal_list,
+            disposal_list_summary=ctx.disposal_list_summary,
+            rollforward=ctx.rollforward,
+            lead=ctx.lead,
         )
     )
+    if config.enabled and (
+        ctx.disposal_list_summary
+        or ctx.disposal_test
+        or ctx.disposal_sample_output
+        or ctx.disposal_execution_path
+    ):
+        llm_t0 = perf_counter()
+        from llm.disposal_review import (
+            RULE_ID as DISPOSAL_LLM_RULE,
+            build_disposal_llm_issues,
+        )
+
+        disposal_llm_issues = attach_rule_metadata(
+            build_disposal_llm_issues(
+                config,
+                disposal_list_summary=ctx.disposal_list_summary,
+                disposal_test=ctx.disposal_test,
+                disposal_sample_output=ctx.disposal_sample_output,
+                disposal_execution_path=ctx.disposal_execution_path,
+                prior_issues=disposal_issues,
+            )
+        )
+        disposal_issues.extend(disposal_llm_issues)
+        if disposal_llm_issues and DISPOSAL_LLM_RULE not in rule_ids:
+            rule_ids.append(DISPOSAL_LLM_RULE)
+        elapsed = perf_counter() - llm_t0
+        llm_seconds += elapsed
+        record_llm_detail(
+            "disposal_semantic",
+            "K.02.2 disposal semantic review",
+            elapsed,
+        )
     issues.extend(disposal_issues)
     rule_ids.extend(list(DISPOSAL_RULE_IDS))
 
@@ -394,7 +430,11 @@ def run_workbook_qc(
 
         for result in run_workbook_ingest_reviews(
             config,
+            lead=ctx.lead,
             rollforward=ctx.rollforward,
+            disposal_test=ctx.disposal_test,
+            disposal_sample_output=ctx.disposal_sample_output,
+            disposal_execution_path=ctx.disposal_execution_path,
             workbook_path=ctx.source_file,
             workbook_sheet_titles=sheet_titles,
             recognized_sheet_kinds=_recognized_ingest_sheet_kinds(ctx),

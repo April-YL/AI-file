@@ -5,18 +5,35 @@ from unittest.mock import patch
 
 import openpyxl
 
+from ingest.addition_test_sheet import ModuleAssessment
+from ingest.lead_sheet import LeadSheetDataset
+from ingest.disposal_test_sheet import (
+    DisposalExecutionPathDataset,
+    DisposalSampleOutputDataset,
+    DisposalSampleRow,
+    DisposalTestSheetDataset,
+    DisposalTestedSampleRow,
+)
 from llm.config import LlmConfig
 from llm.ingest_review import (
     EXPECTED_INGEST_OBJECTS,
     K01_PROFILE_HINT,
+    K021_ADDITION_PROFILE_HINT,
+    K022_DISPOSAL_PROFILE_HINT,
+    LEAD_PROFILE_HINT,
     SYSTEM_PROMPT,
+    SUMMARY_PROFILE_HINT,
     IngestReviewCandidatePreview,
     IngestReviewPayload,
+    build_k022_disposal_ingest_review_payload,
+    build_lead_ingest_review_payload,
     build_missing_k01_ingest_review_payload,
     build_ingest_review_user_prompt,
     parse_ingest_review_result,
     run_ingest_review,
     run_workbook_ingest_reviews,
+    should_review_k022_disposal_ingest,
+    should_review_lead_ingest,
 )
 
 
@@ -80,6 +97,26 @@ def test_build_user_prompt_includes_payload_and_k01_hint():
     assert "missing_object_discovery" in prompt
     assert "program_profile_hint" in prompt
     assert "表4折旧费用与利润表核对的差异不得被当作 TB 差异" in prompt
+
+
+def test_program_profiles_are_attached_to_missing_discovery_objects():
+    by_name = {obj.object_name: obj.profile_hint for obj in EXPECTED_INGEST_OBJECTS}
+
+    assert by_name["汇总"] == SUMMARY_PROFILE_HINT
+    assert by_name["K.00 Lead Sheet"] == LEAD_PROFILE_HINT
+    assert by_name["新增清单"] == K021_ADDITION_PROFILE_HINT
+    assert by_name["K.02.1 新增测试"] == K021_ADDITION_PROFILE_HINT
+    assert by_name["K.02.1a 新增选样输出"] == K021_ADDITION_PROFILE_HINT
+    assert by_name["处置清单"] == K022_DISPOSAL_PROFILE_HINT
+    assert by_name["K.02.2 处置测试"] == K022_DISPOSAL_PROFILE_HINT
+    assert by_name["K.02.2a 处置选样输出"] == K022_DISPOSAL_PROFILE_HINT
+
+
+def test_program_profile_prompts_include_false_positive_guardrails():
+    assert "sheet 名称存在尾随空格" in SUMMARY_PROFILE_HINT
+    assert "no_cra_te_volatility" in LEAD_PROFILE_HINT
+    assert "右侧 SOP/易错点说明区" in K021_ADDITION_PROFILE_HINT
+    assert "汇总页已拒绝执行" in K022_DISPOSAL_PROFILE_HINT
 
 
 def test_run_ingest_review_disabled_returns_none():
@@ -296,3 +333,147 @@ def test_run_workbook_ingest_reviews_covers_all_core_program_sheets(tmp_path: Pa
 
     assert len(results) == len(EXPECTED_INGEST_OBJECTS)
     assert {r.procedure_code for r in results} >= {"SUMMARY", "K.00", "K.01", "K.02.1", "K.02.2", "K.03.1", "K.03.2", "K.03.3"}
+
+
+def _disposal_test_sheet() -> DisposalTestSheetDataset:
+    return DisposalTestSheetDataset(
+        source_file="wb.xlsx",
+        source_sheet="K.02.2 处置测试",
+        module_assessments=[
+            ModuleAssessment(
+                module_key="population_reconciliation",
+                module_name="处置/报废总金额核对",
+                status="weak",
+                confidence=0.45,
+                evidence=["处置测试", "净值"],
+            )
+        ],
+        recognition_confidence=0.52,
+        usable_for_rules=False,
+        tested_samples=[
+            DisposalTestedSampleRow(
+                source_row=30,
+                sample_type="关键项",
+                asset_id="FA-TEST-001",
+                asset_name="设备A",
+                net_value="100",
+                disposal_method="出售",
+                evidence_description="合同及收款单",
+            )
+        ],
+        notes=["disposal_reconciliation_matrix_low_confidence"],
+    )
+
+
+def _disposal_sample_output() -> DisposalSampleOutputDataset:
+    return DisposalSampleOutputDataset(
+        source_file="wb.xlsx",
+        source_sheet="K.02.2a 处置选样输出",
+        module_assessments=[
+            ModuleAssessment(
+                module_key="selected_samples",
+                module_name="已选取样本",
+                status="recognized",
+                confidence=0.9,
+                evidence=["处置选样输出", "样本池"],
+            )
+        ],
+        recognition_confidence=0.91,
+        usable_for_rules=True,
+        selected_samples=[
+            DisposalSampleRow(
+                source_row=22,
+                sample_type="代表性样本",
+                asset_id="FA-TEST-001",
+                asset_name="设备A",
+                net_value="100",
+                disposal_method="出售",
+            )
+        ],
+    )
+
+
+def _disposal_execution_path() -> DisposalExecutionPathDataset:
+    return DisposalExecutionPathDataset(
+        path_kind="full_expected",
+        recognition_confidence=0.8,
+        disposal_test_sheet="K.02.2 处置测试",
+        disposal_sample_output_sheet="K.02.2a 处置选样输出",
+        missing_components=[],
+    )
+
+
+def test_should_review_k022_disposal_ingest_when_low_confidence_or_unusable():
+    assert (
+        should_review_k022_disposal_ingest(
+            disposal_test=_disposal_test_sheet(),
+            disposal_sample_output=_disposal_sample_output(),
+            disposal_execution_path=_disposal_execution_path(),
+        )
+        is True
+    )
+
+
+def test_lead_ingest_review_runs_only_when_deterministic_result_is_unusable():
+    lead = LeadSheetDataset(
+        source_file="wb.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        usable_for_rules=False,
+    )
+
+    assert should_review_lead_ingest(lead) is True
+    payload = build_lead_ingest_review_payload(lead)
+    assert payload.expected_object["procedure"] == "K.00"
+    assert payload.coding_result["usable_for_rules"] is False
+
+    lead.usable_for_rules = True
+    assert should_review_lead_ingest(lead) is False
+
+
+def test_build_k022_disposal_payload_uses_profile_and_read_result_review():
+    payload = build_k022_disposal_ingest_review_payload(
+        disposal_test=_disposal_test_sheet(),
+        disposal_sample_output=_disposal_sample_output(),
+        disposal_execution_path=_disposal_execution_path(),
+    )
+
+    assert payload.review_type == "read_result_review"
+    assert payload.program_profile_hint == K022_DISPOSAL_PROFILE_HINT
+    assert payload.expected_object["procedure"] == "K.02.2"
+    assert payload.coding_result["recognition_confidence"] == 0.52
+    assert "disposal_test:population_reconciliation:weak" in payload.coding_result["missing_sections"]
+    assert payload.candidate_previews[0].sheet_name == "K.02.2 处置测试"
+    assert payload.candidate_previews[0].anchor_hits
+
+
+def test_run_workbook_ingest_reviews_handles_k022_read_result_review():
+    raw = {
+        "assessment": "suspicious",
+        "risk_level": "medium",
+        "risk_area": "section_boundary",
+        "suspected_object": "K.02.2 disposal ingest result",
+        "candidate_sheet": "K.02.2 处置测试",
+        "candidate_rows": [30],
+        "evidence_anchors": ["处置测试", "净值", "出售"],
+        "rationale": "K.02.2 测试页低置信且样本行含处置净值锚点，建议人工核对读取区域。",
+        "suggested_action": "核对 K.02.2 处置测试页第30行附近是否为实测样本区域。",
+        "should_retry_deterministic_ingest": False,
+        "manual_review_focus": "确认处置测试样本区域和处置净值字段是否读对。",
+    }
+
+    with patch("llm.ingest_review.chat_completion_json", return_value=raw):
+        results = run_workbook_ingest_reviews(
+            _config(),
+            disposal_test=_disposal_test_sheet(),
+            disposal_sample_output=_disposal_sample_output(),
+            disposal_execution_path=_disposal_execution_path(),
+            recognized_sheet_kinds={
+                "disposal_test": True,
+                "disposal_sample_output": True,
+            },
+        )
+
+    assert len(results) == 1
+    assert results[0].procedure_code == "K.02.2"
+    assert results[0].review_type == "k022_ingest_review"
+    assert results[0].risk_area == "section_boundary"

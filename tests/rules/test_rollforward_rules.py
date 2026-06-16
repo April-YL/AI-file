@@ -584,7 +584,7 @@ def test_rollforward_difference_over_sad_fails_when_no_note():
     assert "未读取到 Notes" in issue.message
 
 
-def test_rollforward_difference_over_sad_fails_when_material_cells_have_no_note_marker():
+def test_rollforward_difference_over_sad_accepts_region_notes_without_cell_marker():
     rf = _minimal_rf(
         section_presence={"b2_movement_tb_reconciliation": True},
         tb_reconciliation_detected=True,
@@ -601,11 +601,9 @@ def test_rollforward_difference_over_sad_fails_when_material_cells_have_no_note_
     issues = check_rollforward_difference_over_sad(rf, lead=_lead_with_sad("5"))
     assert len(issues) == 1
     issue = issues[0]
-    assert issue.severity == Severity.FAIL
-    assert issue.source_row == 43
-    assert issue.field == "tb_difference_note_marker"
-    assert "E43=6" in issue.message
-    assert "AC43=7" in issue.message
+    assert issue.severity == Severity.NEED_REVIEW
+    assert issue.source_row == 85
+    assert issue.field == "tb_notes_text"
 
 
 def test_rollforward_difference_over_sad_needs_review_when_note_exists():
@@ -624,6 +622,22 @@ def test_rollforward_difference_over_sad_needs_review_when_note_exists():
     assert issue.severity == Severity.NEED_REVIEW
     assert issue.source_row == 12
     assert "已有 Notes" in issue.message
+
+
+def test_rollforward_difference_over_sad_accepts_related_table3_notes():
+    rf = _minimal_rf(
+        section_presence={"b2_movement_tb_reconciliation": True},
+        tb_reconciliation_detected=True,
+        tb_difference_values=[Decimal("6")],
+        tb_difference_row=8,
+        table3_notes_text_present=True,
+        table3_notes_row=12,
+        table3_notes_text="明细账与总账存在差异，系后推表未及时更新。",
+    )
+    issues = check_rollforward_difference_over_sad(rf, lead=_lead_with_sad("5"))
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.NEED_REVIEW
+    assert issues[0].source_row == 12
 
 
 def test_rollforward_difference_over_sad_needs_review_when_sad_missing():

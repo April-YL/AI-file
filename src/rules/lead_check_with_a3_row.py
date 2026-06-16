@@ -62,68 +62,34 @@ def check_lead_check_with_a3_row(lead: LeadSheetDataset | None) -> list[QcIssue]
         ]
 
     issues: list[QcIssue] = []
-    material_nonzero = False
-
     for line in net_lines:
         diff_amt = parse_threshold_amount(line.diff_value)
         if diff_amt is None:
             continue
         if diff_amt == 0 or not _diff_is_material(diff_amt):
             continue
-        material_nonzero = True
-        issues.append(
-            QcIssue(
-                asset_id=None,
-                rule_id=RULE_ID,
-                field=f"diff:{line.account_label}",
-                severity=Severity.FAIL,
-                message=(
-                    f"「{line.account_label}」A3 核对 Diff 为 {diff_amt}"
-                    f"（|Diff|≥{A3_DIFF_LEAVE_THRESHOLD}，须为 0 或说明）"
-                ),
-                suggestion="核对 A3 与引导表净值，或在 Notes 中说明差异原因",
-                procedure_code="K.00",
-                source_sheet=lead.source_sheet,
-                source_row=cw.diff_source_row,
-            )
-        )
-
         mov_amt = parse_threshold_amount(line.movement_value)
         a3_amt = parse_threshold_amount(line.a3_value)
-        if mov_amt is not None and a3_amt is not None:
-            if not amounts_close(mov_amt, a3_amt, ref=max(abs(mov_amt), abs(a3_amt))):
-                issues.append(
-                    QcIssue(
-                        asset_id=None,
-                        rule_id=RULE_ID,
-                        field=f"a3:{line.account_label}",
-                        severity=Severity.WARN,
-                        message=(
-                            f"「{line.account_label}」引导表金额（{mov_amt}）与 "
-                            f"Check with A3 行（{a3_amt}）不一致"
-                        ),
-                        suggestion="确认 link A3 公式或更新 Check with A3 行",
-                        procedure_code="K.00",
-                        source_sheet=lead.source_sheet,
-                        source_row=cw.check_source_row,
-                    )
-                )
-
-    if material_nonzero and is_blank(cw.notes_text):
+        details = [f"Diff={diff_amt}"]
+        if (
+            mov_amt is not None
+            and a3_amt is not None
+            and not amounts_close(mov_amt, a3_amt, ref=max(abs(mov_amt), abs(a3_amt)))
+        ):
+            details.append(f"引导表金额={mov_amt}，A3金额={a3_amt}")
+        if is_blank(cw.notes_text):
+            details.append("未识别到Notes说明")
         issues.append(
             QcIssue(
                 asset_id=None,
                 rule_id=RULE_ID,
-                field="notes",
+                field=f"check_with_a3_diff:{line.account_label}",
                 severity=Severity.FAIL,
-                message=(
-                    f"净值 A3 核对存在 |Diff|≥{A3_DIFF_LEAVE_THRESHOLD} 的差异，"
-                    "但未摘录到 Notes 说明"
-                ),
-                suggestion="在 Diff 行下方 Notes 区说明差异原因",
+                message=f"「{line.account_label}」Check with A3/Diff 核对不一致：" + "；".join(details),
+                suggestion="核对 A3 与引导表净值，并在 Notes 中说明差异原因。",
                 procedure_code="K.00",
                 source_sheet=lead.source_sheet,
-                source_row=cw.notes_source_row,
+                source_row=cw.diff_source_row or cw.check_source_row,
             )
         )
 

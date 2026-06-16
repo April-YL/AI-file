@@ -15,24 +15,26 @@ from typing import Any
 
 import openpyxl
 
+from ingest.disposal_test_sheet import (
+    DisposalExecutionPathDataset,
+    DisposalSampleOutputDataset,
+    DisposalTestSheetDataset,
+)
+from ingest.lead_sheet import LeadSheetDataset
 from ingest.models import SheetKind
 from ingest.rollforward_sheet import K01_SECTION_IDS, RollforwardSheetDataset
 from ingest.sheet_classifier import classify_sheet, score_by_name
 from ingest.workbook_reader import read_worksheet_rows
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
-
-PROGRAM_PROFILE_HINT = """固定资产 K1 底稿通常包含：
-- 汇总页：程序目录、是否执行、不执行理由和注意事项。
-- K.00 Lead Sheet：基础信息、TE/SAD/CRA/TT、预期分析、波动说明和调整汇总。
-- K.01 Agree SL to GL：后推明细表、TB/FA list/利润表核对和 Notes。
-- FA list：固定资产明细清单。
-- K.02.1 新增测试程序包：新增清单、K.02.1 新增测试、K.02.1a 选样输出。
-- K.02.2 处置测试程序包：处置清单、K.02.2 处置测试、K.02.2a 选样输出。
-- K.03 折旧程序：K.03.1 SAP、K.03.2 折旧 TOD / by item、K.03.3 折旧政策复核。
-
-请基于 sheet 名称、局部预览、表头字段和锚点判断是否存在读取层风险。
-如果没有明确锚点，不要把非标准名称直接判为 suspicious。"""
+from llm.ingest_profiles import (
+    K01_PROFILE_HINT,
+    K021_ADDITION_PROFILE_HINT,
+    K022_DISPOSAL_PROFILE_HINT,
+    LEAD_PROFILE_HINT,
+    PROGRAM_PROFILE_HINT,
+    SUMMARY_PROFILE_HINT,
+)
 
 SYSTEM_PROMPT = """你是固定资产审计底稿的资深质检 CPA，负责复核 Agent 的 ingest 读取结果是否可靠。
 
@@ -64,22 +66,6 @@ SYSTEM_PROMPT = """你是固定资产审计底稿的资深质检 CPA，负责复
 注意：
 coding 是事实取数层；你是读取结果复核层。你只能输出复核建议，不生成最终审计结论。"""
 
-K01_PROFILE_HINT = """K.01 后推表通常包含六个物理区块：
-1) 表1 BKD 主矩阵；
-2) 变动 / TB / 差异区；
-3) 表2 FA list 分类汇总；
-4) 表3 表2 check with 表1；
-5) 表4 折旧费用与利润表核对；
-6) Notes / SAD / TE / 程序路由。
-
-请特别注意：
-- 表3 check、TB check、表4折旧核对是不同专题，Notes 不得混用。
-- 仅有“变动金额”不等于可靠 TB check；可靠 TB check 通常需要 TB/试算表口径和“差异”标签同时出现。
-- 表4折旧费用与利润表核对的差异不得被当作 TB 差异。
-- hybrid / category_dual_period 是案例库常见合法版式，不得仅因不符合 SOP 标准矩阵而判 suspicious。
-- 如果发现疑似漏读，只提出候选 sheet、候选行、锚点证据和建议动作，不计算金额、不判断是否超过 SAD。"""
-
-
 @dataclass(frozen=True)
 class ExpectedIngestObject:
     procedure_code: str
@@ -97,6 +83,7 @@ EXPECTED_INGEST_OBJECTS: tuple[ExpectedIngestObject, ...] = (
         object_type="sheet",
         sheet_kinds=(SheetKind.SUMMARY,),
         why_expected="汇总页用于列示固定资产 PSP 是否执行、不执行理由和程序页索引。",
+        profile_hint=SUMMARY_PROFILE_HINT,
     ),
     ExpectedIngestObject(
         procedure_code="K.00",
@@ -104,6 +91,7 @@ EXPECTED_INGEST_OBJECTS: tuple[ExpectedIngestObject, ...] = (
         object_type="sheet",
         sheet_kinds=(SheetKind.LEAD,),
         why_expected="Lead 页用于读取基础信息、TE/SAD、CRA/TT、预期分析和波动说明。",
+        profile_hint=LEAD_PROFILE_HINT,
     ),
     ExpectedIngestObject(
         procedure_code="K.01",
@@ -126,6 +114,7 @@ EXPECTED_INGEST_OBJECTS: tuple[ExpectedIngestObject, ...] = (
         object_type="sheet",
         sheet_kinds=(SheetKind.ADDITION_LIST,),
         why_expected="新增清单用于确定新增测试总体、字段完整性和与 K.01 购置金额勾稽。",
+        profile_hint=K021_ADDITION_PROFILE_HINT,
     ),
     ExpectedIngestObject(
         procedure_code="K.02.1",
@@ -133,6 +122,7 @@ EXPECTED_INGEST_OBJECTS: tuple[ExpectedIngestObject, ...] = (
         object_type="sheet",
         sheet_kinds=(SheetKind.ADDITION_TEST,),
         why_expected="K.02.1 新增测试页用于记录执行路径、总体金额、样本测试和异常说明。",
+        profile_hint=K021_ADDITION_PROFILE_HINT,
     ),
     ExpectedIngestObject(
         procedure_code="K.02.1a",
@@ -140,6 +130,7 @@ EXPECTED_INGEST_OBJECTS: tuple[ExpectedIngestObject, ...] = (
         object_type="sheet",
         sheet_kinds=(SheetKind.ADDITION_SAMPLE_OUTPUT,),
         why_expected="K.02.1a 选样输出用于核对样本池、抽样参数和已选取样本。",
+        profile_hint=K021_ADDITION_PROFILE_HINT,
     ),
     ExpectedIngestObject(
         procedure_code="K.02.2",
@@ -147,6 +138,7 @@ EXPECTED_INGEST_OBJECTS: tuple[ExpectedIngestObject, ...] = (
         object_type="sheet",
         sheet_kinds=(SheetKind.DISPOSAL_LIST,),
         why_expected="处置清单用于确定处置测试总体、处置净值和与 K.01 处置金额勾稽。",
+        profile_hint=K022_DISPOSAL_PROFILE_HINT,
     ),
     ExpectedIngestObject(
         procedure_code="K.02.2",
@@ -154,6 +146,7 @@ EXPECTED_INGEST_OBJECTS: tuple[ExpectedIngestObject, ...] = (
         object_type="sheet",
         sheet_kinds=(SheetKind.DISPOSAL_TEST,),
         why_expected="K.02.2 处置测试页用于记录执行路径、总体金额、样本测试和异常说明。",
+        profile_hint=K022_DISPOSAL_PROFILE_HINT,
     ),
     ExpectedIngestObject(
         procedure_code="K.02.2a",
@@ -161,6 +154,7 @@ EXPECTED_INGEST_OBJECTS: tuple[ExpectedIngestObject, ...] = (
         object_type="sheet",
         sheet_kinds=(SheetKind.DISPOSAL_SAMPLE_OUTPUT,),
         why_expected="K.02.2a 选样输出用于核对处置测试样本池、抽样参数和已选取样本。",
+        profile_hint=K022_DISPOSAL_PROFILE_HINT,
     ),
     ExpectedIngestObject(
         procedure_code="K.03.1",
@@ -353,7 +347,11 @@ def run_ingest_review(
 def run_workbook_ingest_reviews(
     config: LlmConfig,
     *,
+    lead: LeadSheetDataset | None = None,
     rollforward: RollforwardSheetDataset | None = None,
+    disposal_test: DisposalTestSheetDataset | None = None,
+    disposal_sample_output: DisposalSampleOutputDataset | None = None,
+    disposal_execution_path: DisposalExecutionPathDataset | None = None,
     workbook_path: str | None = None,
     workbook_sheet_titles: list[str] | None = None,
     recognized_sheet_kinds: dict[str, bool] | None = None,
@@ -383,6 +381,28 @@ def run_workbook_ingest_reviews(
             )
         )
 
+    if should_review_lead_ingest(lead):
+        payloads.append(
+            build_lead_ingest_review_payload(
+                lead,
+                workbook_path=workbook_path,
+            )
+        )
+
+    if should_review_k022_disposal_ingest(
+        disposal_test=disposal_test,
+        disposal_sample_output=disposal_sample_output,
+        disposal_execution_path=disposal_execution_path,
+    ):
+        payloads.append(
+            build_k022_disposal_ingest_review_payload(
+                disposal_test=disposal_test,
+                disposal_sample_output=disposal_sample_output,
+                disposal_execution_path=disposal_execution_path,
+                workbook_path=workbook_path,
+            )
+        )
+
     results: list[IngestReviewResult] = []
     for payload in payloads:
         result, _raw = run_ingest_review(config, payload)
@@ -408,6 +428,102 @@ def should_review_k01_ingest(rollforward: RollforwardSheetDataset | None) -> boo
         or rollforward.section_conflicts
         or _missing_important_k01_sections(rollforward)
     )
+
+
+def should_review_lead_ingest(lead: LeadSheetDataset | None) -> bool:
+    """Ask the LLM only when deterministic Lead ingest is not rule-usable."""
+    return bool(lead is not None and lead.usable_for_rules is False)
+
+
+def build_lead_ingest_review_payload(
+    lead: LeadSheetDataset,
+    *,
+    workbook_path: str | None = None,
+) -> IngestReviewPayload:
+    """Build a compact Lead read-result review without asking for amounts."""
+    rows = _load_sheet_rows(workbook_path, lead.source_sheet)
+    preview_lines = _generic_preview_lines(rows)
+    return IngestReviewPayload(
+        review_target="K.00 Lead Sheet 读取结果复核",
+        review_type="read_result_review",
+        program_profile_hint=LEAD_PROFILE_HINT,
+        coding_result={
+            "classified_sheet": lead.source_sheet,
+            "usable_for_rules": lead.usable_for_rules,
+            "recognized_blocks": [
+                {
+                    "kind": block.kind.value,
+                    "anchor_row": block.anchor_row,
+                    "start_row": block.start_row,
+                    "end_row": block.end_row,
+                    "confidence": block.confidence,
+                }
+                for block in lead.blocks
+            ],
+            "movement_labels": [row.account_label for row in lead.movement_rows[:8]],
+            "movement_column_roles": [binding.role for binding in lead.movement_bindings],
+            "check_with_a3_detected": lead.check_with_a3 is not None,
+            "fluctuation_notes_detected": bool(lead.fluctuation_notes),
+            "ingest_notes": list(lead.notes or [])[:20],
+        },
+        expected_object={
+            "procedure": "K.00",
+            "object_type": "module",
+            "object_name": "Lead movement table and Notes",
+        },
+        candidate_previews=[
+            IngestReviewCandidatePreview(
+                sheet_name=lead.source_sheet,
+                preview_lines=preview_lines[:30],
+                anchor_hits=_anchor_hits_from_preview(preview_lines[:30]),
+            )
+        ],
+        question=(
+            "请判断 Lead 主表的账户行、两期列、Check with A3/Diff 和 Notes "
+            "是否可能漏读、错分或错映射；不要计算金额或判断规则结论。"
+        ),
+    )
+
+
+def should_review_k022_disposal_ingest(
+    *,
+    disposal_test: DisposalTestSheetDataset | None = None,
+    disposal_sample_output: DisposalSampleOutputDataset | None = None,
+    disposal_execution_path: DisposalExecutionPathDataset | None = None,
+) -> bool:
+    """Whether K.02.2 disposal ingest looks unstable enough for LLM review."""
+    if not (disposal_test or disposal_sample_output or disposal_execution_path):
+        return False
+
+    if disposal_execution_path is not None:
+        if disposal_execution_path.recognition_confidence < 0.65:
+            return True
+        if disposal_execution_path.missing_components:
+            return True
+        if disposal_execution_path.notes:
+            return True
+
+    if disposal_test is not None:
+        if disposal_test.recognition_confidence < 0.65:
+            return True
+        if disposal_test.notes:
+            return True
+        if disposal_test.usable_for_rules is False:
+            return True
+        if _has_unrecognized_modules(disposal_test.module_assessments):
+            return True
+
+    if disposal_sample_output is not None:
+        if disposal_sample_output.recognition_confidence < 0.65:
+            return True
+        if disposal_sample_output.notes:
+            return True
+        if disposal_sample_output.usable_for_rules is False:
+            return True
+        if _has_unrecognized_modules(disposal_sample_output.module_assessments):
+            return True
+
+    return False
 
 
 def build_missing_ingest_object_review_payload(
@@ -535,6 +651,83 @@ def build_k01_ingest_review_payload(
     )
 
 
+def build_k022_disposal_ingest_review_payload(
+    *,
+    disposal_test: DisposalTestSheetDataset | None = None,
+    disposal_sample_output: DisposalSampleOutputDataset | None = None,
+    disposal_execution_path: DisposalExecutionPathDataset | None = None,
+    workbook_path: str | None = None,
+) -> IngestReviewPayload:
+    """Build a compact K.02.2 disposal ingest-review payload.
+
+    This is a read-result review for the sixth ingest layer. It sends only
+    recognition metadata, module evidence and small sheet previews; the LLM must
+    not calculate disposal amounts or judge sample matching.
+    """
+    expected = _k022_expected_object()
+    previews = _build_k022_candidate_previews(
+        disposal_test=disposal_test,
+        disposal_sample_output=disposal_sample_output,
+        disposal_execution_path=disposal_execution_path,
+        workbook_path=workbook_path,
+    )
+    return IngestReviewPayload(
+        review_target="K.02.2 处置测试读取结果复核",
+        review_type="read_result_review",
+        program_profile_hint=K022_DISPOSAL_PROFILE_HINT,
+        coding_result={
+            "classified_sheet": {
+                "disposal_test": disposal_test.source_sheet if disposal_test else None,
+                "disposal_sample_output": (
+                    disposal_sample_output.source_sheet
+                    if disposal_sample_output
+                    else None
+                ),
+            },
+            "recognized_sections": _k022_recognized_modules(
+                disposal_test=disposal_test,
+                disposal_sample_output=disposal_sample_output,
+            ),
+            "missing_sections": _k022_missing_modules(
+                disposal_test=disposal_test,
+                disposal_sample_output=disposal_sample_output,
+                disposal_execution_path=disposal_execution_path,
+            ),
+            "recognition_confidence": _min_confidence(
+                disposal_test.recognition_confidence if disposal_test else None,
+                disposal_sample_output.recognition_confidence
+                if disposal_sample_output
+                else None,
+                disposal_execution_path.recognition_confidence
+                if disposal_execution_path
+                else None,
+            ),
+            "execution_path": (
+                disposal_execution_path.to_dict()
+                if disposal_execution_path
+                else None
+            ),
+            "disposal_test": _disposal_test_excerpt(disposal_test),
+            "disposal_sample_output": _disposal_sample_output_excerpt(
+                disposal_sample_output
+            ),
+            "ingest_notes": _k022_ingest_notes(
+                disposal_test=disposal_test,
+                disposal_sample_output=disposal_sample_output,
+                disposal_execution_path=disposal_execution_path,
+            ),
+        },
+        expected_object=expected,
+        candidate_previews=previews,
+        deterministic_findings=[],
+        question=(
+            "请判断 K.02.2 处置测试读取结果是否存在 sheet 错分、模块漏读、"
+            "执行路径误读或样本/净值锚点错位风险；只提出候选位置和人工复核重点，"
+            "不计算金额、不判断样本是否匹配。"
+        ),
+    )
+
+
 def parse_ingest_review_result(
     raw: dict[str, Any],
     payload: IngestReviewPayload,
@@ -607,6 +800,146 @@ def _missing_important_k01_sections(rollforward: RollforwardSheetDataset) -> boo
     return any(not rollforward.section_presence.get(sid) for sid in important)
 
 
+def _has_unrecognized_modules(modules: list[Any]) -> bool:
+    for module in modules:
+        status = str(getattr(module, "status", "") or "").strip().lower()
+        if status and status != "recognized":
+            return True
+    return False
+
+
+def _min_confidence(*values: float | None) -> float | None:
+    numeric = [float(v) for v in values if v is not None]
+    if not numeric:
+        return None
+    return round(min(numeric), 3)
+
+
+def _k022_recognized_modules(
+    *,
+    disposal_test: DisposalTestSheetDataset | None,
+    disposal_sample_output: DisposalSampleOutputDataset | None,
+) -> list[str]:
+    out: list[str] = []
+    for prefix, modules in (
+        ("disposal_test", disposal_test.module_assessments if disposal_test else []),
+        (
+            "disposal_sample_output",
+            disposal_sample_output.module_assessments
+            if disposal_sample_output
+            else [],
+        ),
+    ):
+        for module in modules:
+            if str(getattr(module, "status", "") or "").strip().lower() == "recognized":
+                out.append(f"{prefix}:{module.module_key}")
+    return out
+
+
+def _k022_missing_modules(
+    *,
+    disposal_test: DisposalTestSheetDataset | None,
+    disposal_sample_output: DisposalSampleOutputDataset | None,
+    disposal_execution_path: DisposalExecutionPathDataset | None,
+) -> list[str]:
+    missing: list[str] = []
+    if disposal_execution_path is not None:
+        missing.extend(disposal_execution_path.missing_components)
+    for prefix, modules in (
+        ("disposal_test", disposal_test.module_assessments if disposal_test else []),
+        (
+            "disposal_sample_output",
+            disposal_sample_output.module_assessments
+            if disposal_sample_output
+            else [],
+        ),
+    ):
+        for module in modules:
+            status = str(getattr(module, "status", "") or "").strip().lower()
+            if status and status != "recognized":
+                missing.append(f"{prefix}:{module.module_key}:{status}")
+    return missing[:20]
+
+
+def _k022_ingest_notes(
+    *,
+    disposal_test: DisposalTestSheetDataset | None,
+    disposal_sample_output: DisposalSampleOutputDataset | None,
+    disposal_execution_path: DisposalExecutionPathDataset | None,
+) -> list[str]:
+    notes: list[str] = []
+    if disposal_execution_path is not None:
+        notes.extend(disposal_execution_path.notes)
+    if disposal_test is not None:
+        notes.extend(disposal_test.notes)
+        if disposal_test.usable_for_rules is False:
+            notes.append("disposal_test_not_usable_for_rules")
+    if disposal_sample_output is not None:
+        notes.extend(disposal_sample_output.notes)
+        if disposal_sample_output.usable_for_rules is False:
+            notes.append("disposal_sample_output_not_usable_for_rules")
+    return [str(note) for note in notes if str(note).strip()][:20]
+
+
+def _disposal_test_excerpt(
+    disposal_test: DisposalTestSheetDataset | None,
+) -> dict[str, Any] | None:
+    if disposal_test is None:
+        return None
+    return {
+        "source_sheet": disposal_test.source_sheet,
+        "recognition_confidence": disposal_test.recognition_confidence,
+        "usable_for_rules": disposal_test.usable_for_rules,
+        "module_assessments": [
+            module.to_dict() for module in disposal_test.module_assessments[:12]
+        ],
+        "waiver_note_rows": disposal_test.waiver_note_rows[:8],
+        "amount_anchor_keys": sorted(disposal_test.amounts.keys())[:20],
+        "tested_sample_count": len(disposal_test.tested_samples),
+        "tested_sample_rows": [
+            {
+                "source_row": row.source_row,
+                "sample_type": row.sample_type,
+                "asset_id_present": bool(row.asset_id),
+                "net_value_present": bool(row.net_value),
+                "disposal_method_present": bool(row.disposal_method),
+                "evidence_description_present": bool(row.evidence_description),
+            }
+            for row in disposal_test.tested_samples[:12]
+        ],
+        "notes": list(disposal_test.notes[:20]),
+    }
+
+
+def _disposal_sample_output_excerpt(
+    sample_output: DisposalSampleOutputDataset | None,
+) -> dict[str, Any] | None:
+    if sample_output is None:
+        return None
+    return {
+        "source_sheet": sample_output.source_sheet,
+        "recognition_confidence": sample_output.recognition_confidence,
+        "usable_for_rules": sample_output.usable_for_rules,
+        "module_assessments": [
+            module.to_dict() for module in sample_output.module_assessments[:12]
+        ],
+        "parameter_keys": sorted(sample_output.parameters.keys())[:20],
+        "amount_anchor_keys": sorted(sample_output.amounts.keys())[:20],
+        "selected_sample_count": len(sample_output.selected_samples),
+        "selected_sample_rows": [
+            {
+                "source_row": row.source_row,
+                "sample_type": row.sample_type,
+                "asset_id_present": bool(row.asset_id),
+                "net_value_present": bool(row.net_value),
+                "disposal_method_present": bool(row.disposal_method),
+            }
+            for row in sample_output.selected_samples[:12]
+        ],
+        "notes": list(sample_output.notes[:20]),
+    }
+
+
 def _k01_expected_object(missing_sections: list[str]) -> dict[str, str]:
     object_name = missing_sections[0] if missing_sections else "K.01 section boundary"
     return {
@@ -616,6 +949,18 @@ def _k01_expected_object(missing_sections: list[str]) -> dict[str, str]:
         "why_expected": (
             "K.01 后推表通常包含表1、TB区、表2、表3、表4和 Notes；"
             "低置信度或区块冲突会影响后续规则判断。"
+        ),
+    }
+
+
+def _k022_expected_object() -> dict[str, str]:
+    return {
+        "procedure": "K.02.2",
+        "object_type": "module",
+        "object_name": "K.02.2 disposal ingest result",
+        "why_expected": (
+            "K.02.2 处置测试通常需要结合处置清单、K.02.2 测试页、"
+            "K.02.2a 选样输出和汇总页执行路径判断是否读对。"
         ),
     }
 
@@ -634,6 +979,128 @@ def _build_k01_candidate_preview(
         preview_lines=preview_lines,
         anchor_hits=_anchor_hits_from_preview(preview_lines),
     )
+
+
+def _build_k022_candidate_previews(
+    *,
+    disposal_test: DisposalTestSheetDataset | None,
+    disposal_sample_output: DisposalSampleOutputDataset | None,
+    disposal_execution_path: DisposalExecutionPathDataset | None,
+    workbook_path: str | None,
+) -> list[IngestReviewCandidatePreview]:
+    previews: list[IngestReviewCandidatePreview] = []
+    seen: set[str] = set()
+
+    for sheet_name, fallback_lines in (
+        (
+            disposal_test.source_sheet if disposal_test else None,
+            _k022_disposal_test_fallback_lines(disposal_test),
+        ),
+        (
+            disposal_sample_output.source_sheet if disposal_sample_output else None,
+            _k022_sample_output_fallback_lines(disposal_sample_output),
+        ),
+    ):
+        if not sheet_name or sheet_name in seen:
+            continue
+        rows = _load_sheet_rows(workbook_path, sheet_name)
+        preview_lines = _generic_preview_lines(rows) if rows else fallback_lines
+        previews.append(
+            IngestReviewCandidatePreview(
+                sheet_name=sheet_name,
+                name_score=None,
+                content_score=None,
+                preview_lines=preview_lines[:30],
+                anchor_hits=_anchor_hits_from_preview(preview_lines[:30]),
+            )
+        )
+        seen.add(sheet_name)
+
+    for sheet_name in (
+        disposal_execution_path.disposal_list_sheet
+        if disposal_execution_path
+        else None,
+        disposal_execution_path.disposal_test_sheet
+        if disposal_execution_path
+        else None,
+        disposal_execution_path.disposal_sample_output_sheet
+        if disposal_execution_path
+        else None,
+    ):
+        if not sheet_name or sheet_name in seen:
+            continue
+        rows = _load_sheet_rows(workbook_path, sheet_name)
+        if not rows:
+            continue
+        preview_lines = _generic_preview_lines(rows)
+        previews.append(
+            IngestReviewCandidatePreview(
+                sheet_name=sheet_name,
+                name_score=None,
+                content_score=None,
+                preview_lines=preview_lines[:20],
+                anchor_hits=_anchor_hits_from_preview(preview_lines[:20]),
+            )
+        )
+        seen.add(sheet_name)
+
+    return [preview for preview in previews if preview.preview_lines]
+
+
+def _k022_disposal_test_fallback_lines(
+    disposal_test: DisposalTestSheetDataset | None,
+) -> list[dict[str, Any]]:
+    if disposal_test is None:
+        return []
+    lines: list[dict[str, Any]] = []
+    for module in disposal_test.module_assessments[:12]:
+        evidence = " | ".join(str(e) for e in module.evidence if str(e).strip())
+        text = f"{module.module_name} | {module.status}"
+        if evidence:
+            text += f" | {evidence}"
+        lines.append({"row": 1 + len(lines), "text": text})
+    for row in disposal_test.tested_samples[:8]:
+        parts = [
+            "处置测试样本",
+            row.sample_type,
+            row.asset_id,
+            row.asset_name,
+            row.net_value,
+            row.disposal_method,
+        ]
+        text = " | ".join(str(p) for p in parts if p)
+        if text:
+            lines.append({"row": row.source_row, "text": text})
+    for row_no in disposal_test.waiver_note_rows[:5]:
+        lines.append({"row": row_no, "text": "K.02.2 处置测试 waiver note"})
+    return lines
+
+
+def _k022_sample_output_fallback_lines(
+    sample_output: DisposalSampleOutputDataset | None,
+) -> list[dict[str, Any]]:
+    if sample_output is None:
+        return []
+    lines: list[dict[str, Any]] = []
+    for module in sample_output.module_assessments[:12]:
+        evidence = " | ".join(str(e) for e in module.evidence if str(e).strip())
+        text = f"{module.module_name} | {module.status}"
+        if evidence:
+            text += f" | {evidence}"
+        lines.append({"row": 1 + len(lines), "text": text})
+    for row in sample_output.selected_samples[:8]:
+        parts = [
+            "处置选样输出",
+            row.sample_type,
+            row.asset_id,
+            row.asset_name,
+            row.net_value,
+            row.disposal_method,
+        ]
+        text = " | ".join(str(p) for p in parts if p)
+        if text:
+            lines.append({"row": row.source_row, "text": text})
+    return lines
 
 
 def _load_sheet_rows(
@@ -981,6 +1448,12 @@ def _anchor_tokens_from_text(text: str) -> set[str]:
         "处置日期",
         "处置方式",
         "减少方式",
+        "报废",
+        "出售",
+        "处置选样输出",
+        "处置测试样本",
+        "处置选样",
+        "样本类型",
         "SAP",
         "折旧测试",
         "折旧政策",

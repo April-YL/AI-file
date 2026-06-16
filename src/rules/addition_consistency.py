@@ -55,7 +55,8 @@ def build_addition_consistency_preview(
     addition_sample_output: AdditionSampleOutputDataset | None,
     execution_path: AdditionExecutionPathDataset | None = None,
 ) -> AdditionConsistencyPreview:
-    selected = list(addition_sample_output.selected_samples) if addition_sample_output else []
+    selected_all = list(addition_sample_output.selected_samples) if addition_sample_output else []
+    selected = [row for row in selected_all if not _is_replacement_sample(row.sample_type)]
     tested = list(addition_test.tested_samples) if addition_test else []
     matched_count = 0
     unmatched_selected: list[dict[str, Any]] = []
