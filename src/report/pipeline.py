@@ -430,6 +430,7 @@ def run_workbook_qc(
             ctx.k03_sheets,
             lead=ctx.lead,
             rollforward=ctx.rollforward,
+            fa_list=ctx.fa_list,
         )
     )
     issues.extend(k03_issues)

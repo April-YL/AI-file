@@ -138,6 +138,60 @@ class K03DetailTable:
 
 
 @dataclass
+class K03PolicyRow:
+    source_row: int
+    asset_category: Any = None
+    current_method: Any = None
+    current_useful_life: Any = None
+    current_salvage_rate: Any = None
+    current_annual_rate: Any = None
+    prior_method: Any = None
+    prior_useful_life: Any = None
+    prior_salvage_rate: Any = None
+    prior_annual_rate: Any = None
+    useful_life_same_marker: Any = None
+    salvage_rate_same_marker: Any = None
+    difference_explanation: Any = None
+    cell_refs: dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_row": self.source_row,
+            "asset_category": self.asset_category,
+            "current_method": self.current_method,
+            "current_useful_life": self.current_useful_life,
+            "current_salvage_rate": self.current_salvage_rate,
+            "current_annual_rate": self.current_annual_rate,
+            "prior_method": self.prior_method,
+            "prior_useful_life": self.prior_useful_life,
+            "prior_salvage_rate": self.prior_salvage_rate,
+            "prior_annual_rate": self.prior_annual_rate,
+            "useful_life_same_marker": self.useful_life_same_marker,
+            "salvage_rate_same_marker": self.salvage_rate_same_marker,
+            "difference_explanation": self.difference_explanation,
+            "cell_refs": self.cell_refs,
+        }
+
+
+@dataclass
+class K03PolicyTable:
+    range: K03Area | None = None
+    header_row: int | None = None
+    column_map: dict[str, K03Column] = field(default_factory=dict)
+    rows: list[K03PolicyRow] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "range": self.range.to_dict() if self.range else None,
+            "header_row": self.header_row,
+            "column_map": {k: v.to_dict() for k, v in self.column_map.items()},
+            "rows": [r.to_dict() for r in self.rows],
+            "warnings": self.warnings,
+        }
+
+
+@dataclass
 class K03SheetDataset:
     workbook_name: str
     source_file: str
@@ -155,6 +209,7 @@ class K03SheetDataset:
     conclusion_area: K03Area | None = None
     note_area: K03Area | None = None
     instruction_area: K03Area | None = None
+    policy_table: K03PolicyTable | None = None
     raw_columns: list[K03Column] = field(default_factory=list)
     normalized_column_map: dict[str, K03Column] = field(default_factory=dict)
     unmapped_columns: list[str] = field(default_factory=list)
@@ -194,6 +249,7 @@ class K03SheetDataset:
             "instruction_area": (
                 self.instruction_area.to_dict() if self.instruction_area else None
             ),
+            "policy_table": self.policy_table.to_dict() if self.policy_table else None,
             "raw_columns": [c.to_dict() for c in self.raw_columns],
             "normalized_column_map": {
                 k: v.to_dict() for k, v in self.normalized_column_map.items()
@@ -324,7 +380,18 @@ def _parse_policy_review(
 ) -> K03SheetDataset:
     text_rows = _rows_containing(rows, ("政策", "折旧", "结论", "说明", "复核"))
     conclusion = _area_for_rows(rows, _rows_containing(rows, ("结论",)))
-    note = _area_for_rows(rows, _rows_containing(rows, ("说明", "注：", "注:")))
+    policy_table = _extract_policy_table(rows)
+    note = _detect_policy_note_area(rows, policy_table.range if policy_table else None)
+    detected_sections = ["policy_review"]
+    if policy_table and policy_table.rows:
+        detected_sections.append("policy_table")
+    if note:
+        detected_sections.append("note_area")
+    warnings = [] if confidence >= 0.45 else ["k03_policy_review_low_confidence"]
+    if policy_table is None or not policy_table.rows:
+        warnings.append("k03_policy_table_not_identified")
+    elif policy_table.warnings:
+        warnings.extend(policy_table.warnings)
     ds = K03SheetDataset(
         workbook_name=path.name,
         source_file=str(path),
@@ -334,19 +401,240 @@ def _parse_policy_review(
         template_type="policy_review",
         ingest_depth=INGEST_DEPTH_LIGHTWEIGHT,
         rule_status=RULE_STATUS_LATER_PHASE,
-        detected_sections=["policy_review"],
+        detected_sections=detected_sections,
         conclusion_area=conclusion,
         note_area=note,
-        warnings=[] if confidence >= 0.45 else ["k03_policy_review_low_confidence"],
-        summary={"text_row_count": len(text_rows)},
+        policy_table=policy_table,
+        warnings=warnings,
+        summary={
+            "text_row_count": len(text_rows),
+            "policy_row_count": len(policy_table.rows) if policy_table else 0,
+            "has_policy_table": bool(policy_table and policy_table.rows),
+            "has_note_area": note is not None,
+        },
         unsupported_or_later_phase=False,
         llm_candidate_context={
             "text_rows": text_rows[:20],
-            "warnings": [] if confidence >= 0.45 else ["k03_policy_review_low_confidence"],
+            "warnings": warnings,
             "candidate_for": "depreciation_policy_semantic_review",
+            "policy_table_summary": {
+                "row_count": len(policy_table.rows) if policy_table else 0,
+                "mapped_fields": sorted(policy_table.column_map) if policy_table else [],
+            },
         },
     )
     return ds
+
+
+def _extract_policy_table(rows: list[tuple[Any, ...]]) -> K03PolicyTable | None:
+    header_row, column_map, warnings = _detect_policy_header(rows)
+    if not header_row or not column_map:
+        return None
+    required = {"asset_category", "current_useful_life", "prior_useful_life"}
+    if not (required & set(column_map)):
+        warnings.append("k03_policy_table_core_columns_missing")
+
+    row_items: list[K03PolicyRow] = []
+    end_row = header_row
+    max_col = max(c.column_index for c in column_map.values())
+    min_col = min(c.column_index for c in column_map.values())
+    for idx in range(header_row, len(rows)):
+        row_number = idx + 1
+        row = rows[idx]
+        values = {
+            field: _cell_value(row, col.column_index)
+            for field, col in column_map.items()
+        }
+        if _is_blank(values.values()):
+            if row_items:
+                break
+            continue
+        if _row_has_token(row, ("Notes", "注：", "注:", "说明", "结论")) and row_items:
+            break
+        category = values.get("asset_category")
+        if not _text(category):
+            if row_items:
+                break
+            continue
+        if _looks_like_policy_non_data_row(category):
+            if row_items:
+                break
+            continue
+
+        cell_refs = {
+            field: f"{get_column_letter(col.column_index)}{row_number}"
+            for field, col in column_map.items()
+        }
+        row_items.append(
+            K03PolicyRow(
+                source_row=row_number,
+                asset_category=category,
+                current_method=values.get("current_method"),
+                current_useful_life=values.get("current_useful_life"),
+                current_salvage_rate=values.get("current_salvage_rate"),
+                current_annual_rate=values.get("current_annual_rate"),
+                prior_method=values.get("prior_method"),
+                prior_useful_life=values.get("prior_useful_life"),
+                prior_salvage_rate=values.get("prior_salvage_rate"),
+                prior_annual_rate=values.get("prior_annual_rate"),
+                useful_life_same_marker=values.get("useful_life_same_marker"),
+                salvage_rate_same_marker=values.get("salvage_rate_same_marker"),
+                difference_explanation=values.get("difference_explanation"),
+                cell_refs=cell_refs,
+            )
+        )
+        end_row = row_number
+
+    return K03PolicyTable(
+        range=K03Area(
+            start_row=header_row,
+            end_row=end_row,
+            start_col=min_col,
+            end_col=max_col,
+        ),
+        header_row=header_row,
+        column_map=column_map,
+        rows=row_items,
+        warnings=warnings,
+    )
+
+
+def _detect_policy_header(
+    rows: list[tuple[Any, ...]],
+) -> tuple[int | None, dict[str, K03Column], list[str]]:
+    best_row: int | None = None
+    best_map: dict[str, K03Column] = {}
+    best_score = 0
+    warnings: list[str] = []
+    for idx, row in enumerate(rows[:80], start=1):
+        mapping = _map_policy_header_row(rows, idx)
+        fields = set(mapping)
+        score = len(fields & {
+            "asset_category",
+            "current_method",
+            "current_useful_life",
+            "current_salvage_rate",
+            "prior_method",
+            "prior_useful_life",
+            "prior_salvage_rate",
+            "useful_life_same_marker",
+            "salvage_rate_same_marker",
+            "difference_explanation",
+        })
+        if "asset_category" in fields:
+            score += 2
+        if {"current_useful_life", "prior_useful_life"} <= fields:
+            score += 2
+        if {"current_salvage_rate", "prior_salvage_rate"} <= fields:
+            score += 2
+        if score > best_score:
+            best_row = idx
+            best_map = mapping
+            best_score = score
+    if best_score < 4:
+        return None, {}, ["k03_policy_table_header_not_identified"]
+    return best_row, best_map, warnings
+
+
+def _map_policy_header_row(
+    rows: list[tuple[Any, ...]],
+    row_number: int,
+) -> dict[str, K03Column]:
+    row = rows[row_number - 1]
+    prev = rows[row_number - 2] if row_number >= 2 else ()
+    mapping: dict[str, K03Column] = {}
+    used_fields: set[str] = set()
+    for col_idx, value in enumerate(row, start=1):
+        header = _text(value)
+        prev_header = _text(prev[col_idx - 1]) if col_idx - 1 < len(prev) else ""
+        combined = " ".join(v for v in (prev_header, header) if v)
+        field = _policy_field_for_header(combined, header, prev_header, used_fields)
+        if not field:
+            continue
+        used_fields.add(field)
+        mapping[field] = K03Column(
+            source_header=combined or header,
+            column_index=col_idx,
+            column_letter=get_column_letter(col_idx),
+            standard_field=field,
+        )
+    return mapping
+
+
+def _policy_field_for_header(
+    combined: str,
+    header: str,
+    prev_header: str,
+    used_fields: set[str],
+) -> str | None:
+    n = _norm(combined)
+    h = _norm(header)
+    p = _norm(prev_header)
+    if not n:
+        return None
+    if any(token in n for token in ("固定资产类别", "资产类别", "类别")) and "asset_category" not in used_fields:
+        return "asset_category"
+    is_prior = any(token in n for token in ("上期", "上年", "以前", "prior", "previous", "2024"))
+    is_current = any(token in n for token in ("本期", "本年", "当前", "current", "2025")) or (
+        not is_prior and any(token in p for token in ("本期", "本年", "current"))
+    )
+    is_difference = any(token in n for token in ("差异", "是否一致", "变化", "变动", "difference"))
+
+    if any(token in n for token in ("差异说明", "说明", "备注", "原因", "解释", "note", "comment")):
+        return "difference_explanation"
+    if is_difference and any(token in n for token in ("寿命", "年限", "使用年限")):
+        return "useful_life_same_marker"
+    if is_difference and any(token in n for token in ("残值", "残值率")):
+        return "salvage_rate_same_marker"
+    if any(token in n for token in ("折旧方法", "折旧政策", "折旧方式")):
+        return "prior_method" if is_prior else "current_method" if is_current or "current_method" not in used_fields else "prior_method"
+    if any(token in n for token in ("使用寿命", "使用年限", "折旧年限", "寿命")):
+        return "prior_useful_life" if is_prior else "current_useful_life" if is_current or "current_useful_life" not in used_fields else "prior_useful_life"
+    if any(token in n for token in ("残值率", "净残值率", "残值")):
+        return "prior_salvage_rate" if is_prior else "current_salvage_rate" if is_current or "current_salvage_rate" not in used_fields else "prior_salvage_rate"
+    if any(token in n for token in ("年折旧率", "折旧率")):
+        return "prior_annual_rate" if is_prior else "current_annual_rate" if is_current or "current_annual_rate" not in used_fields else "prior_annual_rate"
+    # Two-level headers sometimes put only the metric in the leaf row.
+    if h in {"折旧方法", "使用寿命", "使用年限", "残值率", "年折旧率"}:
+        if "上期" in p or "prior" in p:
+            prefix = "prior"
+        else:
+            prefix = "current"
+        suffix = {
+            "折旧方法": "method",
+            "使用寿命": "useful_life",
+            "使用年限": "useful_life",
+            "残值率": "salvage_rate",
+            "年折旧率": "annual_rate",
+        }[h]
+        return f"{prefix}_{suffix}"
+    return None
+
+
+def _detect_policy_note_area(
+    rows: list[tuple[Any, ...]],
+    policy_range: K03Area | None,
+) -> K03Area | None:
+    start = policy_range.end_row if policy_range and policy_range.end_row else 0
+    matches: list[int] = []
+    for idx, row in enumerate(rows, start=1):
+        if idx <= start:
+            continue
+        if _row_has_token(row, ("Notes", "注：", "注:", "说明", "差异说明", "结论")):
+            matches.append(idx)
+    return _area_for_rows(rows, matches)
+
+
+def _cell_value(row: tuple[Any, ...], col_index: int) -> Any:
+    return row[col_index - 1] if col_index - 1 < len(row) else None
+
+
+def _looks_like_policy_non_data_row(value: Any) -> bool:
+    text = _text(value)
+    if not text:
+        return True
+    lower = text.lower()
+    return any(token in lower for token in ("合计", "小计", "总计", "notes", "说明", "结论", "表1"))
 
 
 def _parse_sap_sheet(
