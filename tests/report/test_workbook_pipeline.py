@@ -12,8 +12,14 @@ from ingest.disposal_test_sheet import (
     DisposalTestedSampleRow,
     DisposalAmountItem,
 )
-from ingest.models import RollforwardLayoutProfile
-from ingest.rollforward_sheet import K01SectionRegion, RollforwardSheetDataset
+from ingest.lead_sheet import LeadMovementRow, LeadSheetDataset
+from ingest.models import AssetRecord, FieldMapping, RollforwardLayoutProfile
+from ingest.records import FaListDataset
+from ingest.rollforward_sheet import (
+    K01SectionRegion,
+    MovementTransactionAmount,
+    RollforwardSheetDataset,
+)
 from ingest.workbook_context import WorkbookQcContext
 from report.pipeline import run_workbook_qc, run_workbook_qc_from_path
 from rules.delivery_completion import DeliveryCompletionContext
@@ -165,6 +171,146 @@ def test_workbook_qc_includes_addition_llm_issue(monkeypatch):
 
     assert any(i.rule_id == "addition_semantic_review" for i in report.issues)
     assert "addition_semantic" in {d["key"] for d in report.runtime_timings["llm_details"]}
+
+
+def test_workbook_qc_addition_purchase_population_excludes_default_cip_and_llm_does_not_escalate(monkeypatch):
+    monkeypatch.setenv("FA_QC_LLM_API_KEY", "sk-test")
+    monkeypatch.setenv("FA_QC_LLM_ENABLED", "true")
+
+    addition_list = FaListDataset(
+        source_file="stage0_addition_guard.xlsx",
+        source_sheet="新增清单",
+        mapped_fields=[
+            FieldMapping("asset_id", "固定资产编号", 1),
+            FieldMapping("asset_name", "固定资产名称", 2),
+            FieldMapping("asset_category", "固定资产类别", 3),
+            FieldMapping("start_date", "入账开始日期", 4),
+            FieldMapping("original_value", "原值", 5),
+            FieldMapping("addition_method", "新增方式", 6),
+        ],
+        records=[
+            AssetRecord(
+                source_row=2,
+                asset_id="FA-TEST-001",
+                asset_name="设备A",
+                asset_category="机器设备",
+                start_date="2025-01-01",
+                original_value="100",
+                addition_method="购置",
+            ),
+            AssetRecord(
+                source_row=3,
+                asset_id="FA-TEST-002",
+                asset_name="设备B",
+                asset_category="机器设备",
+                start_date="2025-02-01",
+                original_value="900",
+                addition_method="在建工程转入",
+            ),
+        ],
+    )
+    rollforward = RollforwardSheetDataset(
+        source_file="stage0_addition_guard.xlsx",
+        source_sheet="K.01 Agree SL to GL",
+        header_row=1,
+        mapped_fields=[],
+        movement_transactions=[
+            MovementTransactionAmount(
+                transaction_key="purchase",
+                transaction_label="购置",
+                measure="original_value",
+                amount=100,
+                source_row=12,
+            )
+        ],
+    )
+    ctx = WorkbookQcContext(
+        source_file="stage0_addition_guard.xlsx",
+        fa_list=None,
+        summary=None,
+        lead=None,
+        rollforward=rollforward,
+        addition_list=addition_list,
+        structure=None,
+        reconciliations=[],
+    )
+    mock_review = {
+        "topics": [
+            {
+                "topic": "special_addition_source",
+                "assessment": "insufficient",
+                "rationale": "在建工程转入未说明测试安排",
+                "missing_evidence": [],
+                "suggested_action": "补充说明",
+            }
+        ]
+    }
+
+    monkeypatch.setattr("llm.addition_review.chat_completion_json", lambda *args, **kwargs: mock_review)
+    monkeypatch.setattr("llm.ingest_review.run_workbook_ingest_reviews", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        "report.pipeline.enrich_report_with_llm",
+        lambda report, config, summary=None, workbook=None: report,
+    )
+
+    report = run_workbook_qc(ctx, llm=True)
+
+    assert not [
+        issue
+        for issue in report.issues
+        if issue.rule_id == "addition_rollforward_reconciliation"
+    ]
+    assert not [
+        issue
+        for issue in report.issues
+        if issue.rule_id == "addition_semantic_review"
+        and issue.field == "special_addition_source"
+    ]
+
+
+def test_workbook_qc_k01_without_opening_anchor_skips_opening_fail_and_merges_derived_net():
+    lead = LeadSheetDataset(
+        source_file="stage0_k01_guard.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        movement_rows=[
+            LeadMovementRow("原值", "K.01", {"py_audited": "1000", "audited_ending": "1100"}, 10),
+            LeadMovementRow("累计折旧", "K.01", {"py_audited": "300", "audited_ending": "350"}, 11),
+            LeadMovementRow("减值准备", "K.01", {"py_audited": "0", "audited_ending": "0"}, 12),
+            LeadMovementRow("净值", None, {"py_audited": "700", "audited_ending": "750"}, 13),
+        ],
+    )
+    rollforward = RollforwardSheetDataset(
+        source_file="stage0_k01_guard.xlsx",
+        source_sheet="K.01 Agree SL to GL",
+        header_row=1,
+        mapped_fields=[],
+        ending_totals={
+            "original_value": 1100,
+            "accumulated_depreciation": 340,
+            "impairment_provision": 0,
+            "net_value": 760,
+        },
+    )
+    ctx = WorkbookQcContext(
+        source_file="stage0_k01_guard.xlsx",
+        fa_list=None,
+        summary=None,
+        lead=lead,
+        rollforward=rollforward,
+        addition_list=None,
+        structure=None,
+        reconciliations=[],
+    )
+
+    report = run_workbook_qc(ctx, llm=False)
+    k01_link_issues = [
+        issue for issue in report.issues if issue.rule_id == "lead_rollforward_tb_reconciliation"
+    ]
+
+    assert len(k01_link_issues) == 1
+    assert k01_link_issues[0].field == "期末|accumulated_depreciation"
+    assert "并导致净值差异" in k01_link_issues[0].message
+    assert not any((issue.field or "").startswith("期初|") for issue in k01_link_issues)
 
 
 def test_workbook_qc_includes_disposal_sample_issue():

@@ -39,7 +39,18 @@ def _row(key: str, row: int, values: tuple[str, str, str, str], source: str) -> 
     )
 
 
-def _matrix(*, usable: bool = True, list_original: str = "1000") -> DisposalReconciliationMatrix:
+def _matrix(
+    *,
+    usable: bool = True,
+    list_original: str = "1000",
+    list_accumulated: str = "700",
+    list_impairment: str = "0",
+    list_net: str = "300",
+    rollforward_original: str = "1000",
+    rollforward_accumulated: str = "700",
+    rollforward_impairment: str = "0",
+    rollforward_net: str = "300",
+) -> DisposalReconciliationMatrix:
     return DisposalReconciliationMatrix(
         header_row=13,
         measure_columns={
@@ -49,8 +60,23 @@ def _matrix(*, usable: bool = True, list_original: str = "1000") -> DisposalReco
             "impairment_provision": 11,
         },
         rows={
-            "disposal_list": _row("disposal_list", 14, (list_original, "700", "0", "300"), "'处置清单'"),
-            "rollforward": _row("rollforward", 15, ("1000", "700", "0", "300"), "'K.01 Agree SL to GL'"),
+            "disposal_list": _row(
+                "disposal_list",
+                14,
+                (list_original, list_accumulated, list_impairment, list_net),
+                "'处置清单'",
+            ),
+            "rollforward": _row(
+                "rollforward",
+                15,
+                (
+                    rollforward_original,
+                    rollforward_accumulated,
+                    rollforward_impairment,
+                    rollforward_net,
+                ),
+                "'K.01 Agree SL to GL'",
+            ),
             "difference": _row("difference", 16, ("0", "0", "0", "0"), "A"),
             "investigation": DisposalReconciliationRow(
                 row_key="investigation",
@@ -110,7 +136,7 @@ def test_reconciliation_warns_when_list_and_k022_disagree():
     test = DisposalTestSheetDataset(
         source_file="test.xlsx",
         source_sheet="K.02.2 处置测试",
-        reconciliation_matrix=_matrix(list_original="1100"),
+        reconciliation_matrix=_matrix(list_original="1100", list_net="400"),
     )
     issues = run_disposal_reconciliation_rules(
         disposal_list_summary=_summary(),
@@ -120,9 +146,62 @@ def test_reconciliation_warns_when_list_and_k022_disagree():
         lead=None,
     )
     recon = [issue for issue in issues if issue.rule_id == "disposal_rollforward_reconciliation"]
-    assert recon
-    assert all(issue.severity == Severity.WARN for issue in recon)
-    assert any(issue.field == "original_value" for issue in recon)
+    assert len(recon) == 1
+    assert recon[0].severity == Severity.WARN
+    assert recon[0].field == "reconciliation_matrix"
+    assert "处置清单汇总=1000" in recon[0].message
+    assert "K.02.2 处置/报废总金额=1100" in recon[0].message
+    assert "原值" in recon[0].message
+    assert "并导致净值差异" in recon[0].message
+
+
+def test_reconciliation_merges_multiple_component_and_derived_net_differences():
+    test = DisposalTestSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.02.2 处置测试",
+        reconciliation_matrix=_matrix(
+            list_original="1300",
+            list_accumulated="800",
+            list_net="500",
+            rollforward_original="1000",
+            rollforward_accumulated="700",
+            rollforward_net="300",
+        ),
+    )
+    issues = run_disposal_reconciliation_rules(
+        disposal_list_summary=_summary(),
+        disposal_test=test,
+        disposal_execution_path=None,
+        rollforward=None,
+        lead=None,
+    )
+    recon = [issue for issue in issues if issue.rule_id == "disposal_rollforward_reconciliation"]
+    assert len(recon) == 1
+    message = recon[0].message
+    assert "原值" in message
+    assert "累计折旧" in message
+    assert "K.02.2 处置/报废总金额" in message
+    assert "K.02.2 Breakdown" in message
+    assert "并导致净值差异" in message
+
+
+def test_reconciliation_keeps_net_difference_in_same_issue_when_components_match():
+    test = DisposalTestSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.02.2 处置测试",
+        reconciliation_matrix=_matrix(list_net="350"),
+    )
+    issues = run_disposal_reconciliation_rules(
+        disposal_list_summary=_summary(),
+        disposal_test=test,
+        disposal_execution_path=None,
+        rollforward=None,
+        lead=None,
+    )
+    recon = [issue for issue in issues if issue.rule_id == "disposal_rollforward_reconciliation"]
+    assert len(recon) == 1
+    assert "计算净值" in recon[0].message
+    assert "并导致净值差异" not in recon[0].message
 
 
 def test_formula_source_flags_wrong_reference():

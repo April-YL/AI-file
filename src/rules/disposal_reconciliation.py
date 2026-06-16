@@ -171,7 +171,6 @@ def check_disposal_rollforward_reconciliation(
     rollforward: RollforwardSheetDataset | None,
     lead: LeadSheetDataset | None,
 ) -> list[QcIssue]:
-    issues: list[QcIssue] = []
     list_totals = _sale_scrap_totals(disposal_list_summary)
     matrix_list = matrix.rows.get("disposal_list")
     matrix_rollforward = matrix.rows.get("rollforward")
@@ -189,6 +188,10 @@ def check_disposal_rollforward_reconciliation(
             )
         ]
 
+    component_details: list[str] = []
+    net_details: list[str] = []
+    over_sad_amounts: list[Decimal] = []
+    source_row: int | None = None
     for measure in _MEASURES:
         list_amount = list_totals.get(measure)
         test_amount = _row_amount(matrix_list, measure)
@@ -206,24 +209,44 @@ def check_disposal_rollforward_reconciliation(
             if diff <= amount_tolerance(max(abs(left), abs(right))):
                 continue
             over_sad = sad is not None and diff > sad
-            message = (
-                f"处置{_MEASURE_LABELS[measure]}勾稽不一致："
-                f"{left_label}={left}，{right_label}={right}，差异={diff}。"
+            detail = (
+                f"{_MEASURE_LABELS[measure]}：{left_label}={left}，"
+                f"{right_label}={right}，差异={diff}"
             )
             if over_sad:
-                message += f" 差异超过 SAD（{sad}）。"
-            issues.append(
-                _issue(
-                    "disposal_rollforward_reconciliation",
-                    measure,
-                    Severity.WARN,
-                    message,
-                    "核对出售/报废总体口径、处置清单明细及 K.01 后推处置行。",
-                    source_sheet,
-                    direct_row or (matrix_rollforward.source_row if matrix_rollforward else None),
-                )
-            )
-    return issues
+                over_sad_amounts.append(diff)
+                detail += f"，超过 SAD（{sad}）"
+            if source_row is None:
+                source_row = direct_row or (matrix_rollforward.source_row if matrix_rollforward else None)
+            if measure == "net_value":
+                net_details.append(detail)
+            else:
+                component_details.append(detail)
+
+    details = list(component_details)
+    if net_details:
+        if component_details:
+            details.append("并导致净值差异：" + "；".join(net_details))
+        else:
+            details.extend(net_details)
+    if not details:
+        return []
+
+    max_over_sad = max(over_sad_amounts) if over_sad_amounts else None
+    message = "处置总体勾稽不一致：" + "；".join(details) + "。"
+    if max_over_sad is not None:
+        message += f" 最大差异超过 SAD（{sad}）。"
+    return [
+        _issue(
+            "disposal_rollforward_reconciliation",
+            "reconciliation_matrix",
+            Severity.WARN,
+            message,
+            "核对出售/报废总体口径、处置清单明细、K.02.2 Breakdown 及 K.01 后推处置行。",
+            source_sheet,
+            source_row,
+        )
+    ]
 
 
 def check_disposal_difference_investigation(
