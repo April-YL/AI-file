@@ -132,6 +132,12 @@ class K03DetailTableRef:
 
 
 @dataclass
+class K03DetailTable:
+    detail_rows: list[K03DetailRow] = field(default_factory=list)
+    total_rows: list[K03DetailRow] = field(default_factory=list)
+
+
+@dataclass
 class K03SheetDataset:
     workbook_name: str
     source_file: str
@@ -232,6 +238,67 @@ def load_k03_sheets_from_workbook(
     finally:
         wb.close()
     return datasets
+
+
+def load_k03_detail_table(dataset: K03SheetDataset) -> K03DetailTable:
+    """Read full K.03 TOD-by item details only when deterministic rules need them."""
+    ref = dataset.detail_table_ref
+    if ref is None or not ref.source_file or not ref.sheet_name:
+        return K03DetailTable()
+    if not ref.header_row or not ref.start_row or not ref.end_row:
+        return K03DetailTable()
+
+    wb = openpyxl.load_workbook(ref.source_file, read_only=True, data_only=True)
+    try:
+        if ref.sheet_name not in wb.sheetnames:
+            return K03DetailTable()
+        ws = wb[ref.sheet_name]
+        header_by_col = {
+            col.column_index: col.source_header
+            for col in dataset.raw_columns
+            if col.column_index is not None
+        }
+        field_by_col = {
+            col.column_index: field
+            for field, col in dataset.normalized_column_map.items()
+            if col.column_index is not None
+        }
+        if not header_by_col:
+            return K03DetailTable()
+
+        detail_rows: list[K03DetailRow] = []
+        total_rows: list[K03DetailRow] = []
+        read_start = (ref.header_row or ref.start_row) + 1
+        for row_number in range(read_start, ref.end_row + 1):
+            raw_values: dict[str, Any] = {}
+            normalized_values: dict[str, Any] = {}
+            cell_refs: dict[str, str] = {}
+            for col in sorted(header_by_col):
+                header = header_by_col[col]
+                value = ws.cell(row=row_number, column=col).value
+                raw_values[header] = value
+                field = field_by_col.get(col)
+                if field:
+                    normalized_values[field] = value
+                    cell_refs[field] = f"{get_column_letter(col)}{row_number}"
+            if _is_blank(raw_values.values()):
+                continue
+            row = K03DetailRow(
+                source_row=row_number,
+                raw_values=raw_values,
+                normalized_values=normalized_values,
+                cell_refs=cell_refs,
+            )
+            if row_number in dataset.total_rows or _row_has_token(
+                raw_values.values(),
+                ("合计", "总计", "小计", "total"),
+            ):
+                total_rows.append(row)
+            else:
+                detail_rows.append(row)
+        return K03DetailTable(detail_rows=detail_rows, total_rows=total_rows)
+    finally:
+        wb.close()
 
 
 def _parse_k03_sheet(

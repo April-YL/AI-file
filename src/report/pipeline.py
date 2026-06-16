@@ -22,6 +22,7 @@ from rules.delivery_completion import (
     check_delivery_completion,
 )
 from rules.disposal_runner import DISPOSAL_RULE_IDS, run_disposal_rules
+from rules.k03_runner import K03_RULE_IDS, run_k03_rules
 from rules.lead_runner import LEAD_RULE_IDS, run_lead_rules
 from rules.models import ColumnContext
 from rules.psp_completion import check_psp_completion
@@ -38,6 +39,7 @@ WORKBOOK_RULE_IDS = (
     "final_delivery_standard",
     *DISPOSAL_RULE_IDS,
     *ADDITION_RULE_IDS,
+    *K03_RULE_IDS,
     *LEAD_RULE_IDS,
     *ROLLFORWARD_RULE_IDS,
 )
@@ -422,6 +424,18 @@ def run_workbook_qc(
         )
     issues.extend(disposal_issues)
     rule_ids.extend(list(DISPOSAL_RULE_IDS))
+
+    k03_issues = attach_rule_metadata(
+        run_k03_rules(
+            ctx.k03_sheets,
+            lead=ctx.lead,
+            rollforward=ctx.rollforward,
+        )
+    )
+    issues.extend(k03_issues)
+    rule_ids.extend(list(K03_RULE_IDS))
+    if not source_sheet and ctx.k03_sheets:
+        source_sheet = ctx.k03_sheets[0].sheet_name
 
     rollforward_sheet_section = None
     if config.enabled:
