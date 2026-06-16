@@ -184,6 +184,50 @@ def test_workbook_ingest_does_not_truncate_addition_list(tmp_path: Path):
     assert len(ctx.addition_list.records) == 300
 
 
+def test_workbook_ingest_does_not_truncate_fa_list(tmp_path: Path):
+    path = tmp_path / "long_fa_list.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "FA list"
+    ws.append(["固定资产编号", "固定资产名称", "原值", "累计折旧", "净值"])
+    for idx in range(260):
+        ws.append([f"FA-TEST-{idx:03d}", f"设备{idx}", 100, 10, 90])
+    wb.save(path)
+    wb.close()
+
+    ctx = load_workbook_ingest(path, max_rows=50)
+
+    assert ctx.fa_list is not None
+    assert len(ctx.fa_list.records) == 260
+
+
+def test_workbook_ingest_does_not_truncate_disposal_list(tmp_path: Path):
+    path = tmp_path / "long_disposal.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "处置清单"
+    ws.append(
+        [
+            "固定资产编号",
+            "固定资产名称",
+            "原值",
+            "累计折旧",
+            "净值",
+            "处置日期",
+            "处置方式",
+        ]
+    )
+    for idx in range(240):
+        ws.append([f"FA-D-{idx:03d}", f"旧设备{idx}", 100, 10, 90, "2025-01-01", "报废"])
+    wb.save(path)
+    wb.close()
+
+    ctx = load_workbook_ingest(path, max_rows=50)
+
+    assert ctx.disposal_list is not None
+    assert len(ctx.disposal_list.records) == 240
+
+
 def test_rollforward_detects_k01_sections_six_blocks():
     rows = [
         ("K.01 Agree SL to GL",),

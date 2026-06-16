@@ -13,6 +13,7 @@ from ingest.disposal_test_sheet import (
     DisposalSampleOutputDataset,
     DisposalTestSheetDataset,
 )
+from ingest.k03_sheet import K03SheetDataset
 from ingest.lead_sheet import LeadSheetDataset
 from ingest.reconciliation import ReconciliationCheck
 from ingest.records import DisposalListSummary, FaListDataset
@@ -40,6 +41,7 @@ class WorkbookQcContext:
     disposal_test: DisposalTestSheetDataset | None = None
     disposal_sample_output: DisposalSampleOutputDataset | None = None
     disposal_execution_path: DisposalExecutionPathDataset | None = None
+    k03_sheets: list[K03SheetDataset] = field(default_factory=list)
     structure: WorkbookStructure | None = None
     reconciliations: list[ReconciliationCheck] = field(default_factory=list)
 
@@ -81,6 +83,7 @@ def load_workbook_context(
         disposal_test=ing.disposal_test,
         disposal_sample_output=ing.disposal_sample_output,
         disposal_execution_path=ing.disposal_execution_path,
+        k03_sheets=list(ing.k03_sheets),
         structure=ing.structure,
         reconciliations=list(ing.reconciliations),
     )

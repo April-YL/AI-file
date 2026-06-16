@@ -184,7 +184,7 @@ def score_by_content(
     if best_kind in (SheetKind.DEPRECIATION_TOD, SheetKind.DEPRECIATION_TOD_SAMPLE):
         full_sig = CONTENT_SIGNATURES[SheetKind.DEPRECIATION_TOD]
         hit = count_signature_fields(best_cells, full_sig, SheetKind.DEPRECIATION_TOD)
-        if hit >= 6:
+        if hit >= 4:
             best_kind = SheetKind.DEPRECIATION_TOD
             best_score = max(best_score, 0.85)
 

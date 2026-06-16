@@ -95,6 +95,41 @@ def test_workbook_qc_delivery_stage_selects_final_rule(workbook_demo: Path):
     assert "first_delivery_standard" not in report.rule_ids
 
 
+def test_k03_ingest_dataset_does_not_emit_findings(tmp_path: Path):
+    path = tmp_path / "k03_only.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.03.2 折旧测试"
+    ws.append(["说明", "TOD-by item 全量折旧测试"])
+    ws.append(
+        [
+            "资产编号",
+            "资产名称",
+            "原值",
+            "残值率",
+            "折旧年限",
+            "管理层计算折旧",
+            "审计重新计算折旧",
+            "差异",
+            "结论",
+        ]
+    )
+    ws.append(["FA-TEST-001", "设备A", 1200, "5%", 60, 228, 228, 0, "通过"])
+    ws.append(["合计", "", 1200, "", "", 228, 228, 0, ""])
+    ws.append(["结论", "未见重大差异"])
+    wb.save(path)
+    wb.close()
+
+    report = run_workbook_qc_from_path(str(path), llm=False)
+
+    assert not [
+        issue
+        for issue in report.issues
+        if (issue.procedure_code or "").startswith("K.03")
+        or "depreciation" in issue.rule_id
+    ]
+
+
 @pytest.mark.skipif(not CASE_B.exists(), reason="B company case workbook not available")
 def test_workbook_qc_b_company_includes_addition_sheet_section():
     report = run_workbook_qc_from_path(str(CASE_B), llm=False)

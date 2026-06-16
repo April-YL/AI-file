@@ -22,6 +22,7 @@ from ingest.disposal_test_sheet import (
     load_disposal_sample_output_from_workbook,
     load_disposal_test_from_workbook,
 )
+from ingest.k03_sheet import K03SheetDataset, load_k03_sheets_from_workbook
 from ingest.lead_sheet import LeadSheetDataset, load_lead_from_workbook
 from ingest.models import SheetKind
 from ingest.reconciliation import ReconciliationCheck, run_workbook_reconciliations
@@ -57,6 +58,7 @@ class WorkbookIngestContext:
     disposal_test: DisposalTestSheetDataset | None = None
     disposal_sample_output: DisposalSampleOutputDataset | None = None
     disposal_execution_path: DisposalExecutionPathDataset | None = None
+    k03_sheets: list[K03SheetDataset] = field(default_factory=list)
     summary: SummarySheetDataset | None = None
     lead: LeadSheetDataset | None = None
     reconciliations: list[ReconciliationCheck] = field(default_factory=list)
@@ -89,6 +91,7 @@ class WorkbookIngestContext:
                 if self.disposal_execution_path
                 else None
             ),
+            "k03_sheets": [sheet.to_dict() for sheet in self.k03_sheets],
             "summary": _summary_summary(self.summary),
             "lead": _lead_summary(self.lead),
             "reconciliations": [c.to_dict() for c in self.reconciliations],
@@ -453,6 +456,7 @@ def load_workbook_ingest(
         if disposal_sample_output_sheet
         else None
     )
+    k03_sheets = load_k03_sheets_from_workbook(path, max_rows=None)
 
     summary = load_summary_from_workbook(path, sheet_name=summary_sheet)
     if not summary.programs and not summary.header_row:
@@ -504,6 +508,7 @@ def load_workbook_ingest(
         disposal_test=disposal_test,
         disposal_sample_output=disposal_sample_output,
         disposal_execution_path=disposal_execution_path,
+        k03_sheets=k03_sheets,
         summary=summary,
         lead=lead,
         reconciliations=reconciliations,
