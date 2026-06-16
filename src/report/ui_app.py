@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import re
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
@@ -35,6 +37,38 @@ st.set_page_config(
 
 # 规则/ingest 变更时递增，避免 @st.cache_data 返回旧质检结果。
 _QC_CACHE_VERSION = "20260611-disposal-performance"
+_OUTPUT_SUFFIXES = ("_qc_report", "_qc_review", "_qc_annotated")
+_INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_MAX_OUTPUT_STEM_LENGTH = 100
+
+
+def _new_run_id(now: datetime | None = None) -> str:
+    return (now or datetime.now()).strftime("%Y%m%d_%H%M%S")
+
+
+def _clean_output_stem(filename: str) -> str:
+    stem = Path(filename).stem.strip()
+    lowered = stem.lower()
+    for suffix in _OUTPUT_SUFFIXES:
+        if lowered.endswith(suffix):
+            stem = stem[: -len(suffix)].rstrip()
+            break
+    stem = _INVALID_FILENAME_CHARS.sub("_", stem).strip(" .")
+    stem = re.sub(r"_+", "_", stem)
+    stem = stem[:_MAX_OUTPUT_STEM_LENGTH].rstrip(" ._")
+    return stem or "workpaper"
+
+
+def _output_filename(filename: str, run_id: str, output_type: str) -> str:
+    extensions = {
+        "report": "json",
+        "review": "html",
+        "annotated": "xlsx",
+    }
+    if output_type not in extensions:
+        raise ValueError(f"Unsupported output type: {output_type}")
+    base = _clean_output_stem(filename)
+    return f"{base}_{run_id}_qc_{output_type}.{extensions[output_type]}"
 
 
 def _inject_style() -> None:
@@ -250,8 +284,9 @@ def _render_overview(name: str, data: dict) -> None:
 
 
 def _render_downloads(name: str, bundle: dict) -> None:
-    base = Path(name).stem
+    run_id = bundle["run_id"]
     st.subheader("交付物下载")
+    st.caption(f"本次运行编号：`{run_id}`（三个下载文件使用同一编号）")
     ann = bundle.get("annotated_bytes")
     col1, col2, col3 = st.columns([1.35, 1, 1])
     with col1:
@@ -259,7 +294,7 @@ def _render_downloads(name: str, bundle: dict) -> None:
             st.download_button(
                 "下载标注底稿",
                 ann,
-                file_name=f"{base}_qc_annotated.xlsx",
+                file_name=_output_filename(name, run_id, "annotated"),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary",
                 use_container_width=True,
@@ -270,14 +305,14 @@ def _render_downloads(name: str, bundle: dict) -> None:
         st.download_button(
             "下载 JSON 报告",
             bundle["json_bytes"],
-            file_name=f"{base}_qc_report.json",
+            file_name=_output_filename(name, run_id, "report"),
             use_container_width=True,
         )
     with col3:
         st.download_button(
             "下载 HTML 预览",
             bundle["html_bytes"],
-            file_name=f"{base}_qc_review.html",
+            file_name=_output_filename(name, run_id, "review"),
             use_container_width=True,
         )
 
@@ -613,6 +648,7 @@ if not uploaded:
 if st.button("开始质检", type="primary", use_container_width=True):
     st.session_state["results"] = {}
     st.session_state["errors"] = {}
+    run_id = _new_run_id()
     progress = st.progress(0, text="准备中")
     for idx, uf in enumerate(uploaded):
         progress.progress((idx) / len(uploaded), text=f"正在质检：{uf.name}")
@@ -632,6 +668,7 @@ if st.button("开始质检", type="primary", use_container_width=True):
                 "json_bytes": json_bytes,
                 "html_bytes": html_bytes,
                 "annotated_bytes": ann_bytes,
+                "run_id": run_id,
             }
         except Exception as e:
             st.session_state.setdefault("errors", {})[uf.name] = str(e)
