@@ -48,3 +48,5 @@ py-modules = ["fa_qc_ui"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# 固定单一临时目录，避免每次 --basetemp .pytest_tmp_xxx 在工作区堆积空文件夹
+addopts = "--basetemp=.pytest_tmp"

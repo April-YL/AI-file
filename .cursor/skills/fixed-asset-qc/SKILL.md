@@ -9,6 +9,13 @@ description: 执行固定资产质检 Agent 开发工作流。用于固定资产
 
 遵循 [docs/agent-collaboration.md](../../docs/agent-collaboration.md)：**先回答问题、给出方案与影响范围；用户确认后再修改** `src/`、`tests/`、`docs/`。**`git commit` / `git push` 前须列拟提交清单并等用户确认**（即使用户说「保存并推送」）。用户写明「请勿直接修改」时仅分析不改动。
 
+## 工作区卫生
+
+- 跑测试：`pytest tests/... -q`，**不要**加 `--basetemp`（已固定为 `.pytest_tmp/`）。
+- 实测/调试输出：写 `outputs/` 或 `artifacts/_*`；**不要**在项目根目录生成 `*_qc_report.json`。
+- 诊断：用 `scripts/inspect_workbook.py` 等已有脚本；**不要**新建 `scripts/_*.py`。
+- 会话结束前若产生大量临时文件，提示用户运行 `.\scripts\clean_workspace.ps1`。
+
 ## 开始前
 
 1. 阅读 `AGENTS.md` 与 `docs/agent-collaboration.md`。

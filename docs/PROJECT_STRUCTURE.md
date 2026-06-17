@@ -14,6 +14,10 @@
 | `src/report/export_annotated_workbook.py` | 标注底稿副本导出。 |
 | `scripts/run_case_lead_regression.py` | 案例库 Lead 批量回归。 |
 | `scripts/check_staged_no_secrets.py` | 提交前密钥自检。 |
+| `scripts/clean_workspace.ps1` | 清理本地临时文件（pytest 缓存、`artifacts/_*`、`scripts/_*.py` 等）。 |
+| `outputs/` | **本地实测与导出**（`.gitignore`）；不入 Git。 |
+| `artifacts/case_*` | **可入库**的回归摘要（Lead、K.02 等）；`artifacts/_*` 为临时调试，不入库。 |
+| `.pytest_tmp/` | pytest 固定临时目录（`pyproject.toml` 配置）；勿手动创建 `.pytest_tmp_xxx`。 |
 
 ## 文档目录
 

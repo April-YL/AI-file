@@ -12,14 +12,27 @@
 # Excel 临时/锁文件
 ~$*
 
-# 本地生成的质检报告
+# 本地生成的质检报告（任意目录）
 *_qc_report.json
 *_qc_review.html
+*_qc_annotated.xlsx
 qc_report.json
 .tmp_qc_out
 
+# 本地实测/导出目录（不入库；正式回归见 artifacts/case_*）
+outputs/*
+!outputs/.gitkeep
+
 # 本地临时检查输出（非 fixture）
 _summary_check*.txt
+
+# Agent 一次性诊断脚本（应使用 scripts/inspect_*.py 等固定脚本）
+scripts/_*.py
+
+# artifacts：仅保留 case_* 回归产物入库，其余为本地临时
+artifacts/*
+!artifacts/case_*.json
+!artifacts/case_*.md
 
 # Python 虚拟环境
 .venv/
@@ -30,6 +43,15 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.pytest_tmp/
+.pytest_tmp*/
+
+# pytest 默认系统临时目录（未指定 basetemp 时）
+.tmp/
+
+# IDE / Cursor 本地状态
+.idea/
+agent-transcripts/
 
 # 本地资料库/案例库（体积大，可能包含脱敏但不适合直接入库的底稿）
 固定资产质检agent/资料库/
@@ -51,3 +73,35 @@ Desktop.ini
 # 日志与依赖（若后续有）
 *.log
 node_modules/
+
+# Repo hygiene: AI / IDE / Cursor
+.cursor/
+.vscode/
+
+# Repo hygiene: Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Repo hygiene: test artifacts
+*.log
+
+# Repo hygiene: runtime outputs
+artifacts/
+outputs/
+
+# Repo hygiene: AI-generated docs drafts
+docs/cursor-transcript-index.html
+docs/history/
+docs/reports/
+docs/planning/*.xlsx
+
+# Repo hygiene: OS
+.DS_Store
+
+# Repo hygiene: Excel / local datasets (IMPORTANT)
+*.xlsx
+*.xls
+资料库/
+固定资产质检agent/资料库/
+固定资产质检agent/质检测试结果/

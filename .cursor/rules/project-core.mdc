@@ -15,3 +15,4 @@ alwaysApply: true
 - **`.env` / `FA_QC_LLM_API_KEY` 永不进 Git**（见 `docs/data-security.md`）；提交前运行 `python scripts/check_staged_no_secrets.py`；仅 `.env.example` 可入库。
 - 长期有效的决策不要只留在聊天里，应写入 `docs/`、`.cursor/rules/` 或 `.cursor/skills/`。
 - **LLM 优先级**：质检点准确 = `rules` + `ingest`（P0）；LLM 主战场 = `--llm-rules` / `--llm-checklist`（见 `docs/llm-agent-roadmap.md`）；`--llm` 报告叙述为低优先级。
+- **工作区卫生**：pytest 只用默认 `.pytest_tmp/`（**禁止** `--basetemp .pytest_tmp_xxx`）；实测报告写 `outputs/` 或 `--output` 指定路径；**禁止**新建 `scripts/_*.py`；调试垃圾用 `artifacts/_*` 前缀；收工可跑 `scripts/clean_workspace.ps1`。详见 `docs/agent-collaboration.md` § 工作区卫生。

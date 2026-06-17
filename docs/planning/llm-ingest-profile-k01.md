@@ -115,7 +115,7 @@ candidate_previews 第45行出现“表2 check with 表1”“差异”“Notes�
 
 | 触发 | 说明 | LLM 任务 |
 | --- | --- | --- |
-| `rollforward is None` | 未识别 K.01 后推表 | `missing_object_discovery` |
+| `rollforward is None` |    | `missing_object_discovery` |
 | 多个 K.01 候选 | 例如 `K.01` 与 `K.01-24` 并存 | `sheet_classification` / 多期路由复核 |
 | sheet 名与内容冲突 | 名称像 K.01，但内容像清单或说明页 | `read_result_review` |
 

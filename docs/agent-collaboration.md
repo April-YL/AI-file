@@ -36,6 +36,22 @@ $p = (Get-ChildItem -LiteralPath 'E:\AI file\固定资产质检agent\资料库' 
 
 如果当前没有现成脚本，也应当把路径作为 `argv` 传给临时 Python，而不是把中文路径写进长 `-c` 字符串里。
 
+## 工作区卫生（避免临时文件堆积）
+
+约定目标：**减少根目录和 `artifacts/` 里的本地垃圾**，而不只是靠 `.gitignore` 隐藏。
+
+| 用途 | 应放哪里 | 禁止 |
+| --- | --- | --- |
+| 跑自动测试（pytest） | 固定目录 `.pytest_tmp/`（已在 `pyproject.toml` 配置） | **禁止**每次新建 `.pytest_tmp_任务名`；**禁止**手写 `--basetemp .pytest_tmp_xxx` |
+| 案例库/真实底稿实测报告 | `outputs/` 或案例库同目录，并显式 `--output` | **禁止**把 `*_qc_report.json`、`*_qc_annotated.xlsx` 写到项目根目录 |
+| 一次性诊断 | 优先 `scripts/inspect_workbook.py` 等已有脚本 | **禁止**新建 `scripts/_*.py`（下划线前缀=临时，不入库） |
+| 调试中间结果 | `artifacts/_*`（下划线前缀=临时） | **禁止**把 `_debug_*`、SOP 摘录等长期留在 `artifacts/` |
+| 正式回归产物 | `artifacts/case_*.json` / `case_*.md`（可入库） | 与上表临时文件区分命名 |
+
+**Agent 跑测试**：默认 `pytest tests/... -q` 即可，不要加 `--basetemp`。
+
+**收工或觉得工作区乱**：在外部 PowerShell 运行 `.\scripts\clean_workspace.ps1`（Cursor 占用导致删不掉时，先关 Cursor 再跑）。
+
 ## 沟通语言
 
 项目使用者以审计专业人员为主，可能只有少量 IT 基础。Agent 回复时应默认使用通俗、业务可判断的表达：
@@ -63,7 +79,7 @@ $p = (Get-ChildItem -LiteralPath 'E:\AI file\固定资产质检agent\资料库' 
 
 即使用户说「保存」「提交」「推送」，也**不要默认**直接 `git commit` / `git push`。须先：
 
-1. **列清单**：`git status` / 拟 `add` 的文件列表；**明确不提交**项（如 `.env`、`scripts/_*.py`、`artifacts/_*`、未完成的 docs）。
+1. **列清单**：`git status` / 拟 `add` 的文件列表；**明确不提交**项（如 `.env`、`outputs/`、`scripts/_*.py`、`artifacts/` 下非 `case_*` 文件、未完成的 docs）。
 2. **拟提交说明**：1–2 句 commit 意图；确认**不含** API 密钥（`.env` 仅在本地，`.env.example` 无真实 key）。
 3. **等待确认**：用户回复「可以提交」「可以推送」或调整清单后再执行。
 4. **执行后回报**：commit hash、是否已 push、远程分支。

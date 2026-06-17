@@ -198,6 +198,14 @@ fa-qc-run tests/fixtures/workbook_with_lead.xlsx
 pytest tests/ingest tests/rules tests/llm -q
 ```
 
+### 工作区卫生
+
+- 跑测试**不要**加 `--basetemp`；临时文件统一在 `.pytest_tmp/`。
+- 真实底稿实测报告请写到 `outputs/`，或 `fa-qc-run 底稿.xlsx --output outputs/报告.json`。
+- 工作区乱时：`.\scripts\clean_workspace.ps1`（删不掉时先关 Cursor 再跑）。
+
+详见 [agent-collaboration.md](agent-collaboration.md) § 工作区卫生。
+
 ## 6. 本地资料（不在 Git 中）
 
 以下目录在 `.gitignore` 中，**克隆后需向团队索取**：
