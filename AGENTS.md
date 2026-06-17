@@ -65,6 +65,23 @@
 - `tests/fixtures/`：仅存放脱敏样例数据。
 - `tests/rules/`：存放规则单元测试。
 
+## Frozen Architecture Contract（强制遵守）
+
+- 顶层架构唯一来源：`docs/frozen-top-level-architecture.md`
+- 当前代码映射来源：`docs/frozen-architecture-code-mapping.md`
+- 不允许新增 pipeline stage / layer
+- 不允许绕过 LLM Router（包括 helper / utils / wrapper）
+- LLM Router 只负责调用治理：token、cache、trace、budget、model routing；不拥有业务判断
+- IDENTIFIER 必须属于 Ingest Engine
+- Rules 是 deterministic truth source，可消费 Standardized Model，但不得调用 LLM、不得修改 ingest model
+- Control Plane 是唯一策略决策中心，负责 reasoner / fallback / skip 的触发决策，不承担业务执行
+- Finding Model 是唯一影响承载结构
+- Report 只做展示与交付，不得新增 severity 计算、rule decision、LLM decision 或 finding 改写逻辑
+- 修改代码前必须明确所属 frozen module
+- 已记录 legacy exceptions 可作为当前现实存在；新增代码不得复制、扩大或依赖这些例外作为新设计依据
+- 架构归属、控制流、LLM 边界冲突时，以 `docs/frozen-top-level-architecture.md` 为最高优先级
+- 不允许重新解释或扩展 frozen architecture 的语义
+
 ## 质检结论枚举
 
 - `PASS`：校验通过。

@@ -1,5 +1,13 @@
 # 架构说明
 
+## Frozen Architecture Notice
+
+This file records historical architecture notes and stage-level design context. It is not the highest-priority architecture contract.
+
+The current top-level architecture source is `docs/frozen-top-level-architecture.md`. The current code-to-frozen-module mapping is `docs/frozen-architecture-code-mapping.md`.
+
+If historical three-stage architecture notes, M3+ planning, or module descriptions in this file conflict with the frozen architecture contract, the frozen architecture contract has the highest priority.
+
 固定资产质检 Agent 第一版采用清晰的三段式架构：数据接入、规则质检、报告输出。每个模块保持边界清楚，便于后续接入更多数据源和规则。
 
 业务流程和底稿口径以 `docs/audit-workflow.md`、`docs/qc-checklist.md`、`docs/workpaper-fields.md` 和 `docs/rule-dictionary-mapping.md` 为准。

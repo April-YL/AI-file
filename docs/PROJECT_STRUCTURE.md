@@ -1,5 +1,13 @@
 # 项目文件说明
 
+## Frozen Architecture Notice
+
+This file describes repository files and directory purposes only. It is not the top-level architecture source.
+
+For system architecture, execution chain, module ownership, and LLM boundaries, use `docs/frozen-top-level-architecture.md` as the single architecture contract. For current code ownership, use `docs/frozen-architecture-code-mapping.md`.
+
+If this file conflicts with the frozen architecture contract, the frozen architecture contract has the highest priority.
+
 本文说明固定资产质检 Agent 项目中每个核心目录和文件的作用，便于团队成员、新会话 Agent 和代码评审快速接续工作。
 
 ## 根目录
