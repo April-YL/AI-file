@@ -226,3 +226,112 @@ Transcript/export scripts vs QC system -> NO COUPLING -> Agent transcript import
 API server / scheduler / background workers <-> QC pipeline -> NO COUPLING -> No such runtime entry points were found in the current repository.
 
 Transcript/history/report-export maintenance scripts <-> QC pipeline -> NO COUPLING -> They support collaboration or documentation, not system startup.
+
+## Critical Execution Path Map
+
+### A. Primary Critical Path
+
+结论：一次完整 Excel workbook 质检的权威运行路径从 `run_input_qc()` 开始，到内存中的 `QcReport` 结束；JSON/HTML/XLSX 是调用方随后执行的输出阶段，不是 `run_input_qc()` 内部动作。
+
+严格核心链路：
+
+```text
+run_input_qc()
+-> run_workbook_qc_from_path()
+-> load_workbook_context()
+-> load_workbook_ingest()
+-> run_workbook_qc()
+-> build_report()
+-> QcReport
+```
+
+完整交付链路：
+
+```text
+run_input_qc()
+-> run_workbook_qc_from_path()
+-> load_workbook_context()
+-> load_workbook_ingest()
+-> run_workbook_qc()
+-> build_report()
+-> QcReport
+-> caller-owned export stage
+-> export_report_json()
+-> export_review_html()
+-> export_annotated_workbook()
+-> JSON / HTML / annotated XLSX
+```
+
+说明：
+
+- `run_input_qc()` 是 CLI 和 UI 共享的统一 QC 入口。
+- `run_workbook_qc()` 是 workbook 内部规则编排节点，控制 summary、Lead、K.02、K.03、K.01、delivery、LLM 的实际执行顺序。
+- `build_report()` 只生成内存报告对象 `QcReport`。
+- `export_report_json()`、`export_review_html()`、`export_annotated_workbook()` 由 CLI 或 UI 调用方执行。
+- CSV 路径可以生成 FA list QC report，但不是完整 workbook QC 的 primary critical path。
+
+### B. Secondary Paths
+
+CLI wrapper path -> Secondary -> `fa-qc-run -> report.cli.main -> run_input_qc`. CLI 负责参数解析、`.env` 加载、输出路径、exit code 和文件落盘，不是核心规则编排本身。
+
+UI wrapper path -> Secondary -> `fa-qc-ui / streamlit run ui_app.py -> ui_app._run_qc_cached -> run_input_qc`. UI 负责上传、缓存、临时目录、页面展示和下载按钮，不重写核心 QC 规则。
+
+Ingest diagnostic path -> Secondary -> `fa-qc-diagnose -> ingest.cli.main -> diagnose_workbook -> optional load_workbook_ingest`. 它只诊断读取和分类，不执行完整 QC rules，也不生成正式 report artifacts。
+
+Scripts-based regression paths -> Secondary -> `scripts/run_case_* -> load_workbook_context()` or `run_workbook_qc()`. 这些脚本用于开发验证和回归，不代表用户正式运行入口。
+
+UI bootstrap path -> Secondary -> `启动质检界面.bat / scripts/start-ui.* -> fa-qc-ui or streamlit run ui_app.py`. 它只准备环境并启动 UI。
+
+### C. Decision Nodes
+
+`run_input_qc()` -> Branch -> CSV vs Excel. CSV 进入 FA list QC；Excel 进入 workbook QC。
+
+`load_workbook_ingest()` -> Branch -> sheet classification and candidate selection. 它决定 `ctx.summary`、`ctx.lead`、`ctx.rollforward`、`ctx.addition_list`、`ctx.disposal_list`、`ctx.k03_sheets` 等对象是否存在。
+
+`run_workbook_qc()` -> Branch -> ctx object presence. 规则按对象存在性触发；缺少对象时，相关规则可能跳过、降级为 `NEED_REVIEW`，或只生成专题 section。
+
+`load_llm_config()` / `config.enabled` -> Branch -> LLM enabled vs disabled. 启用后会增加 PSP、Lead、K.02、K.01 notes、ingest review、report enrichment 等语义复核；禁用时只跑确定性规则。
+
+`delivery_context` -> Branch -> first/final/no delivery completion check. 只有传入 delivery context 时才执行交付完整性检查。
+
+CLI export options -> Branch -> `--no-html` and `--no-annotated`. CLI 可跳过 HTML 或标注 workbook；CSV 输入天然不生成 annotated workbook。
+
+UI output handling -> Branch -> Excel vs CSV. UI 对 Excel 生成标注副本下载；CSV 只生成 JSON/HTML 下载。
+
+Overall severity -> Branch -> CLI exit code. CLI 在整体 `FAIL` 时以 exit code `3` 退出；UI 不使用这个退出码控制。
+
+### D. Control Node
+
+System control node -> `run_input_qc()`.
+
+理由：
+
+- CLI 和 UI 都直接或间接汇入 `run_input_qc()`。
+- 它决定 CSV 与 Excel 的第一层执行分支。
+- 它把 Excel workbook 路径交给 `run_workbook_qc_from_path()`，从而进入完整 workbook pipeline。
+
+Core orchestration node -> `run_workbook_qc()`.
+
+理由：
+
+- 它不是外部入口，但控制 workbook 内部质检实际顺序。
+- Summary、Lead、K.02 addition、K.02 disposal、K.03、LLM ingest review、K.01 rollforward、delivery 和 final LLM enrichment 都在这里串接。
+- 因此，架构分析时应区分：`run_input_qc()` 是系统入口控制点，`run_workbook_qc()` 是规则编排控制点。
+
+### E. Non-Critical Paths
+
+`scripts/` maintenance and regression tools -> Excluded -> 它们可调用内部函数，但服务于诊断、回归、导出或历史整理，不定义正式 runtime path。
+
+`outputs/` -> Excluded -> 运行输出目录，不参与系统启动或规则执行。
+
+`artifacts/` local/non-case outputs -> Excluded -> 回归证据或本地输出，不是 runtime control path。
+
+`agent-transcripts/` -> Excluded -> Agent 会话记录，不参与 QC 执行。
+
+`docs/history/` and `docs/reports/` -> Excluded -> 协作历史和报告导出，不参与 workbook processing。
+
+`fa-qc-diagnose` -> Excluded from primary critical path -> 它是读取诊断工具，可帮助理解 ingest，但不执行完整 QC run。
+
+`scripts/test_llm_connection.py` -> Excluded from primary critical path -> 它验证 LLM 连接，不处理 workbook。
+
+`.venv/`, `.pytest_tmp*`, `.pytest_cache/`, `__pycache__/` -> Excluded -> 环境、缓存和测试临时文件不是系统路径。
