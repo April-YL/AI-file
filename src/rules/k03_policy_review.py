@@ -302,7 +302,7 @@ def _fa_life_issue(
     rec: AssetRecord,
     policy: K03PolicyRow,
 ) -> QcIssue | None:
-    policy_range = parse_life_range(policy.current_useful_life, assume_number_unit=None)
+    policy_range = parse_life_range(policy.current_useful_life, assume_number_unit="year")
     asset_life = parse_life_range(rec.useful_life_months, assume_number_unit="month")
     if policy_range is None or asset_life is None:
         return QcIssue(
@@ -420,8 +420,8 @@ def _fa_anomaly(
 
 def _changed_policy_fields(row: K03PolicyRow) -> set[str]:
     changed: set[str] = set()
-    current_life = parse_life_range(row.current_useful_life, assume_number_unit=None)
-    prior_life = parse_life_range(row.prior_useful_life, assume_number_unit=None)
+    current_life = parse_life_range(row.current_useful_life, assume_number_unit="year")
+    prior_life = parse_life_range(row.prior_useful_life, assume_number_unit="year")
     if current_life and prior_life and current_life != prior_life:
         changed.add("useful_life")
     current_rate = parse_rate(row.current_salvage_rate)
@@ -437,8 +437,8 @@ def _changed_policy_fields(row: K03PolicyRow) -> set[str]:
 
 def _same_policy_fields(row: K03PolicyRow) -> set[str]:
     same: set[str] = set()
-    current_life = parse_life_range(row.current_useful_life, assume_number_unit=None)
-    prior_life = parse_life_range(row.prior_useful_life, assume_number_unit=None)
+    current_life = parse_life_range(row.current_useful_life, assume_number_unit="year")
+    prior_life = parse_life_range(row.prior_useful_life, assume_number_unit="year")
     if current_life and prior_life and current_life == prior_life:
         same.add("useful_life")
     current_rate = parse_rate(row.current_salvage_rate)
@@ -450,7 +450,7 @@ def _same_policy_fields(row: K03PolicyRow) -> set[str]:
 
 def _check_policy_anomalies(dataset: K03SheetDataset, row: K03PolicyRow) -> list[QcIssue]:
     issues: list[QcIssue] = []
-    life = parse_life_range(row.current_useful_life, assume_number_unit=None)
+    life = parse_life_range(row.current_useful_life, assume_number_unit="year")
     if is_blank(row.current_useful_life):
         issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_useful_life", Severity.WARN, "Policy useful life is blank.", "Fill in the current-period useful life range."))
     elif life is None:

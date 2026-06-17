@@ -137,6 +137,65 @@ def test_complete_policy_review_does_not_report():
     assert issues == []
 
 
+def test_policy_life_range_without_unit_defaults_to_year_and_does_not_report():
+    ds = _policy_dataset([_row(current_life="5-10", prior_life="5-10")])
+    fa = _fa_list(
+        [
+            AssetRecord(
+                source_row=8,
+                asset_id="FA-TEST-001",
+                asset_category="机器设备",
+                useful_life_months="60",
+                salvage_rate="5%",
+            )
+        ]
+    )
+
+    issues = run_k03_policy_review_rules(ds, fa_list=fa)
+
+    assert "k03_policy_fa_life_out_of_range" not in {issue.rule_id for issue in issues}
+    assert "k03_policy_fa_unit_or_category_review" not in {issue.rule_id for issue in issues}
+
+
+def test_policy_single_life_without_unit_defaults_to_year_and_does_not_report():
+    ds = _policy_dataset([_row(current_life=5, prior_life=5)])
+    fa = _fa_list(
+        [
+            AssetRecord(
+                source_row=8,
+                asset_id="FA-TEST-001",
+                asset_category="机器设备",
+                useful_life_months=60,
+                salvage_rate="5%",
+            )
+        ]
+    )
+
+    issues = run_k03_policy_review_rules(ds, fa_list=fa)
+
+    assert "k03_policy_fa_life_out_of_range" not in {issue.rule_id for issue in issues}
+    assert "k03_policy_fa_unit_or_category_review" not in {issue.rule_id for issue in issues}
+
+
+def test_policy_life_range_without_unit_reports_fa_life_out_of_range():
+    ds = _policy_dataset([_row(current_life="5-10", prior_life="5-10")])
+    fa = _fa_list(
+        [
+            AssetRecord(
+                source_row=8,
+                asset_id="FA-TEST-001",
+                asset_category="机器设备",
+                useful_life_months="48",
+                salvage_rate="5%",
+            )
+        ]
+    )
+
+    issues = run_k03_policy_review_rules(ds, fa_list=fa)
+
+    assert "k03_policy_fa_life_out_of_range" in {issue.rule_id for issue in issues}
+
+
 def test_policy_change_with_true_marker_and_no_explanation_reports():
     ds = _policy_dataset(
         [_row(current_life="8年", prior_life="5年", life_marker="TRUE")],
