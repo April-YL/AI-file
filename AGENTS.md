@@ -160,3 +160,7 @@ $p = (Get-ChildItem -LiteralPath 'E:\AI file\固定资产质检agent\资料库' 
 验收标准：<可验证的结果>。
 终态验收须包含：质检报告 + 底稿标注（若本次未涉及标注，请说明）。
 ```
+
+## Repair Queue frozen 规则
+
+进入“问题审计 + P0–P3 分级 + 修复队列生成”阶段时，必须按 `docs/repair-queue-system.md` 执行。该文件为 Repair Queue System Prompt v1.2（Frozen），只用于问题审计、分级和修复队列生成；不得借此新增分类、层级、架构解释或扩展 Control Plane。
