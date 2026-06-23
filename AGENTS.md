@@ -117,9 +117,10 @@
 
 1. 跑 pytest 时优先使用 `powershell -ExecutionPolicy Bypass -File .\scripts\run_tests.ps1`，不要在项目根目录临时发明 `.pytest_tmp_xxx`。
 2. `run_tests.ps1` 会把 pytest 临时目录放到系统临时目录，并设置 `PYTHONDONTWRITEBYTECODE=1`，减少 `__pycache__`。
-3. 清理工作区时只使用 `powershell -ExecutionPolicy Bypass -File .\scripts\clean_workspace.ps1` 的白名单；默认 dry-run，需要 `-Apply` 才删除。
-4. 禁止用 `git clean -X` 粗暴清理，因为它可能误删 `.env`、`.venv`、资料库、案例库或质检测试结果。
-5. 收工前用 `git status --short` 检查是否还有未跟踪测试产物；真实资料、`.env` 和本地案例库不得提交。
+3. `run_tests.ps1` 跑完后必须通过 `check_workspace_hygiene.ps1`，否则即使 pytest 通过也视为验收失败。
+4. 清理工作区时只使用 `powershell -ExecutionPolicy Bypass -File .\scripts\clean_workspace.ps1` 的白名单；默认 dry-run，需要 `-Apply` 才删除。
+5. 禁止用 `git clean -X` 粗暴清理，因为它可能误删 `.env`、`.venv`、资料库、案例库或质检测试结果。
+6. 收工前用 `git status --short` 检查是否还有未跟踪测试产物；真实资料、`.env` 和本地案例库不得提交。
 
 ### 通用 Excel 读取规范
 

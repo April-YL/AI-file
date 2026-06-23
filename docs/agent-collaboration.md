@@ -24,9 +24,10 @@
 
 1. 跑测试优先使用 `powershell -ExecutionPolicy Bypass -File .\scripts\run_tests.ps1`，例如 `powershell -ExecutionPolicy Bypass -File .\scripts\run_tests.ps1 tests\rules\test_registry.py -q`。
 2. 该脚本会把 pytest 临时目录放到系统临时目录，并关闭 Python 字节码写入，减少项目内 `__pycache__`。
-3. 清理工作区使用 `powershell -ExecutionPolicy Bypass -File .\scripts\clean_workspace.ps1`；默认只预览，确认后再用 `-Apply` 删除白名单临时产物。
-4. 不使用 `git clean -X` 清理工作区，因为它可能误删 `.env`、`.venv`、资料库、案例库或质检测试结果。
-5. 提交前必须确认没有把本地报告、标注底稿、测试输出或真实资料加入暂存区。
+3. 测试结束后会自动运行 `check_workspace_hygiene.ps1`；若产生项目内临时产物，即使 pytest 通过也视为验收失败。
+4. 清理工作区使用 `powershell -ExecutionPolicy Bypass -File .\scripts\clean_workspace.ps1`；默认只预览，确认后再用 `-Apply` 删除白名单临时产物。
+5. 不使用 `git clean -X` 清理工作区，因为它可能误删 `.env`、`.venv`、资料库、案例库或质检测试结果。
+6. 提交前必须确认没有把本地报告、标注底稿、测试输出或真实资料加入暂存区。
 
 ## 本地 Excel 读取规范
 

@@ -24,4 +24,10 @@ if (-not $PytestArgs -or $PytestArgs.Count -eq 0) {
 }
 
 & $python -m pytest @PytestArgs --basetemp $baseTemp -p no:cacheprovider
+$pytestExit = $LASTEXITCODE
+if ($pytestExit -ne 0) {
+    exit $pytestExit
+}
+
+& powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "check_workspace_hygiene.ps1")
 exit $LASTEXITCODE
