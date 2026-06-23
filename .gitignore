@@ -15,8 +15,13 @@
 # 本地生成的质检报告
 *_qc_report.json
 *_qc_review.html
+*_qc_annotated.xlsx
 qc_report.json
 .tmp_qc_out
+
+# 本地实测/导出目录（不入库；保留占位文件）
+outputs/*
+!outputs/.gitkeep
 
 # 本地临时检查输出（非 fixture）
 _summary_check*.txt
@@ -30,10 +35,26 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.pytest_tmp/
+.pytest_tmp*/
+.tmp/
 
 # 本地资料库/案例库（体积大，可能包含脱敏但不适合直接入库的底稿）
 固定资产质检agent/资料库/
 固定资产质检agent/案例库/
+固定资产质检agent/测试202606/
+固定资产质检agent/质检测试结果/
+
+# Agent / IDE 本地诊断输出
+.idea/
+agent-transcripts/
+docs/cursor-transcript-index.html
+docs/history/
+docs/reports/
+docs/planning/*.xlsx
+tests/fixtures/lead_adjustment_cross_account_aa.xlsx
+tests/fixtures/lead_adjustment_en_debit_credit.xlsx
+%SystemDrive%/
 
 # 系统文件
 Thumbs.db

@@ -111,6 +111,16 @@
 4. **默认不主动跑完整测试**：代码写好后，Agent 只说明建议验收命令，由用户自行测试；只有用户明确要求，或测试非常短且对确认修改必要时，才运行必要测试。
 5. **禁止长时间盲目试错**：不允许连续反复改代码、跑命令、看输出超过约 5 分钟；如果没有新证据，应先停下来重新评估方法。
 
+### 测试与临时文件治理
+
+为避免测试和导出产物污染工作区，默认遵守：
+
+1. 跑 pytest 时优先使用 `powershell -ExecutionPolicy Bypass -File .\scripts\run_tests.ps1`，不要在项目根目录临时发明 `.pytest_tmp_xxx`。
+2. `run_tests.ps1` 会把 pytest 临时目录放到系统临时目录，并设置 `PYTHONDONTWRITEBYTECODE=1`，减少 `__pycache__`。
+3. 清理工作区时只使用 `powershell -ExecutionPolicy Bypass -File .\scripts\clean_workspace.ps1` 的白名单；默认 dry-run，需要 `-Apply` 才删除。
+4. 禁止用 `git clean -X` 粗暴清理，因为它可能误删 `.env`、`.venv`、资料库、案例库或质检测试结果。
+5. 收工前用 `git status --short` 检查是否还有未跟踪测试产物；真实资料、`.env` 和本地案例库不得提交。
+
 ### 通用 Excel 读取规范
 
 为了避免中文路径、编码和引号问题反复消耗时间，读取任何本地 Excel 文件时默认按同一套动作执行：
@@ -164,3 +174,4 @@ $p = (Get-ChildItem -LiteralPath 'E:\AI file\固定资产质检agent\资料库' 
 ## Repair Queue frozen 规则
 
 进入“问题审计 + P0–P3 分级 + 修复队列生成”阶段时，必须按 `docs/repair-queue-system.md` 执行。该文件为 Repair Queue System Prompt v1.2（Frozen），只用于问题审计、分级和修复队列生成；不得借此新增分类、层级、架构解释或扩展 Control Plane。
+

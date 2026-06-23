@@ -18,6 +18,16 @@
 4. **默认不主动跑完整测试**：代码写好后，Agent 只说明建议验收命令，由用户自行测试；只有用户明确要求，或测试非常短且对确认修改必要时，才运行必要测试。
 5. **禁止长时间盲目试错**：不允许连续反复改代码、跑命令、看输出超过约 5 分钟；如果没有新证据，应先停下来重新评估方法。
 
+## 测试与临时文件治理
+
+为了避免 Codex、Cursor 或本地 pytest 反复生成临时目录，默认按以下方式执行：
+
+1. 跑测试优先使用 `powershell -ExecutionPolicy Bypass -File .\scripts\run_tests.ps1`，例如 `powershell -ExecutionPolicy Bypass -File .\scripts\run_tests.ps1 tests\rules\test_registry.py -q`。
+2. 该脚本会把 pytest 临时目录放到系统临时目录，并关闭 Python 字节码写入，减少项目内 `__pycache__`。
+3. 清理工作区使用 `powershell -ExecutionPolicy Bypass -File .\scripts\clean_workspace.ps1`；默认只预览，确认后再用 `-Apply` 删除白名单临时产物。
+4. 不使用 `git clean -X` 清理工作区，因为它可能误删 `.env`、`.venv`、资料库、案例库或质检测试结果。
+5. 提交前必须确认没有把本地报告、标注底稿、测试输出或真实资料加入暂存区。
+
 ## 本地 Excel 读取规范
 
 读取任何本地 Excel 文件时，默认按固定模板执行，减少中文路径、编码和引号问题：
@@ -99,3 +109,4 @@ $p = (Get-ChildItem -LiteralPath 'E:\AI file\固定资产质检agent\资料库' 
 - [AGENTS.md](../AGENTS.md) — 项目目标与开发约定
 - [.cursor/rules/project-core.mdc](../.cursor/rules/project-core.mdc) — Cursor 全局规则
 - [.cursor/skills/fixed-asset-qc/SKILL.md](../.cursor/skills/fixed-asset-qc/SKILL.md) — 开发工作流 Skill
+
