@@ -825,3 +825,92 @@ G 科技适合作为“有处置清单但拒绝执行 K.02.2 详细测试”的�
 ### 下一步建议
 
 优先顺序建议为：先跑 J 公司完整流水线确认报告和标注层残留问题，再处理报告展示去重与文案压缩，随后补充日期/截止性规则和 K.01 期初锚点变体。LLM 继续保持“兜底复核”定位，只在确定性规则无法判断或读取可疑时辅助提示，不进入金额勾稽主判断。
+
+## 2026-06-18 Finding 追踪链第一批修复：K.02 新增/处置定位与批注回写
+
+本轮针对“新增测试 finding 位置索引有误，且实际 comments 未成功添加为业务页批注”的同类风险，先处理 K.02 新增测试和处置测试中最影响可追踪性的第一批问题。结论是：问题主要不在导出层，而在部分规则产出的 `QcIssue` 缺少真实 `source_row`，或使用了虚拟 sheet 名，导致报告可以列出 finding，但标注副本无法回写到业务 sheet 的具体单元格。
+
+已完成：
+
+- `addition_sample_match`：K.02.1a 已选样本未进入 K.02.1 时，finding 现在优先指向 K.02.1a 的实际样本行；K.02.1 存在额外实测样本时，指向 K.02.1 的实测样本行。
+- `addition_sample_match`：关键项金额差异、异常说明类 finding 补充了可用的 sheet/row 来源，避免仅落在 `K.02.1 / K.02.1a` 这种虚拟位置。
+- `disposal_sample_match`：K.02.2a 已选处置样本未进入 K.02.2 时，finding 现在优先指向 K.02.2a 的实际样本行。
+- `disposal_sample_match`：关键项数量不一致时，finding 指向 K.02.2a 关键项数量统计行；样本类型不一致继续指向 K.02.2 实测样本行。
+- 导出层新增回归测试，确认带有真实 `source_sheet + source_row` 的 K.02.2 finding 会同时出现在 `Comments【归档前删除】`，并回写为业务 sheet 单元格批注。
+
+未改变：
+
+- 未改变新增/处置测试的规则结论、严重级别、SOP 判断口径或 LLM 辅助逻辑。
+- 未改 frozen architecture、报告导出主流程或 Comments 表结构。
+- 未处理所有历史 sheet-level finding；Lead、K.01、K.03、FA list 等其他程序的定位治理仍需后续按批次处理。
+
+已验证：
+
+- `.\.venv\Scripts\pytest.exe tests\rules\test_addition_consistency.py tests\rules\test_disposal_consistency.py tests\report\test_export_annotated_workbook.py -q`
+- 结果：`24 passed`；仅有 pytest cache 权限 warning，不影响规则和标注结果。
+
+后续建议：
+
+1. 下一批优先排查 K.03 折旧测试、折旧政策复核、折旧政策相关 finding 是否仍存在虚拟 sheet、缺少 source_row 或无法业务页批注的问题。
+2. 建议建立统一的 Finding 追踪链检查：每条 finding 至少能说明归属规则、来源 sheet、来源行、是否可批注、无法批注原因。
+3. 对确实只能 sheet-level 定位的问题，应在报告层明确标记为“页级问题”，不要伪装成可定位到单元格的问题。
+
+## 2026-06-23 Execution Ledger 规则执行台账沉淀
+
+本轮新增 `execution_ledger`，用于区分“规则已执行且未发现异常”和“因资料不足或场景不适用而未执行”。它解决的是报告可解释性问题，不改变任何规则结论。
+
+核心口径：
+
+- `EXECUTED`：规则流程已经运行；如有 finding，则记录 `finding_count`。
+- `DATA_INSUFFICIENT`：资料、工作表或读取结果不足，规则未执行；该状态本身不等于底稿错误。
+- `NOT_APPLICABLE`：当前场景不适用，例如汇总页已明确拒绝执行某程序，相关细项检查不再机械运行。
+- 台账只记录执行事实，不计算 severity，不替代 `PASS` / `WARN` / `FAIL` / `NEED_REVIEW`，也不新增业务判断。
+
+接入范围：
+
+- 新增 `src/rules/execution_recorder.py`，统一记录规则执行状态，并校验有 finding 的规则必须标记为 `EXECUTED`。
+- 各 runner 按实际执行分支记录已执行、资料不足或不适用；覆盖 FA list、Lead、K.01、K.02.1、K.02.2、K.03 和交付完成度检查。
+- `src/report/summary.py`、`src/report/export_json.py`、`src/report/pipeline.py` 输出并校验 `execution_ledger`。
+
+设计边界：
+
+- 台账属于 Finding Model / Report 的辅助说明，不属于 Control Plane 策略决策。
+- Rules 仍是确定性结论来源；台账不允许把未执行规则推断为 PASS。
+- LLM 语义复核仍只作为辅助 finding 来源，不通过台账覆盖确定性规则。
+
+后续建议：
+
+1. 后续新增规则时同步接入 `RuleExecutionRecorder`。
+2. 对资料不足未执行的规则，优先写清楚缺什么资料。
+3. 继续用测试覆盖 execution ledger 的状态汇总、finding 规则一致性和 JSON 输出结构。
+
+## 2026-06-23 UI v2 与新增测试替换样本口径沉淀
+
+本轮 UI 调整重点是让质检人员先看到“哪些问题需要处理、哪些检查没有执行、为什么没有执行”。UI 展示层只做阅读体验优化，不修改底层 finding、severity 或 JSON 报告结论。
+
+UI v2 已调整：
+
+- 首页结果按单个文件展示 Findings 总数和最高系统规则提示。
+- Findings 分为高优先级问题、需人工判断和其他问题，分类仅用于页面展示。
+- 新增“质检点执行摘要”和“质检点执行台账”，展示 `EXECUTED`、`DATA_INSUFFICIENT`、`NOT_APPLICABLE`。
+- 增加外部数据状态提示：TE/SAD 当前优先从 Lead 识别，A3 映射、CRA 标准模板导入仍为后续接入项。
+- 系统诊断、HTML 预览和下载区下沉，避免干扰质检人员优先处理 findings。
+
+UI 边界：
+
+- UI 分类不改 `severity`、`rule_id`、`source_sheet`、`source_row` 或 JSON 输出。
+- UI 的“执行状态”只表示系统流程是否运行，不代表审计结论。
+- 如果报告没有 `execution_ledger`，UI 只提示无法展示台账，不反推规则是否已执行。
+
+新增测试替换样本口径：
+
+- `src/llm/addition_review.py` 新增替换/替代/备选/备用样本边界。
+- 未明确启用的替换样本，不属于必须进入 K.02.1 新增测试页的样本。
+- LLM 不应仅因未启用替换样本未出现在 K.02.1，就要求解释“为何未测试”。
+- 只有输入材料明确显示替换样本已启用、已替代原样本或已纳入实际测试时，才评价其测试一致性。
+
+后续建议：
+
+1. UI v2 需要用真实底稿人工复核一轮，确认质检人员能按“高优先级问题 -> 人工判断 -> 执行台账”顺序阅读。
+2. 如果后续新增外部资料接入，例如 A3、CRA 标准模板，应同步更新 UI 的外部数据状态提示。
+3. 新增测试 LLM 口径继续保持辅助性质，不覆盖 `addition_sample_match` 等确定性规则。

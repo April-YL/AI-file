@@ -47,6 +47,15 @@ SYSTEM_PROMPT = """你是固定资产审计底稿中 K.02.1 新增测试的语�
 
 请只返回一个 JSON 对象，不要返回 markdown。"""
 
+REPLACEMENT_SAMPLE_BOUNDARY = """
+替换/替代/备选样本边界：
+1. 替换样本、替代样本、备选样本、备用样本默认是备用样本；未明确启用时，不属于必须进入 K.02.1 新增测试页的样本。
+2. 不要仅因这类未启用样本未出现在 K.02.1 测试页中，就要求解释“为何未测试”。
+3. 只有输入材料明确显示其被启用、替代原样本、或已纳入实际测试时，才评价其测试一致性。
+"""
+
+SYSTEM_PROMPT = SYSTEM_PROMPT + REPLACEMENT_SAMPLE_BOUNDARY
+
 USER_TEMPLATE = """请复核 K.02.1 新增测试的语义充分性，并返回 JSON：
 {{
   "topics": [
@@ -217,16 +226,50 @@ def _sample_output_excerpt(
 ) -> dict[str, Any] | None:
     if sample_output is None:
         return None
+    required_samples = [
+        sample for sample in sample_output.selected_samples if not _is_optional_replacement_sample(sample)
+    ]
+    optional_replacement_samples = [
+        sample for sample in sample_output.selected_samples if _is_optional_replacement_sample(sample)
+    ]
     return {
         "source_sheet": sample_output.source_sheet,
         "parameters": {k: v.to_dict() for k, v in sample_output.parameters.items()},
         "amounts": {k: v.to_dict() for k, v in sample_output.amounts.items()},
         "selected_sample_count": len(sample_output.selected_samples),
         "selected_samples": [s.to_dict() for s in sample_output.selected_samples[:20]],
+        "required_test_sample_count": len(required_samples),
+        "required_test_samples": [s.to_dict() for s in required_samples[:20]],
+        "optional_replacement_sample_count": len(optional_replacement_samples),
+        "optional_replacement_samples": [s.to_dict() for s in optional_replacement_samples[:20]],
+        "replacement_sample_policy": (
+            "替换样本、替代样本、备选样本、备用样本默认是备用样本；"
+            "未明确启用、替代原样本或纳入实际测试时，不属于必须进入 K.02.1 的测试样本，"
+            "不应仅因未出现在 K.02.1 测试页中就要求解释为何未测试。"
+        ),
         "module_assessments": [m.to_dict() for m in sample_output.module_assessments],
         "recognition_confidence": sample_output.recognition_confidence,
         "notes": sample_output.notes,
     }
+
+
+def _is_optional_replacement_sample(sample: Any) -> bool:
+    sample_type = str(getattr(sample, "sample_type", "") or "").strip().lower()
+    compact = sample_type.replace(" ", "").replace("_", "").replace("-", "")
+    return any(
+        term in compact
+        for term in (
+            "替换",
+            "替代",
+            "备选",
+            "备用",
+            "replacement",
+            "alternate",
+            "alternative",
+            "reserve",
+            "backup",
+        )
+    )
 
 
 def _issue_hints(issues: list[QcIssue]) -> list[dict[str, Any]]:

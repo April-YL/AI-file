@@ -72,6 +72,30 @@ def _sample_output() -> AdditionSampleOutputDataset:
     )
 
 
+def _sample_output_with_replacement() -> AdditionSampleOutputDataset:
+    return AdditionSampleOutputDataset(
+        source_file="test.xlsx",
+        source_sheet="K.02.1a addition sampling output",
+        selected_samples=[
+            AdditionSampleRow(
+                source_row=40,
+                asset_id="FA-TEST-001",
+                asset_name="Machine",
+                original_value="1000",
+                sample_type="代表性样本",
+            ),
+            AdditionSampleRow(
+                source_row=41,
+                asset_id="FA-TEST-R01",
+                asset_name="Replacement machine",
+                original_value="800",
+                sample_type="替换样本",
+            ),
+        ],
+        recognition_confidence=0.9,
+    )
+
+
 def test_addition_prompt_sets_semantic_only_boundaries():
     prompt = SYSTEM_PROMPT
     assert "你只复核文字说明是否充分" in prompt
@@ -79,6 +103,11 @@ def test_addition_prompt_sets_semantic_only_boundaries():
     assert "不要自行补事实" in prompt
     assert "sample_selection" in prompt
     assert "special_addition_source" in prompt
+    assert "替换样本" in prompt
+    assert "替代样本" in prompt
+    assert "备选样本" in prompt
+    assert "未明确启用" in prompt
+    assert "不属于必须进入 K.02.1" in prompt
 
 
 def test_build_addition_review_payload_includes_rule_findings_and_policy():
@@ -108,6 +137,21 @@ def test_build_addition_review_payload_includes_rule_findings_and_policy():
     assert payload["addition_test"]["tested_sample_count"] == 1
     assert payload["addition_sample_output"]["selected_sample_count"] == 1
     assert payload["deterministic_rule_findings"][0]["rule_id"] == "addition_sample_pool_amount"
+
+
+def test_addition_review_payload_separates_required_and_replacement_samples():
+    payload = build_addition_review_payload(
+        addition_test=_addition_test(),
+        addition_sample_output=_sample_output_with_replacement(),
+    )
+
+    sample_output = payload["addition_sample_output"]
+    assert sample_output["selected_sample_count"] == 2
+    assert sample_output["required_test_sample_count"] == 1
+    assert sample_output["required_test_samples"][0]["sample_type"] == "代表性样本"
+    assert sample_output["optional_replacement_sample_count"] == 1
+    assert sample_output["optional_replacement_samples"][0]["sample_type"] == "替换样本"
+    assert "未明确启用" in sample_output["replacement_sample_policy"]
 
 
 def test_run_addition_review_disabled_returns_empty():
