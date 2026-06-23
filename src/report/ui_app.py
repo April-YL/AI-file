@@ -701,7 +701,11 @@ def _render_system_diagnostics(data: dict, bundle: dict) -> None:
     with st.expander("系统诊断 / 输出质量", expanded=False):
         _render_output_quality(data)
         _render_runtime_timings(data)
-        st.subheader("HTML 预览")
+
+
+def _render_artifact_preview(bundle: dict) -> None:
+    with st.expander("HTML 交付物预览", expanded=False):
+        st.caption("仅用于查看导出 HTML 的呈现效果；页面 Findings 明细是交互查看入口。")
         st.components.v1.html(
             bundle["html_bytes"].decode("utf-8"),
             height=520,
@@ -1389,20 +1393,19 @@ def _render_execution_ledger_summary(data: dict) -> None:
 
 def _render_priority_findings(data: dict) -> None:
     groups = _group_findings_v2(data)
-    with st.expander("Findings 明细", expanded=False):
-        if not any(groups.values()):
-            st.info("本次未记录需展示的 findings。")
-            return
-        for key, label, _note, _tone in _UI_FINDING_BUCKETS_V2:
-            items = groups[key]
-            if not items:
-                continue
-            with st.expander(f"{label} · {len(items)} 条", expanded=False):
-                st.dataframe(
-                    [_findings_row(i) for i in items],
-                    use_container_width=True,
-                    hide_index=True,
-                )
+    if not any(groups.values()):
+        st.info("本次未记录需展示的 findings。")
+        return
+    for key, label, _note, _tone in _UI_FINDING_BUCKETS_V2:
+        items = groups[key]
+        if not items:
+            continue
+        with st.expander(f"{label} · {len(items)} 条", expanded=False):
+            st.dataframe(
+                [_findings_row(i) for i in items],
+                use_container_width=True,
+                hide_index=True,
+            )
 
 
 def _ledger_row(item: dict) -> dict:
@@ -1557,6 +1560,124 @@ def _build_delivery_context(
     return None
 
 
+def _render_result_view(results: dict, errors: dict) -> None:
+    st.subheader("质检结果")
+    message = st.session_state.get("last_run_message")
+    if message:
+        st.success(message)
+    if errors:
+        for file_name, err in errors.items():
+            st.error(f"**{file_name}**：{err}")
+
+    names = list(results.keys())
+    if not names:
+        return
+    selected_name = (
+        st.selectbox("查看文件", names, key="result_file_selector")
+        if len(names) > 1
+        else names[0]
+    )
+    bundle = results[selected_name]
+    data = bundle["data"]
+
+    st.caption(f"当前文件：{selected_name}")
+    _render_downloads(selected_name, bundle)
+    st.divider()
+
+    _render_findings_summary(data)
+    st.divider()
+    _render_execution_ledger_summary(data)
+    st.divider()
+
+    findings_tab, ledger_tab, procedure_tab, preview_tab, diagnostics_tab = st.tabs(
+        ["Findings 明细", "质检点执行台账", "程序分组明细", "交付物预览", "系统诊断"]
+    )
+    with findings_tab:
+        _render_priority_findings(data)
+    with ledger_tab:
+        _render_execution_ledger_table(data)
+    with procedure_tab:
+        _render_procedure_summary(data)
+        _render_findings_grouped(data)
+        st.divider()
+        _render_manual_review(data)
+        st.divider()
+        _render_qc_summary(data)
+    with preview_tab:
+        _render_artifact_preview(bundle)
+    with diagnostics_tab:
+        _render_system_diagnostics(data, bundle)
+
+
+def _render_upload_panel(*, collapsed_after_results: bool) -> None:
+    container = st.expander("重新上传 / 修改参数", expanded=False) if collapsed_after_results else st.container()
+    with container:
+        st.subheader("交付完成度")
+        delivery_stage = st.radio(
+            "交付阶段",
+            options=["none", "first", "final"],
+            format_func=lambda v: {
+                "none": "不检查交付完成度",
+                "first": "首次交付",
+                "final": "整体交付",
+            }[v],
+            horizontal=True,
+        )
+
+        st.info("外部数据状态：TE/SAD 当前优先从 Lead 识别，手工确认后续接入；A3 审定金额表映射后续接入；CRA 标准模板导入后续接入。未提供外部资料不会阻断运行，相关检查点会显示为数据不足，未执行。")
+        uploaded = st.file_uploader(
+            "选择待质检底稿",
+            type=["xlsx", "xlsm", "csv"],
+            accept_multiple_files=True,
+        )
+
+        if not uploaded:
+            st.info("上传 Excel 或 CSV 后开始质检。")
+            st.markdown(
+                f'''
+**主要交付物**：`*_qc_annotated.xlsx`
+
+| Sheet | 内容 |
+| --- | --- |
+| `{COMMENTS_SHEET_NAME}` | 其他程序逐条 findings + FA list 共性问题合并行 |
+| `{FA_LIST_COMMENTS_SHEET_NAME}` | FA list findings 逐条明细 |
+                '''
+            )
+            return
+
+        if st.button("开始质检", type="primary", use_container_width=True):
+            st.session_state["results"] = {}
+            st.session_state["errors"] = {}
+            run_id = _new_run_id()
+            progress = st.progress(0, text="准备中")
+            for idx, uf in enumerate(uploaded):
+                progress.progress((idx) / len(uploaded), text=f"正在质检：{uf.name}")
+                try:
+                    data, json_bytes, html_bytes, ann_bytes = _run_qc_cached(
+                        uf.getvalue(),
+                        uf.name,
+                        use_llm,
+                        fa_sheet.strip() or None,
+                        summary_sheet.strip() or None,
+                        lead_sheet.strip() or None,
+                        delivery_stage,
+                        _QC_CACHE_VERSION,
+                    )
+                    st.session_state.setdefault("results", {})[uf.name] = {
+                        "data": data,
+                        "json_bytes": json_bytes,
+                        "html_bytes": html_bytes,
+                        "annotated_bytes": ann_bytes,
+                        "run_id": run_id,
+                    }
+                except Exception as e:
+                    st.session_state.setdefault("errors", {})[uf.name] = str(e)
+                progress.progress((idx + 1) / len(uploaded), text="已处理")
+            progress.empty()
+            st.session_state["last_run_message"] = f"已处理 {len(uploaded)} 个文件，结果如下。"
+            st.rerun()
+
+
 _inject_style()
 _render_topbar()
 
@@ -1574,105 +1695,15 @@ with st.sidebar:
         lead_sheet = st.text_input("Lead 表名", "")
         st.caption("当前仅支持部分工作表名称指定；不填则自动识别。完整 K.01/K.02/K.03 表名指定后续单独扩展。")
 
-st.subheader("交付完成度")
-delivery_stage = st.radio(
-    "交付阶段",
-    options=["none", "first", "final"],
-    format_func=lambda v: {
-        "none": "不检查交付完成度",
-        "first": "首次交付",
-        "final": "整体交付",
-    }[v],
-    horizontal=True,
-)
-
-st.info("外部数据状态：TE/SAD 当前优先从 Lead 识别，手工确认后续接入；A3 审定金额表映射后续接入；CRA 标准模板导入后续接入。未提供外部资料不会阻断运行，相关检查点会显示为数据不足，未执行。")
-uploaded = st.file_uploader(
-    "选择待质检底稿",
-    type=["xlsx", "xlsm", "csv"],
-    accept_multiple_files=True,
-)
-
-if not uploaded:
-    st.info("上传 Excel 或 CSV 后开始质检。")
-    st.markdown(
-        f"""
-**主要交付物**：`*_qc_annotated.xlsx`
-
-| Sheet | 内容 |
-| --- | --- |
-| `{COMMENTS_SHEET_NAME}` | 其他程序逐条 findings + FA list 共性问题合并行 |
-| `{FA_LIST_COMMENTS_SHEET_NAME}` | FA list findings 逐条明细 |
-        """
-    )
-    st.stop()
-
-if st.button("开始质检", type="primary", use_container_width=True):
-    st.session_state["results"] = {}
-    st.session_state["errors"] = {}
-    run_id = _new_run_id()
-    progress = st.progress(0, text="准备中")
-    for idx, uf in enumerate(uploaded):
-        progress.progress((idx) / len(uploaded), text=f"正在质检：{uf.name}")
-        try:
-            data, json_bytes, html_bytes, ann_bytes = _run_qc_cached(
-                uf.getvalue(),
-                uf.name,
-                use_llm,
-                fa_sheet.strip() or None,
-                summary_sheet.strip() or None,
-                lead_sheet.strip() or None,
-                delivery_stage,
-                _QC_CACHE_VERSION,
-            )
-            st.session_state.setdefault("results", {})[uf.name] = {
-                "data": data,
-                "json_bytes": json_bytes,
-                "html_bytes": html_bytes,
-                "annotated_bytes": ann_bytes,
-                "run_id": run_id,
-            }
-        except Exception as e:
-            st.session_state.setdefault("errors", {})[uf.name] = str(e)
-        progress.progress((idx + 1) / len(uploaded), text="完成")
-    progress.empty()
-    st.success(f"已处理 {len(uploaded)} 个文件，结果如下。")
-
 results = st.session_state.get("results", {})
 errors = st.session_state.get("errors", {})
 
-if errors:
-    for name, err in errors.items():
-        st.error(f"**{name}**：{err}")
-
-if not results:
-    st.stop()
-
-for name, bundle in results.items():
-    data = bundle["data"]
-    expander_title = f"{name} · Findings {_finding_count(data)} 条"
-
-    with st.expander(expander_title, expanded=len(results) == 1):
-        _render_overview(name, data)
-        st.divider()
-        _render_findings_summary(data)
-        st.divider()
-        _render_execution_ledger_summary(data)
-        st.divider()
-        _render_priority_findings(data)
-        st.divider()
-        _render_execution_ledger_table(data)
-        st.divider()
-
-        with st.expander("程序分组明细", expanded=False):
-            _render_procedure_summary(data)
-            _render_findings_grouped(data)
-            st.divider()
-            _render_manual_review(data)
-            st.divider()
-            _render_qc_summary(data)
-
-        st.divider()
-        _render_downloads(name, bundle)
-        st.divider()
-        _render_system_diagnostics(data, bundle)
+if results:
+    _render_result_view(results, errors)
+    st.divider()
+    _render_upload_panel(collapsed_after_results=True)
+else:
+    if errors:
+        for file_name, err in errors.items():
+            st.error(f"**{file_name}**：{err}")
+    _render_upload_panel(collapsed_after_results=False)
