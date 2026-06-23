@@ -19,11 +19,14 @@ from rules.addition_test_package import (
 from rules.addition_runner import ADDITION_RULE_IDS, run_addition_rules
 from rules.delivery_completion import (
     DeliveryCompletionContext,
+    FINAL_DELIVERY_RULE_ID,
+    FIRST_DELIVERY_RULE_ID,
     check_delivery_completion,
 )
 from rules.disposal_runner import DISPOSAL_RULE_IDS, run_disposal_rules
 from rules.k03_runner import K03_RULE_IDS, run_k03_rules
 from rules.lead_runner import LEAD_RULE_IDS, run_lead_rules
+from rules.execution_recorder import RuleExecutionRecorder, validate_execution_ledger
 from rules.models import ColumnContext
 from rules.psp_completion import check_psp_completion
 from rules.registry import attach_rule_metadata
@@ -64,9 +67,16 @@ def run_workbook_qc(
         detail["seconds"] = float(detail["seconds"]) + max(seconds, 0.0)
         detail["calls"] = int(detail["calls"]) + max(calls, 0)
 
+    def record_observed_issues(rule_issues: list) -> None:
+        counts: dict[str, int] = {}
+        for issue in rule_issues:
+            counts[issue.rule_id] = counts.get(issue.rule_id, 0) + 1
+        for rule_id, finding_count in counts.items():
+            recorder.record(rule_id, finding_count)
+
     issues = []
     records = []
-    rule_ids: list[str] = []
+    recorder = RuleExecutionRecorder()
     ingest_review_results: list[dict] = []
     source_sheet = ""
     sheet_titles: list[str] | None = None
@@ -87,9 +97,8 @@ def run_workbook_qc(
             source_sheet=ctx.fa_list.source_sheet,
             procedure_code="FA_LIST",
         )
-        issues.extend(run_fa_list_rules(ctx.fa_list.records, fa_ctx))
+        issues.extend(run_fa_list_rules(ctx.fa_list.records, fa_ctx, recorder=recorder))
         records = ctx.fa_list.records
-        rule_ids.extend(FA_LIST_RULE_IDS)
         source_sheet = ctx.fa_list.source_sheet
 
     if ctx.summary:
@@ -136,7 +145,7 @@ def run_workbook_qc(
                     elapsed,
                 )
 
-        psp_raw_issues = check_psp_completion(
+        psp_raw_issues = recorder.execute_rule("psp_completion", check_psp_completion,
             ctx.summary,
             workbook_sheet_titles=sheet_titles,
             workbook_path=wb_for_psp,
@@ -147,14 +156,14 @@ def run_workbook_qc(
             llm_t0 = perf_counter()
             from llm.summary_psp_review import build_sheet_semantic_issues
 
-            psp_raw_issues.extend(
-                build_sheet_semantic_issues(
-                    ctx.summary,
-                    config,
-                    workbook_path=wb_for_psp,
-                    workbook_sheet_titles=sheet_titles,
-                )
+            psp_semantic_issues = build_sheet_semantic_issues(
+                ctx.summary,
+                config,
+                workbook_path=wb_for_psp,
+                workbook_sheet_titles=sheet_titles,
             )
+            record_observed_issues(psp_semantic_issues)
+            psp_raw_issues.extend(psp_semantic_issues)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
             record_llm_detail(
@@ -165,9 +174,8 @@ def run_workbook_qc(
         psp_issues = attach_rule_metadata(psp_raw_issues)
         issues.extend(psp_issues)
         summary_sheet_section = build_summary_sheet_section(ctx.summary, psp_issues)
-        rule_ids.append("psp_completion")
         addition_package_issues = attach_rule_metadata(
-            check_addition_test_package(
+            recorder.execute_rule("addition_test_package_complete", check_addition_test_package,
                 ctx.summary,
                 workbook_sheet_titles=sheet_titles,
                 workbook_path=ctx.source_file,
@@ -177,9 +185,8 @@ def run_workbook_qc(
             )
         )
         issues.extend(addition_package_issues)
-        rule_ids.append("addition_test_package_complete")
         disposal_package_issues = attach_rule_metadata(
-            check_disposal_test_package(
+            recorder.execute_rule("disposal_test_package_complete", check_disposal_test_package,
                 ctx.summary,
                 workbook_sheet_titles=sheet_titles,
                 workbook_path=ctx.source_file,
@@ -189,7 +196,6 @@ def run_workbook_qc(
             )
         )
         issues.extend(disposal_package_issues)
-        rule_ids.append("disposal_test_package_complete")
         if not source_sheet:
             source_sheet = ctx.summary.source_sheet
     else:
@@ -259,6 +265,7 @@ def run_workbook_qc(
             strict_adjustment_total=strict_adjustment_total,
             adjustment_layout_result=adjustment_layout_result,
             adjustment_extracted_rows=adjustment_extracted_rows,
+            recorder=recorder,
         )
         if config.enabled:
             llm_t0 = perf_counter()
@@ -267,16 +274,10 @@ def run_workbook_qc(
                 config,
                 semantic_context=lead_semantic_context or {},
             )
+            record_observed_issues(llm_lead_issues)
+            record_observed_issues(lead_adj_issues)
             lead_raw_issues.extend(llm_lead_issues)
             lead_raw_issues.extend(lead_adj_issues)
-            if llm_lead_issues:
-                for rid in (RULE_EXPECTATION, RULE_FLUCTUATION):
-                    if rid not in rule_ids:
-                        rule_ids.append(rid)
-            if lead_adj_issues:
-                for rid in (RULE_LAYOUT, RULE_SEMANTIC):
-                    if rid not in rule_ids:
-                        rule_ids.append(rid)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
             record_llm_detail(
@@ -287,7 +288,6 @@ def run_workbook_qc(
         lead_issues = attach_rule_metadata(lead_raw_issues)
         issues.extend(lead_issues)
         lead_sheet_section = build_lead_sheet_section(ctx.lead, lead_issues)
-        rule_ids.extend(list(LEAD_RULE_IDS))
         if not source_sheet:
             source_sheet = ctx.lead.source_sheet
 
@@ -301,6 +301,7 @@ def run_workbook_qc(
                 addition_test=ctx.addition_test,
                 addition_sample_output=ctx.addition_sample_output,
                 addition_execution_path=ctx.addition_execution_path,
+                recorder=recorder,
             )
         )
         if config.enabled:
@@ -320,9 +321,8 @@ def run_workbook_qc(
                     prior_issues=addition_issues,
                 )
             )
+            record_observed_issues(addition_llm_issues)
             addition_issues.extend(addition_llm_issues)
-            if addition_llm_issues and ADDITION_LLM_RULE not in rule_ids:
-                rule_ids.append(ADDITION_LLM_RULE)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
             record_llm_detail(
@@ -331,7 +331,6 @@ def run_workbook_qc(
                 elapsed,
             )
         issues.extend(addition_issues)
-        rule_ids.extend(list(ADDITION_RULE_IDS))
         addition_sheet_section = build_addition_sheet_section(
             ctx.addition_test,
             ctx.addition_sample_output,
@@ -361,10 +360,9 @@ def run_workbook_qc(
                     prior_issues=[],
                 )
             )
+            record_observed_issues(addition_llm_issues)
             addition_issues.extend(addition_llm_issues)
             issues.extend(addition_llm_issues)
-            if addition_llm_issues and ADDITION_LLM_RULE not in rule_ids:
-                rule_ids.append(ADDITION_LLM_RULE)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
             record_llm_detail(
@@ -388,6 +386,7 @@ def run_workbook_qc(
             disposal_list_summary=ctx.disposal_list_summary,
             rollforward=ctx.rollforward,
             lead=ctx.lead,
+            recorder=recorder,
         )
     )
     if config.enabled and (
@@ -412,9 +411,8 @@ def run_workbook_qc(
                 prior_issues=disposal_issues,
             )
         )
+        record_observed_issues(disposal_llm_issues)
         disposal_issues.extend(disposal_llm_issues)
-        if disposal_llm_issues and DISPOSAL_LLM_RULE not in rule_ids:
-            rule_ids.append(DISPOSAL_LLM_RULE)
         elapsed = perf_counter() - llm_t0
         llm_seconds += elapsed
         record_llm_detail(
@@ -423,7 +421,6 @@ def run_workbook_qc(
             elapsed,
         )
     issues.extend(disposal_issues)
-    rule_ids.extend(list(DISPOSAL_RULE_IDS))
 
     k03_issues = attach_rule_metadata(
         run_k03_rules(
@@ -431,10 +428,10 @@ def run_workbook_qc(
             lead=ctx.lead,
             rollforward=ctx.rollforward,
             fa_list=ctx.fa_list,
+            recorder=recorder,
         )
     )
     issues.extend(k03_issues)
-    rule_ids.extend(list(K03_RULE_IDS))
     if not source_sheet and ctx.k03_sheets:
         source_sheet = ctx.k03_sheets[0].sheet_name
 
@@ -479,6 +476,7 @@ def run_workbook_qc(
             ctx.rollforward,
             lead=ctx.lead,
             reconciliations=ctx.reconciliations,
+            recorder=recorder,
         )
         if config.enabled:
             llm_t0 = perf_counter()
@@ -503,9 +501,8 @@ def run_workbook_qc(
                 prior_issues=rollforward_raw_issues,
                 workbook_context=rf_semantic_context,
             )
+            record_observed_issues(rf_note_issues)
             rollforward_raw_issues.extend(rf_note_issues)
-            if rf_note_issues and RF_NOTES_RULE not in rule_ids:
-                rule_ids.append(RF_NOTES_RULE)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
             record_llm_detail(
@@ -518,12 +515,16 @@ def run_workbook_qc(
         rollforward_sheet_section = build_rollforward_sheet_section(
             ctx.rollforward, rollforward_issues
         )
-        rule_ids.extend(list(ROLLFORWARD_RULE_IDS))
         if not source_sheet:
             source_sheet = ctx.rollforward.source_sheet
 
     if delivery_context:
-        delivery_raw_issues = check_delivery_completion(
+        delivery_rule_id = (
+            FIRST_DELIVERY_RULE_ID
+            if delivery_context.stage == "first"
+            else FINAL_DELIVERY_RULE_ID
+        )
+        delivery_raw_issues = recorder.execute_rule(delivery_rule_id, check_delivery_completion,
             delivery_context,
             prior_issues=issues,
             workbook_context=ctx,
@@ -532,25 +533,22 @@ def run_workbook_qc(
         )
         delivery_issues = attach_rule_metadata(delivery_raw_issues)
         issues.extend(delivery_issues)
-        if delivery_context.stage == "first":
-            rule_ids.append("first_delivery_standard")
-        elif delivery_context.stage == "final":
-            rule_ids.append("final_delivery_standard")
 
-    if not rule_ids:
-        rule_ids = list(WORKBOOK_RULE_IDS)
+    execution_ledger = recorder.to_ledger()
+    validate_execution_ledger(execution_ledger, issues)
 
     report = build_report(
         source_file=ctx.source_file,
         source_sheet=source_sheet or "workbook",
         procedure_code="WORKBOOK",
-        rule_ids=list(dict.fromkeys(rule_ids)),
+        rule_ids=recorder.executed_rule_ids(),
         records=records,
         issues=issues,
         summary_sheet_section=summary_sheet_section,
         lead_sheet_section=lead_sheet_section,
         rollforward_sheet_section=rollforward_sheet_section,
         addition_sheet_section=addition_sheet_section,
+        execution_ledger=execution_ledger,
         ingest_review_section=(
             {
                 "description": "读取结果复核提示（LLM 辅助，不等同于业务规则 finding）。",
@@ -667,30 +665,63 @@ def run_input_qc(
     p = Path(path)
     if p.suffix.lower() == ".csv":
         report = run_fa_list_qc(load_fa_list_csv(p), llm=llm)
-        delivery_issues = attach_rule_metadata(
-            check_delivery_completion(
-                delivery_context,
-                prior_issues=report.issues,
+        if delivery_context:
+            delivery_recorder = RuleExecutionRecorder()
+            delivery_rule_id = (
+                FIRST_DELIVERY_RULE_ID
+                if delivery_context.stage == "first"
+                else FINAL_DELIVERY_RULE_ID
             )
-        )
-        if delivery_issues:
-            report.issues.extend(delivery_issues)
-            if delivery_context and delivery_context.stage == "first":
-                report.rule_ids.append("first_delivery_standard")
-            elif delivery_context and delivery_context.stage == "final":
-                report.rule_ids.append("final_delivery_standard")
-            for issue in delivery_issues:
-                if issue.severity.value == "FAIL":
-                    report.summary.fail_count += 1
-                elif issue.severity.value == "WARN":
-                    report.summary.warn_count += 1
-                elif issue.severity.value == "NEED_REVIEW":
-                    report.summary.need_review_count += 1
-                report.summary.by_rule[issue.rule_id] = (
-                    report.summary.by_rule.get(issue.rule_id, 0) + 1
+            delivery_issues = attach_rule_metadata(
+                delivery_recorder.execute_rule(
+                    delivery_rule_id,
+                    check_delivery_completion,
+                    delivery_context,
+                    prior_issues=report.issues,
                 )
-            all_severities = [i.severity for i in report.issues]
-            report.summary.overall_severity = worst_severity(all_severities)
+            )
+            if delivery_issues:
+                report.issues.extend(delivery_issues)
+                for issue in delivery_issues:
+                    if issue.severity.value == "FAIL":
+                        report.summary.fail_count += 1
+                    elif issue.severity.value == "WARN":
+                        report.summary.warn_count += 1
+                    elif issue.severity.value == "NEED_REVIEW":
+                        report.summary.need_review_count += 1
+                    report.summary.by_rule[issue.rule_id] = (
+                        report.summary.by_rule.get(issue.rule_id, 0) + 1
+                    )
+                all_severities = [i.severity for i in report.issues]
+                report.summary.overall_severity = worst_severity(all_severities)
+            base_items = list((report.execution_ledger or {}).get("items", []))
+            base_items.extend(delivery_recorder.to_ledger().get("items", []))
+            executed = sum(1 for item in base_items if item.get("status") == "EXECUTED")
+            data_insufficient = sum(
+                1 for item in base_items if item.get("status") == "DATA_INSUFFICIENT"
+            )
+            not_applicable = sum(
+                1 for item in base_items if item.get("status") == "NOT_APPLICABLE"
+            )
+            rules_with_findings = sum(
+                1
+                for item in base_items
+                if item.get("status") == "EXECUTED" and item.get("finding_count", 0) > 0
+            )
+            report.execution_ledger = {
+                "summary": {
+                    "total_observed_checkpoints": len(base_items),
+                    "executed": executed,
+                    "data_insufficient": data_insufficient,
+                    "not_applicable": not_applicable,
+                    "executed_rules": executed,
+                    "rules_with_findings": rules_with_findings,
+                    "rules_without_findings": executed - rules_with_findings,
+                },
+                "items": base_items,
+            }
+            report.rule_ids = [item["rule_id"] for item in base_items]
+            validate_execution_ledger(report.execution_ledger, report.issues)
         report.manual_review_sections = build_manual_review_sections(None)
         return report
     return run_workbook_qc_from_path(

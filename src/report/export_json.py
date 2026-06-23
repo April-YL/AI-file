@@ -7,8 +7,9 @@ from ingest.records import FaListDataset
 from llm.config import LlmConfig, load_llm_config
 from llm.review import enrich_report_with_llm
 from report.summary import QcReport, build_report
+from rules.execution_recorder import RuleExecutionRecorder, validate_execution_ledger
 from rules.models import ColumnContext
-from rules.runner import FA_LIST_RULE_IDS, run_fa_list_rules
+from rules.runner import run_fa_list_rules
 
 
 def run_fa_list_qc(
@@ -21,14 +22,18 @@ def run_fa_list_qc(
         source_sheet=dataset.source_sheet,
         procedure_code="FA_LIST",
     )
-    issues = run_fa_list_rules(dataset.records, ctx)
+    recorder = RuleExecutionRecorder()
+    issues = run_fa_list_rules(dataset.records, ctx, recorder=recorder)
+    execution_ledger = recorder.to_ledger()
+    validate_execution_ledger(execution_ledger, issues)
     report = build_report(
         source_file=dataset.source_file,
         source_sheet=dataset.source_sheet,
         procedure_code="FA_LIST",
-        rule_ids=list(FA_LIST_RULE_IDS),
+        rule_ids=recorder.executed_rule_ids(),
         records=dataset.records,
         issues=issues,
+        execution_ledger=execution_ledger,
     )
     config = load_llm_config(cli_enabled=llm)
     if config.enabled:

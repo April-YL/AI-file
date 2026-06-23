@@ -6,6 +6,7 @@ from decimal import Decimal
 from ingest.disposal_test_sheet import DisposalSampleOutputDataset, DisposalTestSheetDataset
 from ingest.lead_sheet import CraAssertionRow, LeadSheetDataset
 from ingest.records import DisposalListSummary
+from rules.execution_recorder import RuleExecutionRecorder
 from rules.lead_common import cra_tier, field_values
 from rules.models import QcIssue, Severity
 from rules.parsing import amount_tolerance, parse_amount
@@ -24,25 +25,44 @@ def run_disposal_sampling_rules(
     disposal_test: DisposalTestSheetDataset | None,
     disposal_sample_output: DisposalSampleOutputDataset | None,
     lead: LeadSheetDataset | None,
+    recorder: RuleExecutionRecorder | None = None,
 ) -> list[QcIssue]:
+    recorder = recorder or RuleExecutionRecorder()
     if disposal_sample_output is None:
+        for rule_id in RULE_IDS:
+            recorder.record_data_insufficient(rule_id, "未识别 K.02.2a 处置选样输出，无法执行处置抽样相关检查")
         return []
     if not disposal_sample_output.usable_for_rules:
-        return [
-            _issue(
-                "disposal_sample_pool_amount_match",
-                "sample_output_readability",
-                Severity.NEED_REVIEW,
-                "K.02.2a 选样输出未达到确定性规则执行条件。",
-                "人工确认样本池、抽样参数和已选样本读取结果。",
-                disposal_sample_output.source_sheet,
-            )
-        ]
-    issues = check_disposal_sample_pool_amount(disposal_list_summary, disposal_sample_output)
-    issues.extend(check_disposal_sampling_te_cra(disposal_sample_output, lead))
-    issues.extend(check_disposal_sample_replacement_reason(disposal_test))
+        return recorder.execute_rule(
+            "disposal_sample_pool_amount_match",
+            _disposal_sample_output_readability_issue,
+            disposal_sample_output,
+        )
+    issues = recorder.execute_rule(
+        "disposal_sample_pool_amount_match",
+        check_disposal_sample_pool_amount,
+        disposal_list_summary,
+        disposal_sample_output,
+    )
+    issues.extend(recorder.execute_rule("disposal_sampling_te_cra_consistency", check_disposal_sampling_te_cra, disposal_sample_output, lead))
+    issues.extend(recorder.execute_rule("disposal_sample_replacement_reason", check_disposal_sample_replacement_reason, disposal_test))
     return issues
 
+
+def _disposal_sample_output_readability_issue(
+    disposal_sample_output: DisposalSampleOutputDataset,
+) -> list[QcIssue]:
+    return [
+        _issue(
+            "disposal_sample_pool_amount_match",
+            "sample_output_readability",
+            Severity.NEED_REVIEW,
+            "K.02.2a 选样输出未达到确定性规则执行条件。",
+            "人工确认样本池、抽样参数和已选样本读取结果。",
+            disposal_sample_output.source_sheet,
+            _sample_output_anchor_row(disposal_sample_output),
+        )
+    ]
 
 def check_disposal_sample_pool_amount(
     summary: DisposalListSummary | None,
@@ -199,6 +219,20 @@ def _assertion_keys(text: str | None) -> set[str]:
 
 def _norm(value: str | None) -> str:
     return re.sub(r"[\s_\-（）()，,、/]", "", str(value or "").strip().lower())
+
+
+def _sample_output_anchor_row(sample_output: DisposalSampleOutputDataset) -> int | None:
+    for item in sample_output.parameters.values():
+        if item.source_row:
+            return item.source_row
+    sample_pool = sample_output.amounts.get("sample_pool_amount")
+    if sample_pool and sample_pool.source_row:
+        return sample_pool.source_row
+    for item in sample_output.amounts.values():
+        if item.source_row:
+            return item.source_row
+    first_sample = next(iter(sample_output.selected_samples), None)
+    return first_sample.source_row if first_sample else None
 
 
 def _issue(

@@ -14,6 +14,7 @@ from ingest.rollforward_sheet import (
     RollforwardSheetDataset,
     get_movement_transaction_amount,
 )
+from rules.execution_recorder import RuleExecutionRecorder
 from rules.lead_common import field_values
 from rules.models import QcIssue, Severity
 from rules.parsing import amount_tolerance, is_blank, parse_amount
@@ -66,13 +67,17 @@ def run_k03_tod_by_item_rules(
     *,
     lead: LeadSheetDataset | None = None,
     rollforward: RollforwardSheetDataset | None = None,
+    recorder: RuleExecutionRecorder | None = None,
 ) -> list[QcIssue]:
+    recorder = recorder or RuleExecutionRecorder()
     if dataset.execution_path != EXECUTION_PATH_TOD_BY_ITEM:
+        for rule_id in RULE_IDS:
+            recorder.record_not_applicable(rule_id, "当前 K.03 工作表不是 by-item 折旧测试执行路径")
         return []
 
     issues: list[QcIssue] = []
     if dataset.detail_table_ref is None:
-        return [
+        issues = [
             _issue(
                 dataset,
                 "k03_tod_by_item_detail_unreadable",
@@ -82,6 +87,8 @@ def run_k03_tod_by_item_rules(
                 "Open the K.03.2 sheet and confirm the by-item depreciation test detail area, headers, and total row.",
             )
         ]
+        _record_k03_execution(recorder, issues, ("k03_tod_by_item_detail_unreadable",))
+        return issues
 
     issues.extend(_check_required_fields(dataset))
     table = load_k03_detail_table(dataset)
@@ -96,6 +103,7 @@ def run_k03_tod_by_item_rules(
                 "Check whether the workbook path, sheet name, and detail table range are still valid.",
             )
         )
+        _record_k03_execution(recorder, issues, ("k03_tod_by_item_required_fields", "k03_tod_by_item_detail_unreadable"))
         return issues
 
     issues.extend(_check_difference_column(dataset, table.detail_rows + table.total_rows))
@@ -189,7 +197,20 @@ def run_k03_tod_by_item_rules(
             )
         )
 
+    _record_k03_execution(recorder, issues, RULE_IDS)
     return issues
+
+
+def _record_k03_execution(
+    recorder: RuleExecutionRecorder,
+    issues: list[QcIssue],
+    rule_ids: tuple[str, ...],
+) -> None:
+    counts: dict[str, int] = {}
+    for issue in issues:
+        counts[issue.rule_id] = counts.get(issue.rule_id, 0) + 1
+    for rule_id in rule_ids:
+        recorder.record(rule_id, counts.get(rule_id, 0))
 
 
 def _sad_from_lead(lead: LeadSheetDataset | None) -> Decimal | None:
@@ -215,6 +236,7 @@ def _check_required_fields(dataset: K03SheetDataset) -> list[QcIssue]:
             "K.03 TOD-by item is missing key depreciation comparison fields: "
             + ", ".join(missing),
             "Confirm whether management depreciation and audit recalculated depreciation columns are present or mapped under variant headers.",
+            source_row=_detail_table_anchor_row(dataset),
         )
     ]
 
@@ -393,6 +415,16 @@ def _has_valid_sheet_explanation(dataset: K03SheetDataset) -> bool:
                 continue
             texts.append(area.text)
     return any(_is_valid_explanation(text) for text in texts)
+
+
+def _detail_table_anchor_row(dataset: K03SheetDataset) -> int | None:
+    if dataset.detail_table_ref and dataset.detail_table_ref.header_row:
+        return dataset.detail_table_ref.header_row
+    if dataset.header_rows:
+        return dataset.header_rows[0]
+    if dataset.detail_table_range and dataset.detail_table_range.start_row:
+        return dataset.detail_table_range.start_row
+    return None
 
 
 def _has_valid_row_explanation(row: K03DetailRow) -> bool:

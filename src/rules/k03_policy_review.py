@@ -11,6 +11,7 @@ from ingest.k03_sheet import (
 )
 from ingest.models import AssetRecord
 from ingest.records import FaListDataset
+from rules.execution_recorder import RuleExecutionRecorder
 from rules.models import QcIssue, Severity
 from rules.parsing import is_blank
 
@@ -58,9 +59,11 @@ def run_k03_policy_review_rules(
     dataset: K03SheetDataset | None,
     *,
     fa_list: FaListDataset | None = None,
+    recorder: RuleExecutionRecorder | None = None,
 ) -> list[QcIssue]:
+    recorder = recorder or RuleExecutionRecorder()
     if dataset is None:
-        return [
+        issues = [
             QcIssue(
                 asset_id=None,
                 rule_id="k03_policy_sheet_missing",
@@ -72,13 +75,17 @@ def run_k03_policy_review_rules(
                 source_sheet="K.03.3 折旧政策复核",
             )
         ]
+        _record_k03_policy_execution(recorder, issues, ("k03_policy_sheet_missing",))
+        return issues
     if dataset.execution_path != EXECUTION_PATH_POLICY_REVIEW:
+        for rule_id in RULE_IDS:
+            recorder.record_not_applicable(rule_id, "当前 K.03 工作表不是折旧政策复核执行路径")
         return []
 
     issues: list[QcIssue] = []
     table = dataset.policy_table
     if table is None or not table.rows:
-        return [
+        issues = [
             _issue(
                 dataset,
                 "k03_policy_table_unreadable",
@@ -86,13 +93,29 @@ def run_k03_policy_review_rules(
                 Severity.NEED_REVIEW,
                 "K.03.3 policy table 1 could not be identified or parsed.",
                 "Check the policy review sheet for the asset category, current/prior policy, difference, and notes columns.",
+                source_row=table.header_row if table else None,
             )
         ]
+        _record_k03_policy_execution(recorder, issues, ("k03_policy_table_unreadable",))
+        return issues
 
     issues.extend(_check_structure(dataset))
     issues.extend(_check_policy_rows(dataset))
     issues.extend(_check_fa_list_consistency(dataset, fa_list))
+    _record_k03_policy_execution(recorder, issues, RULE_IDS)
     return issues
+
+
+def _record_k03_policy_execution(
+    recorder: RuleExecutionRecorder,
+    issues: list[QcIssue],
+    rule_ids: tuple[str, ...],
+) -> None:
+    counts: dict[str, int] = {}
+    for issue in issues:
+        counts[issue.rule_id] = counts.get(issue.rule_id, 0) + 1
+    for rule_id in rule_ids:
+        recorder.record(rule_id, counts.get(rule_id, 0))
 
 
 def _check_structure(dataset: K03SheetDataset) -> list[QcIssue]:

@@ -5,6 +5,7 @@ from decimal import Decimal
 from ingest.lead_sheet import LeadSheetDataset
 from ingest.models import AssetRecord
 from ingest.records import DisposalListSummary, FaListDataset
+from rules.execution_recorder import RuleExecutionRecorder
 from rules.lead_common import field_values
 from rules.models import QcIssue, Severity
 from rules.parsing import amount_tolerance, is_blank, parse_amount, record_has_identity, record_is_empty_data_row
@@ -42,15 +43,18 @@ def run_disposal_list_rules(
     disposal_list_summary: DisposalListSummary | None,
     *,
     lead: LeadSheetDataset | None = None,
+    recorder: RuleExecutionRecorder | None = None,
 ) -> list[QcIssue]:
+    recorder = recorder or RuleExecutionRecorder()
     if disposal_list is None:
+        for rule_id in RULE_IDS:
+            recorder.record_data_insufficient(rule_id, "未识别处置清单，无法执行处置清单相关检查")
         return []
-    issues = check_disposal_required_fields(disposal_list)
-    issues.extend(check_disposal_list_net_values(disposal_list))
-    issues.extend(check_disposal_method_classification(disposal_list_summary))
-    issues.extend(check_disposal_other_reduction_over_tt(disposal_list_summary, lead))
+    issues = recorder.execute_rule("disposal_required_fields", check_disposal_required_fields, disposal_list)
+    issues.extend(recorder.execute_rule("disposal_list_net_value_recalculation", check_disposal_list_net_values, disposal_list))
+    issues.extend(recorder.execute_rule("disposal_method_classification", check_disposal_method_classification, disposal_list_summary))
+    issues.extend(recorder.execute_rule("disposal_other_reduction_over_tt", check_disposal_other_reduction_over_tt, disposal_list_summary, lead))
     return issues
-
 
 def check_disposal_required_fields(disposal_list: FaListDataset) -> list[QcIssue]:
     issues: list[QcIssue] = []

@@ -325,13 +325,22 @@ def load_k03_detail_table(dataset: K03SheetDataset) -> K03DetailTable:
         detail_rows: list[K03DetailRow] = []
         total_rows: list[K03DetailRow] = []
         read_start = (ref.header_row or ref.start_row) + 1
-        for row_number in range(read_start, ref.end_row + 1):
+        min_col = min(header_by_col)
+        max_col = max(header_by_col)
+        row_iter = ws.iter_rows(
+            min_row=read_start,
+            max_row=ref.end_row,
+            min_col=min_col,
+            max_col=max_col,
+            values_only=True,
+        )
+        for row_number, row_values in zip(range(read_start, ref.end_row + 1), row_iter):
             raw_values: dict[str, Any] = {}
             normalized_values: dict[str, Any] = {}
             cell_refs: dict[str, str] = {}
             for col in sorted(header_by_col):
                 header = header_by_col[col]
-                value = ws.cell(row=row_number, column=col).value
+                value = row_values[col - min_col]
                 raw_values[header] = value
                 field = field_by_col.get(col)
                 if field:

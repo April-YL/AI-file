@@ -12,6 +12,7 @@ from ingest.disposal_test_sheet import (
 from ingest.lead_sheet import LeadSheetDataset
 from ingest.records import DisposalListSummary
 from ingest.rollforward_sheet import RollforwardSheetDataset, get_movement_transaction_amount
+from rules.execution_recorder import RuleExecutionRecorder
 from rules.lead_common import field_values
 from rules.models import QcIssue, Severity
 from rules.parsing import amount_tolerance, parse_amount
@@ -39,17 +40,48 @@ def run_disposal_reconciliation_rules(
     disposal_execution_path: DisposalExecutionPathDataset | None,
     rollforward: RollforwardSheetDataset | None,
     lead: LeadSheetDataset | None,
+    recorder: RuleExecutionRecorder | None = None,
 ) -> list[QcIssue]:
+    recorder = recorder or RuleExecutionRecorder()
     if _is_waived(disposal_execution_path):
+        for rule_id in RULE_IDS:
+            recorder.record_not_applicable(rule_id, "处置测试已豁免或注明不执行")
         return []
-    issues = check_disposal_reconciliation_readability(disposal_test)
+    issues = recorder.execute_rule(
+        "disposal_reconciliation_readability",
+        check_disposal_reconciliation_readability,
+        disposal_test,
+    )
     matrix = disposal_test.reconciliation_matrix if disposal_test else None
     if matrix is None or not matrix.usable_for_rules:
+        for rule_id in (
+            "disposal_reconciliation_formula_source",
+            "disposal_net_value_recalculation",
+            "disposal_rollforward_reconciliation",
+            "disposal_difference_investigation",
+        ):
+            recorder.record_data_insufficient(rule_id, "处置总体核对矩阵未达到确定性规则执行条件")
         return issues
-    issues.extend(check_disposal_reconciliation_formula_source(matrix, disposal_test.source_sheet))
-    issues.extend(check_disposal_matrix_net_values(matrix, disposal_test.source_sheet))
     issues.extend(
-        check_disposal_rollforward_reconciliation(
+        recorder.execute_rule(
+            "disposal_reconciliation_formula_source",
+            check_disposal_reconciliation_formula_source,
+            matrix,
+            disposal_test.source_sheet,
+        )
+    )
+    issues.extend(
+        recorder.execute_rule(
+            "disposal_net_value_recalculation",
+            check_disposal_matrix_net_values,
+            matrix,
+            disposal_test.source_sheet,
+        )
+    )
+    issues.extend(
+        recorder.execute_rule(
+            "disposal_rollforward_reconciliation",
+            check_disposal_rollforward_reconciliation,
             disposal_list_summary=disposal_list_summary,
             matrix=matrix,
             source_sheet=disposal_test.source_sheet,
@@ -57,9 +89,16 @@ def run_disposal_reconciliation_rules(
             lead=lead,
         )
     )
-    issues.extend(check_disposal_difference_investigation(matrix, disposal_test.source_sheet, lead))
+    issues.extend(
+        recorder.execute_rule(
+            "disposal_difference_investigation",
+            check_disposal_difference_investigation,
+            matrix,
+            disposal_test.source_sheet,
+            lead,
+        )
+    )
     return issues
-
 
 def check_disposal_reconciliation_readability(
     disposal_test: DisposalTestSheetDataset | None,
@@ -93,6 +132,7 @@ def check_disposal_reconciliation_readability(
             "K.02.2 总体核对模块未达到确定性规则执行条件。" + detail,
             "人工确认总体核对模块、金额维度及处置清单/K.01 公式来源后再判断勾稽结果。",
             disposal_test.source_sheet,
+            _matrix_anchor_row(matrix),
         )
     ]
 
@@ -333,6 +373,15 @@ def _cell_amount(cell: DisposalReconciliationCell | None) -> Decimal | None:
 
 def _cell_text(cell: DisposalReconciliationCell | None) -> str | None:
     return cell.value.strip() if cell and cell.value else None
+
+
+def _matrix_anchor_row(matrix: DisposalReconciliationMatrix | None) -> int | None:
+    if matrix is None:
+        return None
+    if matrix.header_row:
+        return matrix.header_row
+    first_row = next(iter(matrix.rows.values()), None)
+    return first_row.source_row if first_row else None
 
 
 def _is_yes(value: str) -> bool:

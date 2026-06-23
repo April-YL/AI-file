@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from ingest.disposal_test_sheet import DisposalTestSheetDataset, DisposalTestedSampleRow
+from rules.execution_recorder import RuleExecutionRecorder
 from rules.models import QcIssue, Severity
 from rules.parsing import amount_tolerance, parse_amount
 
@@ -14,17 +15,27 @@ RULE_IDS = (
 )
 
 
-def run_disposal_detailed_test_rules(disposal_test: DisposalTestSheetDataset | None) -> list[QcIssue]:
+def run_disposal_detailed_test_rules(
+    disposal_test: DisposalTestSheetDataset | None,
+    *,
+    recorder: RuleExecutionRecorder | None = None,
+) -> list[QcIssue]:
+    recorder = recorder or RuleExecutionRecorder()
     if disposal_test is None:
+        for rule_id in RULE_IDS:
+            recorder.record_data_insufficient(rule_id, "未识别 K.02.2 处置测试表，无法执行处置样本详细测试")
         return []
     issues: list[QcIssue] = []
+    if not disposal_test.tested_samples:
+        for rule_id in RULE_IDS:
+            recorder.record_data_insufficient(rule_id, "未读取到处置测试样本，无法执行处置样本详细测试")
+        return issues
     for sample in disposal_test.tested_samples:
-        issues.extend(_check_attributes(disposal_test, sample))
-        issues.extend(_check_amounts(disposal_test, sample))
-        issues.extend(_check_sale_evidence(disposal_test, sample))
-        issues.extend(_check_exception_followup(disposal_test, sample))
+        issues.extend(recorder.execute_rule("disposal_test_attributes_complete", _check_attributes, disposal_test, sample))
+        issues.extend(recorder.execute_rule("disposal_test_amount_recalculation", _check_amounts, disposal_test, sample))
+        issues.extend(recorder.execute_rule("disposal_sale_evidence_complete", _check_sale_evidence, disposal_test, sample))
+        issues.extend(recorder.execute_rule("disposal_exception_followup", _check_exception_followup, disposal_test, sample))
     return issues
-
 
 def _check_attributes(test: DisposalTestSheetDataset, sample: DisposalTestedSampleRow) -> list[QcIssue]:
     values = [str(value).strip() for value in sample.attribute_results if value not in (None, "")]
