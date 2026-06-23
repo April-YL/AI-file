@@ -87,6 +87,43 @@ def test_disposal_sample_match_flags_sample_type_mismatch_only():
     assert all(issue.severity == Severity.NEED_REVIEW for issue in issues)
     assert any("样本类型不一致" in issue.message for issue in issues)
     assert any("关键项数量" in issue.message for issue in issues)
+    sample_type_issue = next(issue for issue in issues if issue.field == "sample_type")
+    assert sample_type_issue.source_sheet == "K.02.2 处置测试"
+    assert sample_type_issue.source_row == 69
+    key_item_count_issue = next(issue for issue in issues if issue.field == "key_item_count")
+    assert key_item_count_issue.source_sheet == "K.02.2a 处置选样输出"
+    assert key_item_count_issue.source_row == 50
+
+
+def test_disposal_sample_match_finding_uses_selected_sample_location():
+    disposal_test = DisposalTestSheetDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.2",
+        tested_samples=[],
+    )
+    disposal_sample_output = DisposalSampleOutputDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.2a",
+        selected_samples=[
+            DisposalSampleRow(
+                source_row=102,
+                sample_type="代表性样本",
+                asset_id="FA-D-001",
+                asset_name="Disposed asset",
+                net_value="100",
+            )
+        ],
+    )
+
+    issues = check_disposal_sample_match(
+        disposal_test,
+        disposal_sample_output,
+        execution_path=_executed_path(),
+    )
+    sample_match_issue = next(issue for issue in issues if issue.field == "sample_match")
+
+    assert sample_match_issue.source_sheet == "K.02.2a"
+    assert sample_match_issue.source_row == 102
 
 
 def test_disposal_sample_match_skips_when_summary_waived():

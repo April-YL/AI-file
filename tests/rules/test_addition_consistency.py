@@ -4,6 +4,7 @@ import pytest
 
 from ingest.addition_test_sheet import (
     AdditionSampleOutputDataset,
+    AdditionSampleRow,
     AdditionTestSheetDataset,
     AdditionTestedSampleRow,
     ModuleAssessment,
@@ -107,8 +108,6 @@ def test_exception_summary_recognition_is_not_a_finding():
 
 
 def test_unactivated_replacement_sample_is_not_required_in_detailed_test():
-    from ingest.addition_test_sheet import AdditionSampleRow
-
     addition_test = AdditionTestSheetDataset(
         source_file="case.xlsx",
         source_sheet="K.02.1",
@@ -143,3 +142,31 @@ def test_unactivated_replacement_sample_is_not_required_in_detailed_test():
     )
 
     assert check_addition_sample_match(addition_test, sample_output) == []
+
+
+def test_addition_sample_match_finding_uses_selected_sample_location():
+    addition_test = AdditionTestSheetDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.1",
+        tested_samples=[],
+    )
+    sample_output = AdditionSampleOutputDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.1a",
+        selected_samples=[
+            AdditionSampleRow(
+                source_row=30,
+                sample_type="代表性样本",
+                asset_id="FA-TEST-001",
+                asset_name="Asset",
+                original_value="100",
+            )
+        ],
+    )
+
+    issues = check_addition_sample_match(addition_test, sample_output)
+    sample_match_issues = [issue for issue in issues if issue.field == "sample_match"]
+
+    assert sample_match_issues
+    assert all(issue.source_sheet == "K.02.1a" for issue in sample_match_issues)
+    assert all(issue.source_row == 30 for issue in sample_match_issues)

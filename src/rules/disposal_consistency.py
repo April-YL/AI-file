@@ -141,6 +141,12 @@ def check_disposal_sample_match(
 
     issues: list[QcIssue] = []
     if preview.selected_count and preview.matched_count < preview.selected_count:
+        source_sheet, source_row = _disposal_issue_anchor(
+            preferred_sheet=disposal_sample_output.source_sheet if disposal_sample_output else None,
+            preferred_row=_first_source_row(preview.unmatched_selected),
+            fallback_sheet=disposal_test.source_sheet if disposal_test else None,
+            fallback_row=_first_source_row(preview.unmatched_tested),
+        )
         issues.append(
             _issue(
                 field="sample_match",
@@ -150,7 +156,8 @@ def check_disposal_sample_match(
                     f"已选 {preview.selected_count} 条，匹配到 {preview.matched_count} 条。"
                 ),
                 suggestion="请核对 K.02.2a 选样输出与 K.02.2 实测样本是否一致；替换样本如未启用，可在底稿中说明。",
-                source_sheet=_source_sheet(disposal_sample_output, disposal_test),
+                source_sheet=source_sheet or _source_sheet(disposal_sample_output, disposal_test),
+                source_row=source_row,
             )
         )
 
@@ -190,6 +197,7 @@ def check_disposal_sample_match(
         preview.key_item_selected_count is not None
         and preview.key_item_selected_count != preview.key_item_tested_count
     ):
+        source_row = _key_item_count_source_row(disposal_sample_output)
         issues.append(
             _issue(
                 field="key_item_count",
@@ -201,6 +209,7 @@ def check_disposal_sample_match(
                 ),
                 suggestion="请核对关键项识别和代表性样本分类是否在选样输出与实测页保持一致。",
                 source_sheet=disposal_sample_output.source_sheet if disposal_sample_output else "K.02.2a",
+                source_row=source_row,
             )
         )
 
@@ -220,6 +229,39 @@ def _key_item_count(disposal_sample_output: DisposalSampleOutputDataset | None) 
     item = disposal_sample_output.amounts.get("key_item_count")
     amount = _parse_amount(item.amount if item else None)
     return int(amount) if amount is not None else None
+
+
+def _key_item_count_source_row(disposal_sample_output: DisposalSampleOutputDataset | None) -> int | None:
+    if disposal_sample_output is None:
+        return None
+    item = disposal_sample_output.amounts.get("key_item_count")
+    return item.source_row if item is not None else None
+
+
+def _first_source_row(items: list[dict[str, Any]]) -> int | None:
+    for item in items:
+        row = item.get("source_row")
+        if isinstance(row, int) and row > 0:
+            return row
+    return None
+
+
+def _disposal_issue_anchor(
+    *,
+    preferred_sheet: str | None,
+    preferred_row: int | None,
+    fallback_sheet: str | None,
+    fallback_row: int | None,
+) -> tuple[str | None, int | None]:
+    if preferred_sheet and preferred_row:
+        return preferred_sheet, preferred_row
+    if fallback_sheet and fallback_row:
+        return fallback_sheet, fallback_row
+    if preferred_sheet:
+        return preferred_sheet, None
+    if fallback_sheet:
+        return fallback_sheet, None
+    return None, None
 
 
 def _sample_summary(row: DisposalSampleRow) -> dict[str, Any]:

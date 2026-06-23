@@ -124,8 +124,16 @@ def check_addition_sample_match(
     # Exception-summary recognition is diagnostic only for K.02.1; it should
     # not create a finding unless another rule identifies a concrete mismatch.
     preview.exception_flags = []
+    sample_output_sheet = addition_sample_output.source_sheet if addition_sample_output else None
+    test_sheet = addition_test.source_sheet if addition_test else None
 
     if preview.selected_count and preview.matched_count < preview.selected_count:
+        source_sheet, source_row = _addition_issue_anchor(
+            preferred_sheet=sample_output_sheet,
+            preferred_row=_first_source_row(preview.unmatched_selected),
+            fallback_sheet=test_sheet,
+            fallback_row=_first_source_row(preview.unmatched_tested),
+        )
         issues.append(
             _issue(
                 field="sample_match",
@@ -138,12 +146,15 @@ def check_addition_sample_match(
                     "请核对 K.02.1a 已选取样本是否全部进入 K.02.1 实际测试，"
                     "并确认是否存在漏测或样本替换未记录。"
                 ),
+                source_sheet=source_sheet,
+                source_row=source_row,
             )
         )
 
     sel_amt = _parse_amount(preview.key_item_selected_amount)
     test_amt = _parse_amount(preview.key_item_tested_amount)
     if sel_amt is not None and test_amt is not None and abs(sel_amt - test_amt) > _MATCH_TOLERANCE:
+        source_sheet, source_row = _key_item_anchor(addition_test, addition_sample_output)
         issues.append(
             _issue(
                 field="key_item_amount",
@@ -156,6 +167,8 @@ def check_addition_sample_match(
                     "请核对关键项金额来源、关键项样本是否完整，"
                     "以及定量关键项是否与实际测试样本一致。"
                 ),
+                source_sheet=source_sheet,
+                source_row=source_row,
             )
         )
 
@@ -171,6 +184,8 @@ def check_addition_sample_match(
                     "请在 K.02.1 的异常情况区补充异常分析，"
                     "说明差异原因或属性 N 的处理结果。"
                 ),
+                source_sheet=test_sheet,
+                source_row=_first_exception_source_row(addition_test),
             )
         )
 
@@ -185,6 +200,8 @@ def check_addition_sample_match(
                     f"{item.get('asset_id') or item.get('asset_name') or '未知'}。"
                 ),
                 suggestion="请补充对应测试样本或修正选样输出与测试底稿的一致性。",
+                source_sheet=sample_output_sheet,
+                source_row=item.get("source_row"),
             )
         )
 
@@ -201,6 +218,8 @@ def check_addition_sample_match(
                     f"{item.get('asset_id') or item.get('asset_name') or '未知'}。"
                 ),
                 suggestion="请确认该样本是否为替换样本、关键项扩展样本或手工补充样本。",
+                source_sheet=test_sheet,
+                source_row=item.get("source_row"),
             )
         )
 
@@ -350,7 +369,69 @@ def _exception_flags(
     return flags
 
 
-def _issue(*, field: str, severity: Severity, message: str, suggestion: str) -> QcIssue:
+def _first_source_row(items: list[dict[str, Any]]) -> int | None:
+    for item in items:
+        row = item.get("source_row")
+        if isinstance(row, int) and row > 0:
+            return row
+    return None
+
+
+def _addition_issue_anchor(
+    *,
+    preferred_sheet: str | None,
+    preferred_row: int | None,
+    fallback_sheet: str | None,
+    fallback_row: int | None,
+) -> tuple[str | None, int | None]:
+    if preferred_sheet and preferred_row:
+        return preferred_sheet, preferred_row
+    if fallback_sheet and fallback_row:
+        return fallback_sheet, fallback_row
+    return preferred_sheet or fallback_sheet, preferred_row or fallback_row
+
+
+def _key_item_anchor(
+    addition_test: AdditionTestSheetDataset | None,
+    addition_sample_output: AdditionSampleOutputDataset | None,
+) -> tuple[str | None, int | None]:
+    if addition_sample_output:
+        for row in addition_sample_output.selected_samples:
+            if _is_key_item_sample(row.sample_type):
+                return addition_sample_output.source_sheet, row.source_row
+    if addition_test:
+        for row in addition_test.tested_samples:
+            if _is_key_item_sample(row.sample_type):
+                return addition_test.source_sheet, row.source_row
+    return (
+        addition_sample_output.source_sheet if addition_sample_output else (
+            addition_test.source_sheet if addition_test else None
+        ),
+        None,
+    )
+
+
+def _first_exception_source_row(addition_test: AdditionTestSheetDataset | None) -> int | None:
+    if addition_test is None:
+        return None
+    for sample in addition_test.tested_samples:
+        diff = _parse_amount(sample.amount_difference)
+        if diff is not None and diff != 0:
+            return sample.source_row
+        if any(str(v).strip().upper() == "N" for v in sample.attribute_results if v is not None):
+            return sample.source_row
+    return None
+
+
+def _issue(
+    *,
+    field: str,
+    severity: Severity,
+    message: str,
+    suggestion: str,
+    source_sheet: str | None = None,
+    source_row: int | None = None,
+) -> QcIssue:
     return QcIssue(
         asset_id=None,
         rule_id="addition_sample_match",
@@ -359,5 +440,6 @@ def _issue(*, field: str, severity: Severity, message: str, suggestion: str) -> 
         message=message,
         suggestion=suggestion,
         procedure_code="K.02.1",
-        source_sheet="K.02.1 / K.02.1a",
+        source_sheet=source_sheet or "K.02.1 / K.02.1a",
+        source_row=source_row,
     )

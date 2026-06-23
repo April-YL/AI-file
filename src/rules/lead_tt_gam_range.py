@@ -25,6 +25,7 @@ def check_lead_tt_gam_range(lead: LeadSheetDataset | None) -> list[QcIssue]:
 
     te = parse_threshold_amount(field_values(lead).get("te"))
     if te is None or te <= 0:
+        te_source_row = _basic_info_source_row(lead, "te")
         return [
             QcIssue(
                 asset_id=None,
@@ -35,11 +36,13 @@ def check_lead_tt_gam_range(lead: LeadSheetDataset | None) -> list[QcIssue]:
                 suggestion="补充 TE 后重跑，或人工对照 GAM 复核各认定 TT",
                 procedure_code="K.00",
                 source_sheet=lead.source_sheet,
+                source_row=te_source_row,
             )
         ]
 
     issues: list[QcIssue] = []
     unmapped = 0
+    first_unmapped_source_row: int | None = None
     for row in lead.cra_rows:
         tt = parse_threshold_amount(row.tt)
         if tt is None or tt <= 0:
@@ -47,6 +50,8 @@ def check_lead_tt_gam_range(lead: LeadSheetDataset | None) -> list[QcIssue]:
         tier = cra_tier(row.cra)
         if tier is None:
             unmapped += 1
+            if first_unmapped_source_row is None:
+                first_unmapped_source_row = row.source_row
             continue
         band = GAM_TT_RATIO_BANDS.get(tier)
         if band is None:
@@ -85,6 +90,12 @@ def check_lead_tt_gam_range(lead: LeadSheetDataset | None) -> list[QcIssue]:
                 suggestion="确认 CRA 填写为 Minimal/Low/Moderate/High 等可识别枚举",
                 procedure_code="K.00",
                 source_sheet=lead.source_sheet,
+                source_row=first_unmapped_source_row,
             )
         )
     return issues
+
+
+def _basic_info_source_row(lead: LeadSheetDataset, field_key: str) -> int | None:
+    field = next((item for item in lead.basic_info_fields if item.field_key == field_key), None)
+    return field.source_row if field else None
