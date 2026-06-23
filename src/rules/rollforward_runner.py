@@ -12,7 +12,10 @@ from rules.rollforward_depreciation_pl_reconciliation import (
 )
 from rules.rollforward_difference_over_sad import check_rollforward_difference_over_sad
 from rules.rollforward_exists import check_rollforward_exists
-from rules.rollforward_fa_list_reconciliation import check_rollforward_fa_list_reconciliation
+from rules.rollforward_fa_list_reconciliation import (
+    build_rollforward_fa_list_reconciliation_observation,
+    check_rollforward_fa_list_reconciliation,
+)
 
 ROLLFORWARD_RULE_IDS: tuple[str, ...] = (
     "rollforward_exists",
@@ -44,6 +47,11 @@ def run_rollforward_rules(
             reconciliations,
             rollforward=rollforward,
             lead=lead,
+            observation=build_rollforward_fa_list_reconciliation_observation(
+                reconciliations,
+                rollforward=rollforward,
+                lead=lead,
+            ),
         )
     )
     issues.extend(recorder.execute_rule("rollforward_difference_over_sad", check_rollforward_difference_over_sad, rollforward, lead=lead))

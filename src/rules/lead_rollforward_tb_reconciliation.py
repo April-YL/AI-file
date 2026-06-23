@@ -49,6 +49,96 @@ def _check_from_k01_check_column(
     )
 
 
+
+
+
+def build_lead_rollforward_tb_reconciliation_observation(
+    lead: LeadSheetDataset | None,
+    rollforward: RollforwardSheetDataset | None,
+) -> dict:
+    if lead is None or not lead.source_sheet:
+        return {"path": "data_insufficient", "inputs": [], "checks": [], "notes": ["lead_missing"]}
+    inputs = [
+        {
+            "source_sheet": lead.source_sheet,
+            "section": "movement_rows",
+            "field": "lead_book_balance",
+            "row": None,
+            "column": None,
+            "range": None,
+        }
+    ]
+    if rollforward is None or not (rollforward.ending_totals or rollforward.opening_totals):
+        return {
+            "path": "data_insufficient",
+            "inputs": inputs,
+            "checks": [],
+            "notes": ["rollforward_totals_missing"],
+        }
+
+    checks = getattr(rollforward, "table1_check_values", None) or {}
+    if checks:
+        path = "primary"
+        rows = getattr(rollforward, "table1_check_rows", None) or {}
+        first_row = next((row for row in rows.values() if row), None)
+        inputs.append(
+            {
+                "source_sheet": rollforward.source_sheet,
+                "section": "table1_check_column",
+                "field": "table1_check_values",
+                "row": first_row,
+                "column": None,
+                "range": None,
+            }
+        )
+        non_zero = [
+            value
+            for value in checks.values()
+            if value is not None and not amounts_close(value, 0, ref=max(abs(value), 1))
+        ]
+        checks_out = [
+            {
+                "name": "k01_check_column_difference",
+                "left_label": "non_zero_check_count",
+                "left_value": str(len(non_zero)),
+                "operator": "=",
+                "right_label": "expected_non_zero_count",
+                "right_value": "0",
+                "result": "triggered" if non_zero else "passed",
+            }
+        ]
+        notes = ["used_k01_check_column"]
+    else:
+        path = "fallback"
+        inputs.append(
+            {
+                "source_sheet": rollforward.source_sheet,
+                "section": "rollforward_totals",
+                "field": "opening_totals/ending_totals",
+                "row": rollforward.total_row,
+                "column": None,
+                "range": None,
+            }
+        )
+        compared_fields = 0
+        for row in lead.movement_rows:
+            field_key = movement_field_key(row.account_label)
+            if field_key and field_key in rollforward.ending_totals:
+                compared_fields += 1
+        checks_out = [
+            {
+                "name": "direct_lead_k01_compared_fields",
+                "left_label": "compared_fields",
+                "left_value": str(compared_fields),
+                "operator": "exists",
+                "right_label": "direct_check_fields",
+                "right_value": None,
+                "result": "passed" if compared_fields else "data_insufficient",
+            }
+        ]
+        notes = ["k01_check_column_not_available"]
+    return {"path": path, "inputs": inputs[:8], "checks": checks_out[:8], "notes": notes[:5]}
+
 def check_lead_rollforward_tb_reconciliation(
     lead: LeadSheetDataset | None,
     rollforward: RollforwardSheetDataset | None,

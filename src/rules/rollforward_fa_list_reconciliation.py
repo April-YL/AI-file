@@ -188,6 +188,101 @@ def _fallback_issue_from_reconciliations(
     )
 
 
+
+
+
+def build_rollforward_fa_list_reconciliation_observation(
+    reconciliations: list[ReconciliationCheck] | None,
+    *,
+    rollforward: RollforwardSheetDataset | None = None,
+    lead: LeadSheetDataset | None = None,
+) -> dict:
+    inputs = []
+    checks = []
+    notes = []
+    if rollforward is None or not rollforward.source_sheet:
+        return {"path": "data_insufficient", "inputs": [], "checks": [], "notes": ["rollforward_missing"]}
+
+    sad = _sad_from_lead(lead)
+    if rollforward.section_presence.get("b4_table3_check_with_table1") and rollforward.table3_check_values:
+        path = "primary"
+        inputs.append(
+            {
+                "source_sheet": rollforward.source_sheet,
+                "section": "b4_table3_check_with_table1",
+                "field": "table3_check_values",
+                "row": rollforward.table3_check_row,
+                "column": None,
+                "range": None,
+            }
+        )
+        if sad is not None:
+            inputs.append(
+                {
+                    "source_sheet": lead.source_sheet if lead else None,
+                    "section": "materiality",
+                    "field": "SAD",
+                    "row": None,
+                    "column": None,
+                    "range": None,
+                }
+            )
+        diffs = [v for v in rollforward.table3_check_values if abs(v) > _AMOUNT_TOL]
+        max_diff = max(diffs, key=lambda d: abs(d)) if diffs else Decimal("0")
+        if sad is None:
+            result = "data_insufficient" if diffs else "passed"
+            operator = "exists"
+            right_value = None
+        else:
+            result = "triggered" if abs(max_diff) > sad else "passed"
+            operator = ">"
+            right_value = str(sad)
+        checks.append(
+            {
+                "name": "table3_difference_vs_sad",
+                "left_label": "max_difference",
+                "left_value": str(max_diff),
+                "operator": operator,
+                "right_label": "SAD",
+                "right_value": right_value,
+                "result": result,
+            }
+        )
+        notes.append(
+            "table3_notes_present" if rollforward.table3_notes_text_present else "table3_notes_not_detected"
+        )
+    else:
+        path = "fallback"
+        region = rollforward.section_regions.get("b3_table2_fa_summary")
+        inputs.append(
+            {
+                "source_sheet": rollforward.source_sheet,
+                "section": "b3_table2_fa_summary",
+                "field": "table2_amount_count",
+                "row": region.anchor_row if region else None,
+                "column": None,
+                "range": None,
+            }
+        )
+        relevant = [
+            c
+            for c in (reconciliations or [])
+            if c.link_id in _FIELD_BY_LINK_ID
+        ]
+        checks.append(
+            {
+                "name": "fallback_reconciliation_count",
+                "left_label": "relevant_reconciliations",
+                "left_value": str(len(relevant)),
+                "operator": "exists",
+                "right_label": "fallback_checks",
+                "right_value": None,
+                "result": "triggered" if relevant else "data_insufficient",
+            }
+        )
+        notes.append("table3_check_values_not_available")
+    return {"path": path, "inputs": inputs[:8], "checks": checks[:8], "notes": notes[:5]}
+
 def check_rollforward_fa_list_reconciliation(
     reconciliations: list[ReconciliationCheck] | None,
     *,

@@ -37,6 +37,7 @@
 
 - Git 仓库已初始化并关联 GitHub 远程。
 - 资料库与案例库诊断、SOP/checklist/字段映射文档已沉淀。
+- K1 checklist 与 Agent 实际 rules 的映射已沉淀：口径文档见 `docs/checklist-rule-mapping.md`，正式映射工作簿为 `固定资产质检agent/资料库/K1 check list_rule_mapping.xlsx`，当前最新 sheet 为 `规则映射v0.4编号补全版`。
 - `src/ingest/`：sheet 分类、字段映射、底稿诊断 CLI、FA list CSV/Excel 解析（`load_fa_list_from_workbook`）。
 - `src/rules/` + `src/report/`：首批 3 条 FA list 规则 + JSON 报告；**`fa-qc-run` CLI 已可用**。
 - 规则字典映射：`docs/rule-dictionary-mapping.md`、`src/rules/registry.py`、`tests/fixtures/rule_dictionary_*.csv`
@@ -48,6 +49,7 @@
 - 项目结构说明：`docs/PROJECT_STRUCTURE.md`
 - 领域词典、架构、任务与进度文档
 - 质检 checklist：`docs/qc-checklist.md`
+- K1 checklist 与 Agent rules 映射：`docs/checklist-rule-mapping.md`；正式 Excel 为 `固定资产质检agent/资料库/K1 check list_rule_mapping.xlsx`，最新 sheet `规则映射v0.4编号补全版`。本轮已补齐此前 14 条“未登记字典编号”，包括 `AT-LLM-001`、`DP-BI-001`～`DP-BI-003`、`DP-POL-001`～`DP-POL-006`；本轮只补规则元数据和映射口径，不改变 runner、pipeline、severity 或 finding 判断逻辑。后续开发新 rule 前，先查该映射表确认 checklist 行、现有覆盖、执行条件和缺口。
 - 底稿字段映射：`docs/workpaper-fields.md`
 - 案例库底稿读取诊断（6 份小型底稿）
 - `src/ingest/`（含 `fa-qc-diagnose`）、`tests/ingest/`
@@ -914,3 +916,40 @@ UI 边界：
 1. UI v2 需要用真实底稿人工复核一轮，确认质检人员能按“高优先级问题 -> 人工判断 -> 执行台账”顺序阅读。
 2. 如果后续新增外部资料接入，例如 A3、CRA 标准模板，应同步更新 UI 的外部数据状态提示。
 3. 新增测试 LLM 口径继续保持辅助性质，不覆盖 `addition_sample_match` 等确定性规则。
+
+## 2026-06-24 UI ledger observation handoff
+
+This note records the stabilized UI/execution-observation scope from this round. It intentionally uses ASCII text to avoid Windows console encoding drift during commit preparation.
+
+Done:
+
+- Kept the architecture unchanged: no checkpoint_catalog, no standalone runtime_trace, and no UI inference layer.
+- Added bounded observation under execution_ledger.items, with only path, inputs, checks, and notes.
+- Added observation for the first 3 pilot rules: addition_sample_match, rollforward_fa_list_reconciliation, and lead_rollforward_tb_reconciliation.
+- Updated the UI ledger columns to show checkpoint, rule number, rule_ID, execution status, check method, dependent materials, key check summary, and finding/output count.
+- Renamed the summary card wording to clarify that the count is the current run's execution points from execution_ledger, not the full checklist population.
+- Sorted the ledger by audit procedure order: global/delivery, K.00, K.01, FA list, K.02.1, K.02.2, K.03.1, K.03.2, K.03.3, then LLM/other.
+- Restored the system diagnostics panel by adding the missing output-quality renderer.
+- Completed registry display metadata for K.03.2, K.03.3, and related LLM rules, with tests to prevent question-mark mojibake from returning.
+
+Frozen boundaries:
+
+- registry remains static rule metadata.
+- execution_ledger remains the only runtime truth source.
+- findings remain exception/result records only.
+- UI only joins, sorts, formats, and displays; it must not infer audit conclusions or execution status.
+
+Still open:
+
+1. Only 3 pilot rules currently have full observation.
+2. Full registry metadata for check method, dependent materials, and key check summary is not yet complete across all rules.
+3. The full-checklist-vs-current-run missing-execution explanation remains deferred.
+4. Different workpapers may produce different ledger counts because the ledger records the current run facts, not the full checklist population.
+
+Next recommended work:
+
+1. Extend observation rule-by-rule, starting with high-value deterministic rules in K.01, K.02.1, K.02.2, and K.03.
+2. Continue enriching registry metadata as static auditor-readable descriptions only; do not store current-run input facts there.
+3. If missing-execution visibility is needed later, prefer a narrow missing-rule list over a complex reconciliation panel.
+4. Keep registry display tests that block question-mark mojibake and lock key K.03 display names.
+

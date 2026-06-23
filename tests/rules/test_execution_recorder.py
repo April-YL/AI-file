@@ -68,3 +68,98 @@ def test_validate_execution_ledger_accepts_executed_issue_rule():
     ledger = recorder.to_ledger()
 
     validate_execution_ledger(ledger, [_issue("rule_with_issue")])
+
+
+
+def _observation() -> dict:
+    return {
+        "path": "primary",
+        "inputs": [
+            {
+                "source_sheet": "K.01 Agree SL to GL",
+                "section": "b4_table3_check_with_table1",
+                "field": "table3_check_values",
+                "row": 42,
+                "column": None,
+                "range": None,
+            }
+        ],
+        "checks": [
+            {
+                "name": "difference_vs_sad",
+                "left_label": "max_difference",
+                "left_value": "120000",
+                "operator": ">",
+                "right_label": "SAD",
+                "right_value": "50000",
+                "result": "triggered",
+            }
+        ],
+        "notes": ["Used primary table3 check values"],
+    }
+
+
+def test_execution_ledger_records_bounded_observation_without_changing_summary():
+    recorder = RuleExecutionRecorder()
+    recorder.record_executed("observed_rule", 1, observation=_observation())
+
+    ledger = recorder.to_ledger()
+    item = ledger["items"][0]
+
+    assert ledger["summary"]["total_observed_checkpoints"] == 1
+    assert ledger["summary"]["executed"] == 1
+    assert item["observation"]["path"] == "primary"
+    assert set(item["observation"]) == {"path", "inputs", "checks", "notes"}
+    assert set(item["observation"]["inputs"][0]) == {
+        "source_sheet",
+        "section",
+        "field",
+        "row",
+        "column",
+        "range",
+    }
+    assert set(item["observation"]["checks"][0]) == {
+        "name",
+        "left_label",
+        "left_value",
+        "operator",
+        "right_label",
+        "right_value",
+        "result",
+    }
+
+
+def test_execution_observation_rejects_arbitrary_top_level_keys():
+    recorder = RuleExecutionRecorder()
+    obs = _observation()
+    obs["free_form_log"] = []
+
+    with pytest.raises(ValueError, match="only path, inputs, checks, notes"):
+        recorder.record_executed("bad_observation", 0, observation=obs)
+
+
+def test_execution_observation_rejects_unbounded_inputs():
+    recorder = RuleExecutionRecorder()
+    obs = _observation()
+    obs["inputs"] = obs["inputs"] * 9
+
+    with pytest.raises(ValueError, match="inputs must be a bounded list"):
+        recorder.record_executed("bad_observation", 0, observation=obs)
+
+
+def test_execution_observation_rejects_nested_arbitrary_input_fields():
+    recorder = RuleExecutionRecorder()
+    obs = _observation()
+    obs["inputs"][0]["raw_row"] = {"full": "workpaper row"}
+
+    with pytest.raises(ValueError, match="input has unsupported fields"):
+        recorder.record_executed("bad_observation", 0, observation=obs)
+
+
+def test_execution_observation_rejects_free_form_long_notes():
+    recorder = RuleExecutionRecorder()
+    obs = _observation()
+    obs["notes"] = ["x" * 121]
+
+    with pytest.raises(ValueError, match="note is too long"):
+        recorder.record_executed("bad_observation", 0, observation=obs)

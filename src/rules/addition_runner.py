@@ -8,7 +8,10 @@ from ingest.addition_test_sheet import (
 from ingest.lead_sheet import LeadSheetDataset
 from ingest.records import FaListDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset
-from rules.addition_consistency import check_addition_sample_match
+from rules.addition_consistency import (
+    build_addition_sample_match_observation,
+    check_addition_sample_match,
+)
 from rules.addition_population_homogeneity import check_addition_population_homogeneity
 from rules.addition_required_fields import check_addition_required_fields
 from rules.addition_rollforward_reconciliation import check_addition_rollforward_reconciliation
@@ -76,6 +79,11 @@ def run_addition_rules(
             addition_test,
             addition_sample_output,
             execution_path=addition_execution_path,
+            observation=build_addition_sample_match_observation(
+                addition_test,
+                addition_sample_output,
+                execution_path=addition_execution_path,
+            ),
         )
     )
     if _is_addition_sampling_skipped(addition_execution_path):

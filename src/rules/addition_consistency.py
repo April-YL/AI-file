@@ -226,6 +226,75 @@ def check_addition_sample_match(
     return issues
 
 
+
+
+
+def build_addition_sample_match_observation(
+    addition_test: AdditionTestSheetDataset | None,
+    addition_sample_output: AdditionSampleOutputDataset | None,
+    execution_path: AdditionExecutionPathDataset | None = None,
+) -> dict[str, Any]:
+    preview = build_addition_consistency_preview(
+        addition_test,
+        addition_sample_output,
+        execution_path=execution_path,
+    )
+    inputs = []
+    if addition_sample_output is not None:
+        inputs.append(
+            {
+                "source_sheet": addition_sample_output.source_sheet,
+                "section": "selected_samples",
+                "field": "asset_id/original_value/sample_type",
+                "row": None,
+                "column": None,
+                "range": None,
+            }
+        )
+    if addition_test is not None:
+        inputs.append(
+            {
+                "source_sheet": addition_test.source_sheet,
+                "section": "tested_samples",
+                "field": "asset_id/original_value/sample_type",
+                "row": None,
+                "column": None,
+                "range": None,
+            }
+        )
+    if preview.execution_path in {"summary_waived", "test_sheet_waiver_note"}:
+        path = "skipped"
+        result = "not_applicable"
+    elif preview.selected_count or preview.tested_count:
+        path = "primary"
+        result = "passed" if preview.matched_count >= preview.selected_count else "triggered"
+    else:
+        path = "data_insufficient"
+        result = "data_insufficient"
+    notes = []
+    if preview.execution_path:
+        notes.append(f"execution_path={preview.execution_path}")
+    if preview.unmatched_selected:
+        notes.append(f"unmatched_selected={len(preview.unmatched_selected)}")
+    if preview.unmatched_tested:
+        notes.append(f"unmatched_tested={len(preview.unmatched_tested)}")
+    return {
+        "path": path,
+        "inputs": inputs[:8],
+        "checks": [
+            {
+                "name": "sample_match_count",
+                "left_label": "matched_count",
+                "left_value": str(preview.matched_count),
+                "operator": "=",
+                "right_label": "selected_count",
+                "right_value": str(preview.selected_count),
+                "result": result,
+            }
+        ],
+        "notes": notes[:5],
+    }
+
 def _match_selected_sample(
     sample: AdditionSampleRow,
     tested: list[AdditionTestedSampleRow],

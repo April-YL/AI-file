@@ -21,6 +21,7 @@ from rules.lead_movement_notes_required import check_lead_movement_notes_require
 from rules.lead_movement_rows_complete import check_lead_movement_rows_complete
 from rules.lead_required_fields import check_lead_required_fields
 from rules.lead_rollforward_tb_reconciliation import (
+    build_lead_rollforward_tb_reconciliation_observation,
     check_lead_rollforward_tb_reconciliation,
 )
 from rules.lead_tt_gam_range import check_lead_tt_gam_range
@@ -118,6 +119,10 @@ def run_lead_rules(
             check_lead_rollforward_tb_reconciliation,
             lead,
             rollforward,
+            observation=build_lead_rollforward_tb_reconciliation_observation(
+                lead,
+                rollforward,
+            ),
         )
     )
     return issues

@@ -29,6 +29,7 @@ from report.export_review_html import export_review_html
 from report.pipeline import run_input_qc
 from report.procedure_labels import group_findings_by_procedure
 from rules.delivery_completion import DeliveryCompletionContext
+from rules.registry import get_by_rule_id
 
 st.set_page_config(
     page_title="固定资产质检",
@@ -795,6 +796,30 @@ def _format_seconds(value: object) -> str:
     return f"{seconds:.1f} s"
 
 
+
+def _render_output_quality(data: dict) -> None:
+    summary = data.get("summary") or {}
+    ledger = _execution_ledger(data) or {}
+    ledger_summary = ledger.get("summary") or {}
+    timings = data.get("runtime_timings") or {}
+    llm_enabled = "启用" if timings.get("llm_enabled") else "未启用"
+    metrics = [
+        ("整体级别", summary.get("overall_severity", "未生成"), "来自 summary", "other"),
+        ("Findings", _finding_count(data), "不含 PASS", "warn"),
+        (
+            "本次记录执行点",
+            ledger_summary.get("total_observed_checkpoints", len(ledger.get("items") or [])),
+            "来自 execution_ledger",
+            "other",
+        ),
+        ("LLM", llm_enabled, "仅表示是否启用辅助复核", "other"),
+    ]
+    st.markdown("**输出质量**")
+    cols = st.columns(len(metrics))
+    for col, (label, value, note, tone) in zip(cols, metrics):
+        with col:
+            _render_card(label, value, note, tone)
+
 def _render_runtime_timings(data: dict) -> None:
     timings = data.get("runtime_timings") or {}
     if not timings:
@@ -1072,7 +1097,7 @@ _LEDGER_STATUS_LABELS = {
     "NOT_APPLICABLE": "暂不适用",
 }
 _LEDGER_STATUS_CARD_META = (
-    ("total_observed_checkpoints", "已记录质检点", "来自 execution_ledger", "other"),
+    ("total_observed_checkpoints", "本次记录执行点", "来自 execution_ledger", "other"),
     ("executed", "已执行", "仅表示规则流程已运行", "pass"),
     ("data_insufficient", "数据不足，未执行", "资料不足或未识别", "warn"),
     ("not_applicable", "暂不适用", "当前场景不适用", "other"),
@@ -1100,17 +1125,42 @@ _FORBIDDEN_EXECUTION_NOTE_TERMS = (
 
 _PROCEDURE_ORDER = (
     "全局 / 交付检查",
-    "汇总页 / PSP / AE",
-    "FA 清单",
     "K.00 Lead",
     "K.01 后推",
+    "FA list",
     "K.02.1 新增测试",
     "K.02.2 处置测试",
-    "K.03 折旧测试",
+    "K.03.1 SAP",
+    "K.03.2 折旧测试",
     "K.03.3 折旧政策复核",
     "LLM 辅助复核",
     "其他",
 )
+
+_PROCEDURE_LABELS = {
+    "GLOBAL": "全局 / 交付检查",
+    "SUMMARY": "全局 / 交付检查",
+    "K.00": "K.00 Lead",
+    "K.01": "K.01 后推",
+    "FA_LIST": "FA list",
+    "FA list": "FA list",
+    "FA 清单": "FA list",
+    "K.02": "K.02.1 新增测试",
+    "K.02.1": "K.02.1 新增测试",
+    "K.02.1 新增测试": "K.02.1 新增测试",
+    "K.02.2": "K.02.2 处置测试",
+    "K.02.2 处置测试": "K.02.2 处置测试",
+    "K.03.1": "K.03.1 SAP",
+    "K.03.1 SAP": "K.03.1 SAP",
+    "K.03": "K.03.2 折旧测试",
+    "K.03 折旧测试": "K.03.2 折旧测试",
+    "K.03.2": "K.03.2 折旧测试",
+    "K.03.2 折旧测试": "K.03.2 折旧测试",
+    "K.03.3": "K.03.3 折旧政策复核",
+    "K.03.3 折旧政策复核": "K.03.3 折旧政策复核",
+    "LLM 辅助复核": "LLM 辅助复核",
+    "其他": "其他",
+}
 
 # Display mapping only. It improves readability but never creates execution rows
 # and never infers whether a rule should have run.
@@ -1348,6 +1398,11 @@ def _display_execution_note(item: dict) -> str:
     return note
 
 
+
+def _procedure_display_name(procedure: object) -> str:
+    value = str(procedure or "").strip()
+    return _PROCEDURE_LABELS.get(value, value or "其他")
+
 def _rule_display(rule_id: str) -> tuple[str, str, str]:
     if rule_id in _RULE_DISPLAY:
         return _RULE_DISPLAY[rule_id]
@@ -1408,6 +1463,93 @@ def _render_priority_findings(data: dict) -> None:
             )
 
 
+
+_OBSERVATION_PATH_LABELS = {
+    "primary": "主路径",
+    "fallback": "兜底路径",
+    "alternative": "替代路径",
+    "skipped": "已跳过",
+    "data_insufficient": "数据不足",
+    "not_applicable": "暂不适用",
+}
+
+_OBSERVATION_CHECK_RESULT_LABELS = {
+    "passed": "通过",
+    "triggered": "触发异常",
+    "not_applicable": "不适用",
+    "data_insufficient": "数据不足",
+}
+
+
+def _observation(item: dict) -> dict:
+    observation = item.get("observation")
+    return observation if isinstance(observation, dict) else {}
+
+
+def _display_observation_path(item: dict) -> str:
+    path = str(_observation(item).get("path") or "").strip()
+    return _OBSERVATION_PATH_LABELS.get(path, path or "未记录")
+
+
+def _display_observation_inputs(item: dict) -> str:
+    inputs = _observation(item).get("inputs") or []
+    if not isinstance(inputs, list) or not inputs:
+        return "未记录"
+    parts: list[str] = []
+    for raw in inputs:
+        if not isinstance(raw, dict):
+            continue
+        source = str(raw.get("source_sheet") or "").strip()
+        section = str(raw.get("section") or "").strip()
+        field = str(raw.get("field") or "").strip()
+        row = raw.get("row")
+        column = raw.get("column")
+        range_ref = str(raw.get("range") or "").strip()
+        item_parts = [part for part in (source, section, field) if part]
+        if row:
+            item_parts.append(f"row {row}")
+        if column:
+            item_parts.append(f"col {column}")
+        if range_ref:
+            item_parts.append(range_ref)
+        if item_parts:
+            parts.append(" / ".join(item_parts))
+    return "；".join(parts) if parts else "未记录"
+
+
+
+def _format_check_side(label: object, value: object) -> str:
+    label_text = str(label or "").strip()
+    value_text = str(value or "").strip()
+    if label_text and value_text:
+        return f"{label_text}={value_text}"
+    return label_text or value_text
+
+
+def _display_observation_checks(item: dict) -> str:
+    checks = _observation(item).get("checks") or []
+    if not isinstance(checks, list) or not checks:
+        return "未记录"
+    parts: list[str] = []
+    for raw in checks:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip()
+        left = _format_check_side(raw.get("left_label"), raw.get("left_value"))
+        operator = str(raw.get("operator") or "").strip()
+        right = _format_check_side(raw.get("right_label"), raw.get("right_value"))
+        result_key = str(raw.get("result") or "").strip()
+        result = _OBSERVATION_CHECK_RESULT_LABELS.get(result_key, result_key)
+        comparison = " ".join(part for part in (left, operator, right) if part)
+        if name and comparison:
+            parts.append(f"{name}: {comparison} -> {result}")
+        elif comparison:
+            parts.append(f"{comparison} -> {result}")
+        elif name:
+            parts.append(f"{name} -> {result}")
+    return "；".join(parts) if parts else "未记录"
+
+
 def _ledger_row(item: dict) -> dict:
     rule_id = str(item.get("rule_id") or "")
     status = _ledger_status(item)
@@ -1416,41 +1558,51 @@ def _ledger_row(item: dict) -> dict:
         finding_count_int = int(finding_count or 0)
     except (TypeError, ValueError):
         finding_count_int = 0
-    procedure, checkpoint, method = _rule_display(rule_id)
+    spec = get_by_rule_id(rule_id)
+    if spec is not None:
+        procedure = _procedure_display_name(spec.procedure_code)
+        checkpoint = spec.rule_name or spec.qc_checkpoint or rule_id
+        rule_code = spec.dict_code
+    else:
+        procedure, checkpoint, _method = _rule_display(rule_id)
+        procedure = _procedure_display_name(procedure)
+        checkpoint = checkpoint or "未映射规则"
+        rule_code = "未映射规则"
     return {
         "程序": procedure,
         "质检点": checkpoint,
-        "检查方式": method,
+        "规则编号": rule_code,
+        "rule_ID": rule_id,
         "执行状态": _display_ledger_status(status),
-        "流程记录": _display_execution_note(item),
-        "异常记录": finding_count_int,
-        "规则编号": rule_id,
+        "检查方式": _display_observation_path(item),
+        "依赖资料": _display_observation_inputs(item),
+        "关键检查摘要": _display_observation_checks(item),
+        "规则输出记录数": finding_count_int,
         "_status": status,
         "_finding_count": finding_count_int,
     }
 
 
-def _ledger_sort_key(row: dict) -> tuple[int, int, str, str]:
+def _ledger_sort_key(row: dict) -> tuple[int, str, str, str]:
     # ui_sorting_policy:
     #   scope: presentation_only
+    #   sort by audit workpaper procedure before status or findings
     #   must_not_affect:
     #     - execution_ledger
     #     - rule_engine
     #     - finding_model
     #     - control_plane
-    status = row.get("_status")
-    finding_count = int(row.get("_finding_count") or 0)
-    if status == "EXECUTED" and finding_count > 0:
-        status_key = "EXECUTED_WITH_FINDINGS"
-    elif status == "EXECUTED":
-        status_key = "EXECUTED_NO_FINDINGS"
-    else:
-        status_key = status if status in _LEDGER_STATUS_ORDER else "UNKNOWN"
+    procedure = _procedure_display_name(row.get("程序"))
+    procedure_index = (
+        _PROCEDURE_ORDER.index(procedure)
+        if procedure in _PROCEDURE_ORDER
+        else len(_PROCEDURE_ORDER)
+    )
     return (
-        _LEDGER_STATUS_ORDER.get(status_key, _LEDGER_STATUS_ORDER["UNKNOWN"]),
-        _PROCEDURE_ORDER.index(row["程序"]) if row["程序"] in _PROCEDURE_ORDER else len(_PROCEDURE_ORDER),
-        str(row.get("质检点") or ""),
+        procedure_index,
         str(row.get("规则编号") or ""),
+        str(row.get("质检点") or ""),
+        str(row.get("rule_ID") or ""),
     )
 
 
@@ -1477,7 +1629,7 @@ def _render_execution_ledger_table(data: dict) -> None:
         return
     rows = sorted((_ledger_row(item) for item in items), key=_ledger_sort_key)
     grouped = _group_ledger_rows(rows)
-    visible_columns = ["质检点", "检查方式", "执行状态", "流程记录", "异常记录", "规则编号"]
+    visible_columns = ["质检点", "规则编号", "rule_ID", "执行状态", "检查方式", "依赖资料", "关键检查摘要", "规则输出记录数"]
     for program, group_rows in grouped.items():
         executed = sum(1 for row in group_rows if row["_status"] == "EXECUTED")
         data_insufficient = sum(1 for row in group_rows if row["_status"] == "DATA_INSUFFICIENT")
@@ -1489,7 +1641,7 @@ def _render_execution_ledger_table(data: dict) -> None:
         ):
             st.dataframe(
                 [
-                    {column: row[column] for column in visible_columns}
+                    {column: row.get(column, "") for column in visible_columns}
                     for row in group_rows
                 ],
                 use_container_width=True,
