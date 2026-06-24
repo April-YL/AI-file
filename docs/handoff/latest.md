@@ -9,6 +9,17 @@
 - 已修复 `MT-002 / special_movement_identification` 与 `GL-003 / lead_prior_year_reconciliation` 复核意见中的疑问口径；当前说明明确这些点的 runner 纳入状态、人工复核边界和与既有规则的重叠关系。
 - 本轮只更新 K1 mapping Excel 与说明文档，不改变 `src/rules/registry.py`、runner、execution_ledger、severity 或 finding 判断逻辑。
 
+## 2026-06-24 UI 分类口径 v1
+
+- 已完成 `fa-qc-ui` Findings 分类收敛：UI 展示分类只影响页面优先级，不改变 `PASS/WARN/FAIL/NEED_REVIEW`、JSON 报告、registry、execution_ledger 或规则判断。
+- 当前 UI 三类为：`高优先级问题`、`需人工处理`、`其他提示`。
+- `FA_LIST` findings 默认归入 `其他提示`，避免 FA list 明细字段、金额、使用寿命、残值率等高频问题淹没 Lead/K.01/PSP 等核心事项。
+- mapping / registry 中 `qc_checkpoint` 以 `N-` 或 `No-` 开头的项目默认归入 `其他提示`；后续如需细化，应优先按 `K1 check list_rule_mapping.xlsx` 的系统质检点列校正，而不是靠 UI 关键词猜测。
+- K.03.2 by-item 折旧测试问题已收敛：`k03_tod_by_item_*` 中超过 SAD 的单项/总体差异不再自动进入 `高优先级问题`；`NEED_REVIEW` 的 by-item 项仍进入 `需人工处理`。
+- SAD 是明显微小错报门槛，不等同重大差异阈值；UI 不再仅因 “SAD / difference / amount / te” 等泛化关键词把 finding 提升为高优先级。若未来要判断是否达到 TT 或影响整体结论，应由规则输出结构化字段，不在 UI 中猜测。
+- 高优先级当前采用明确 rule_id 白名单，主要保留 PSP、Lead/K.01、样本池/后推等核心勾稽和程序范围事项。
+- 已验证：`tests/report/test_ui_priority_classification.py -q` 5 passed；`tests/report/test_ui_priority_classification.py tests/report/test_workbook_pipeline.py -q` 17 passed。用户已用实际 UI 结果复测，确认大面积错分已消失。
+
 ## 固定资料入口
 
 以后查标准底稿、SOP 和程序执行方法，不再靠全仓搜索，统一先看这里：

@@ -403,6 +403,20 @@ def _has_any_keyword(text: str, keywords: tuple[str, ...]) -> bool:
     return any(k.lower() in text for k in keywords)
 
 
+def _is_prompt_only_checkpoint(issue: dict) -> bool:
+    """Mapping 中 N/No 类质检点仅作为 UI 提示项展示。"""
+    checkpoint = str(issue.get("qc_checkpoint") or "").strip().lower()
+    return checkpoint.startswith("n-") or checkpoint.startswith("no-")
+
+
+def _is_fa_list_issue(issue: dict) -> bool:
+    return str(issue.get("procedure_code") or "").upper() == "FA_LIST"
+
+
+def _is_by_item_issue(rule_id: str) -> bool:
+    return rule_id.startswith(_BY_ITEM_RULE_PREFIX_V2)
+
+
 def _classify_finding_for_ui(issue: dict) -> str:
     """Return a UI-only priority bucket without mutating the finding."""
     text = _issue_search_text(issue)
@@ -1038,6 +1052,7 @@ _UI_FINDING_BUCKETS_V2: tuple[tuple[str, str, str, str], ...] = (
 )
 
 _HIGH_PRIORITY_RULE_IDS_V2 = {
+    "psp_completion",
     "materiality_consistency",
     "risk_threshold_consistency",
     "lead_check_with_a3_row",
@@ -1050,30 +1065,8 @@ _HIGH_PRIORITY_RULE_IDS_V2 = {
     "disposal_rollforward_reconciliation",
     "disposal_summary_reconciliation",
     "disposal_sample_pool_amount_match",
-    "k03_tod_by_item_difference_over_sad",
-    "k03_tod_by_item_conclusion_missing",
-    "k03_tod_by_item_total_difference_over_sad",
-    "k03_tod_by_item_rollforward_depreciation",
     "k03_policy_change_without_explanation",
-    "k03_policy_fa_life_out_of_range",
-    "k03_policy_fa_salvage_mismatch",
 }
-
-_HIGH_PRIORITY_KEYWORDS_V2 = (
-    "materiality",
-    "threshold",
-    "sad",
-    "te",
-    "reconciliation",
-    "tb",
-    "a3",
-    "金额差异超过",
-    "核心勾稽",
-    "勾稽不一致",
-    "跨期",
-    "资本化日期",
-    "折旧政策明显不一致",
-)
 
 _MANUAL_KEYWORDS_V2 = (
     "semantic",
@@ -1089,6 +1082,7 @@ _MANUAL_KEYWORDS_V2 = (
     "证据充分性",
     "cra",
 )
+_BY_ITEM_RULE_PREFIX_V2 = "k03_tod_by_item_"
 
 _LEDGER_ALLOWED_STATUSES = {"EXECUTED", "DATA_INSUFFICIENT", "NOT_APPLICABLE"}
 _LEDGER_STATUS_LABELS = {
@@ -1288,11 +1282,10 @@ def _classify_finding_bucket_v2(issue: dict) -> str:
     review_source = str(issue.get("review_source") or "").lower()
     llm_review_type = issue.get("llm_review_type")
     rule_id = str(issue.get("rule_id") or "")
-    if severity == "FAIL" and (
-        rule_id in _HIGH_PRIORITY_RULE_IDS_V2
-        or _has_any_keyword(text, _HIGH_PRIORITY_KEYWORDS_V2)
-    ):
-        return "high"
+    if _is_fa_list_issue(issue) or _is_prompt_only_checkpoint(issue):
+        return "other"
+    if _is_by_item_issue(rule_id):
+        return "manual" if severity == "NEED_REVIEW" or llm_review_type else "other"
     if (
         severity == "NEED_REVIEW"
         or llm_review_type
@@ -1300,6 +1293,8 @@ def _classify_finding_bucket_v2(issue: dict) -> str:
         or _has_any_keyword(text, _MANUAL_KEYWORDS_V2)
     ):
         return "manual"
+    if severity == "FAIL" and rule_id in _HIGH_PRIORITY_RULE_IDS_V2:
+        return "high"
     return "other"
 
 
