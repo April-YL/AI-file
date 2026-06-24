@@ -1,0 +1,360 @@
+{
+  "schema_version": "case_workbook_structured_summary.v1",
+  "generated_on": "2026-06-24",
+  "source_case_dir": "E:\\AI file\\固定资产质检agent\\案例库",
+  "purpose": "固定资产质检 Agent 四张完整底稿的最小结构化样本库摘要，用于后续 bug 修复时按模块选择回归案例。",
+  "data_safety": {
+    "contains_asset_level_detail": false,
+    "contains_personal_or_invoice_detail": false,
+    "note": "仅保留工作簿结构、sheet 识别、模块计数、勾稽状态和测试用途，不保存资产明细行。"
+  },
+  "how_to_use": [
+    "修改 summary/PSP 识别或规则时，优先跑 B、G、H、J 的 summary 相关小回归。",
+    "修改 Lead/K.00 规则时，优先跑 B、G、H、J 的 Lead 识别和规则小回归。",
+    "修改 K.01 后推识别或勾稽时，优先跑 B、G、H、J 的 rollforward/reconciliation 小回归。",
+    "修改新增规则时，优先跑 B、G、H、J，其中 G/H/J 覆盖更复杂新增场景。",
+    "修改处置规则时，优先跑 J；G 可作为有处置清单但缺少处置测试 sheet 的场景，H 可作为处置测试有豁免说明的场景。",
+    "修改 report/export/UI/execution_ledger 时，至少抽 B 或 J 跑整本流水线，分别覆盖较小 SWP 样本和较大完整样本。"
+  ],
+  "cases": [
+    {
+      "case_id": "B",
+      "file": "K1 SWP 固定资产 20251231 B医疗公司.xlsx",
+      "size_mb": 0.83,
+      "sheet_count": 19,
+      "profile": "标准 SWP 小型完整底稿，包含汇总、Lead、K.01、FA list、新增测试、新增清单、新增选样输出、处置测试、处置清单、K.03。",
+      "selected_sheets": {
+        "summary": "汇总 ",
+        "lead": "K.00 Lead Sheet",
+        "rollforward": "K.01 Agree SL to GL",
+        "fa_list": "K.01.1a FA list",
+        "addition_list": "新增清单",
+        "addition_test": "K.02.1 新增测试 ",
+        "addition_sample_output": "K.02.1a 新增选样输出",
+        "disposal_list": "处置清单",
+        "disposal_test": "K.02.2 处置测试",
+        "disposal_sample_output": null,
+        "k03_sheets": [
+          "K1_400折旧测试",
+          "K.03.1 SAP",
+          "K.03.2 折旧测试TOD",
+          "K.03.3 折旧政策复核"
+        ]
+      },
+      "sheet_dimensions": [
+        {"name": "Comments【归档前删除】", "rows": 5, "cols": 6},
+        {"name": "汇总 ", "rows": 22, "cols": 9},
+        {"name": "K.00 Lead Sheet", "rows": 180, "cols": 38},
+        {"name": "K.01 Agree SL to GL", "rows": 192, "cols": 110},
+        {"name": "K.01.1a FA list", "rows": 367, "cols": 39},
+        {"name": "K1_400折旧测试", "rows": 497, "cols": 640},
+        {"name": "K.02.1 新增测试 ", "rows": 56, "cols": 20},
+        {"name": "新增清单", "rows": 25, "cols": 12},
+        {"name": "K.02.1a 新增选样输出", "rows": 101, "cols": 15},
+        {"name": "K.02.2 处置测试", "rows": 46, "cols": 23},
+        {"name": "处置清单", "rows": 25, "cols": 29},
+        {"name": "K.03.1 SAP", "rows": 25, "cols": 11},
+        {"name": "K.03.2 折旧测试TOD", "rows": 42, "cols": 21},
+        {"name": "K.03.3 折旧政策复核", "rows": 29, "cols": 24}
+      ],
+      "recognized_sheets_by_kind": {
+        "summary": ["汇总 "],
+        "lead": ["K.00 Lead Sheet"],
+        "rollforward": ["K.01 Agree SL to GL"],
+        "fa_list": ["K.01.1a FA list"],
+        "addition_test": ["K.02.1 新增测试 "],
+        "addition_list": ["新增清单"],
+        "addition_sample_output": ["K.02.1a 新增选样输出"],
+        "disposal_test": ["K.02.2 处置测试"],
+        "disposal_list": ["处置清单"],
+        "sap": ["K.03.1 SAP"],
+        "depreciation_tod": ["K1_400折旧测试", "K.03.2 折旧测试TOD"],
+        "depreciation_policy": ["K.03.3 折旧政策复核"]
+      },
+      "key_counts": {
+        "summary_programs": 12,
+        "lead_cra_rows": 5,
+        "lead_movement_rows": 4,
+        "lead_expectations": 0,
+        "fa_records": 314,
+        "addition_records": 20,
+        "disposal_records": 3,
+        "k03_sheet_count": 4,
+        "reconciliation_count": 5
+      },
+      "mapped_field_groups": {
+        "fa_list": ["asset_category", "asset_id", "asset_name", "start_date", "useful_life_months", "salvage_rate", "original_value", "accumulated_depreciation", "impairment_provision", "net_value", "fully_depreciated_flag"],
+        "addition_list": ["asset_category", "asset_id", "asset_name", "start_date", "useful_life_months", "salvage_rate", "accumulated_depreciation", "current_depreciation", "original_value", "addition_method"],
+        "disposal_list": ["asset_category", "asset_id", "asset_name", "start_date", "disposal_date", "useful_life_months", "salvage_rate", "accumulated_depreciation", "impairment_provision", "net_value"]
+      },
+      "reconciliation_baseline": [
+        {"link_id": "fa_list_rollforward_net", "status": "mismatch"},
+        {"link_id": "fa_list_rollforward_original", "status": "mismatch"},
+        {"link_id": "fa_list_rollforward_accum_dep", "status": "mismatch"},
+        {"link_id": "addition_list_rollforward", "status": "match"},
+        {"link_id": "disposal_list_rollforward", "status": "need_review"}
+      ],
+      "module_notes": {
+        "addition_test": ["addition_test_amounts_detected:5", "addition_test_samples_detected:1", "addition_test_modules_detected:6"],
+        "disposal_test": ["disposal_test_amounts_detected:4", "disposal_test_samples_detected:3", "disposal_test_modules_detected:6", "disposal_test_not_usable_for_deterministic_rules"]
+      },
+      "best_for_tests": ["summary_psp", "lead_rules", "rollforward_ingest", "addition_package", "addition_reconciliation", "disposal_package", "k03_policy", "report_annotation_small"],
+      "known_risk_points": [
+        "FA list 与 K.01 后推存在多项不一致，适合测试勾稽 finding 是否稳定。",
+        "处置测试 sheet 已识别，但当前标记为不适合确定性规则，适合测试 NEED_REVIEW/跳过逻辑。",
+        "K1_400折旧测试列数很大，适合观察 K.03 识别误入或性能影响。"
+      ]
+    },
+    {
+      "case_id": "G",
+      "file": "K1 SWP 固定资产 20251231 G科技.xlsx",
+      "size_mb": 1.36,
+      "sheet_count": 15,
+      "profile": "标准 SWP 中型底稿，FA list 和折旧测试明细较多；新增清单与 K.01 勾稽存在明显差异；无处置测试 sheet。",
+      "selected_sheets": {
+        "summary": "汇总 ",
+        "lead": "K.00 Lead Sheet",
+        "rollforward": "K.01 Agree SL to GL",
+        "fa_list": "K.01.1a FA list",
+        "addition_list": "K.02.1b 新增清单",
+        "addition_test": "K.02.1 新增测试 ",
+        "addition_sample_output": "K.02.1a新增选样输出",
+        "disposal_list": "处置清单",
+        "disposal_test": null,
+        "disposal_sample_output": null,
+        "k03_sheets": ["K.03.3 折旧政策复核", "K.03.2 折旧测试TOD-by item测试"]
+      },
+      "sheet_dimensions": [
+        {"name": "汇总 ", "rows": 22, "cols": 9},
+        {"name": "K.00 Lead Sheet", "rows": 177, "cols": 38},
+        {"name": "K.01 Agree SL to GL", "rows": 204, "cols": 110},
+        {"name": "K.01.1a FA list", "rows": 2151, "cols": 43},
+        {"name": "K.02.1b 新增清单", "rows": 58, "cols": 29},
+        {"name": "K.02.1 新增测试 ", "rows": 55, "cols": 20},
+        {"name": "K.02.1a新增选样输出", "rows": 102, "cols": 15},
+        {"name": "处置清单", "rows": 13, "cols": 12},
+        {"name": "K.03.3 折旧政策复核", "rows": 71, "cols": 24},
+        {"name": "K.03.2 折旧测试TOD-by item测试", "rows": 2151, "cols": 43}
+      ],
+      "recognized_sheets_by_kind": {
+        "summary": ["汇总 "],
+        "lead": ["K.00 Lead Sheet"],
+        "rollforward": ["K.01 Agree SL to GL", "K.03.2 折旧测试TOD-by item测试"],
+        "fa_list": ["K.01.1a FA list"],
+        "addition_test": ["K.02.1 新增测试 "],
+        "addition_list": ["K.02.1b 新增清单"],
+        "addition_sample_output": ["K.02.1a新增选样输出"],
+        "disposal_list": ["处置清单"],
+        "depreciation_policy": ["K.03.3 折旧政策复核"]
+      },
+      "key_counts": {
+        "summary_programs": 12,
+        "lead_cra_rows": 5,
+        "lead_movement_rows": 4,
+        "lead_expectations": 0,
+        "fa_records": 2104,
+        "addition_records": 40,
+        "disposal_records": 10,
+        "k03_sheet_count": 2,
+        "reconciliation_count": 5
+      },
+      "mapped_field_groups": {
+        "fa_list": ["asset_category", "asset_id", "asset_name", "start_date", "useful_life_months", "salvage_rate", "original_value", "accumulated_depreciation", "impairment_provision", "net_value", "fully_depreciated_flag"],
+        "addition_list": ["asset_category", "asset_id", "asset_name", "start_date", "useful_life_months", "salvage_rate", "original_value", "addition_method", "current_depreciation"],
+        "disposal_list": ["asset_category", "asset_id", "asset_name", "original_value", "accumulated_depreciation", "impairment_provision", "net_value", "disposal_date", "disposal_method", "useful_life_months", "salvage_rate"]
+      },
+      "reconciliation_baseline": [
+        {"link_id": "fa_list_rollforward_net", "status": "match"},
+        {"link_id": "fa_list_rollforward_original", "status": "mismatch"},
+        {"link_id": "fa_list_rollforward_accum_dep", "status": "mismatch"},
+        {"link_id": "addition_list_rollforward", "status": "mismatch"},
+        {"link_id": "disposal_list_rollforward", "status": "need_review"}
+      ],
+      "module_notes": {
+        "addition_test": ["addition_test_amounts_detected:5", "addition_test_samples_detected:2", "addition_test_modules_detected:6"],
+        "disposal_test": []
+      },
+      "best_for_tests": ["summary_psp", "lead_rules", "rollforward_ingest", "addition_reconciliation_mismatch", "disposal_list_without_test", "k03_large_detail", "ui_ledger_missing_or_not_applicable"],
+      "known_risk_points": [
+        "K.03.2 折旧测试TOD-by item测试当前也被结构识别列入 rollforward 候选，适合防止 sheet 分类漂移。",
+        "新增清单与 K.01 后推本期增加差异很大，适合测试新增勾稽 WARN/FAIL 是否稳定。",
+        "无处置测试 sheet，但有处置清单，适合测试不适用/数据不足展示。"
+      ]
+    },
+    {
+      "case_id": "H",
+      "file": "K1 固定资产 20251231 H调温器有限公司.xlsx",
+      "size_mb": 1.11,
+      "sheet_count": 13,
+      "profile": "非 SWP 命名的完整底稿，新增场景含在建工程转入；当前 FA list 选择存在风险，处置测试带豁免说明。",
+      "selected_sheets": {
+        "summary": "汇总 ",
+        "lead": "K.00 Lead Sheet",
+        "rollforward": "K.01 Agree SL to GL",
+        "fa_list": "处置清单",
+        "addition_list": "新增清单",
+        "addition_test": "K.02.1 新增测试 ",
+        "addition_sample_output": null,
+        "disposal_list": null,
+        "disposal_test": "K.02.2 处置测试",
+        "disposal_sample_output": null,
+        "k03_sheets": ["K.03.2 折旧测试", "K.03.3 折旧政策复核"]
+      },
+      "sheet_dimensions": [
+        {"name": "Comments【归档前删除】", "rows": 8, "cols": 6},
+        {"name": "汇总 ", "rows": 22, "cols": 9},
+        {"name": "K.00 Lead Sheet", "rows": 172, "cols": 38},
+        {"name": "K.01 Agree SL to GL", "rows": 189, "cols": 104},
+        {"name": "FA list", "rows": 1425, "cols": 43},
+        {"name": "K.02.1 新增测试 ", "rows": 56, "cols": 20},
+        {"name": "K.02.1 新增-在建工程转入", "rows": 56, "cols": 20},
+        {"name": "新增清单", "rows": 54, "cols": 53},
+        {"name": "K.02.2 处置测试", "rows": 46, "cols": 23},
+        {"name": "处置清单", "rows": 166, "cols": 28},
+        {"name": "K.03.2 折旧测试", "rows": 1438, "cols": 34},
+        {"name": "K.03.3 折旧政策复核", "rows": 25, "cols": 24}
+      ],
+      "recognized_sheets_by_kind": {
+        "summary": ["汇总 "],
+        "lead": ["K.00 Lead Sheet"],
+        "rollforward": ["K.01 Agree SL to GL", "K.03.2 折旧测试"],
+        "addition_list": ["FA list", "新增清单"],
+        "addition_test": ["K.02.1 新增测试 ", "K.02.1 新增-在建工程转入"],
+        "disposal_test": ["K.02.2 处置测试"],
+        "fa_list": ["处置清单"],
+        "depreciation_policy": ["K.03.3 折旧政策复核"]
+      },
+      "key_counts": {
+        "summary_programs": 12,
+        "lead_cra_rows": 5,
+        "lead_movement_rows": 4,
+        "lead_expectations": 0,
+        "fa_records": 157,
+        "addition_records": 47,
+        "disposal_records": 0,
+        "k03_sheet_count": 2,
+        "reconciliation_count": 5
+      },
+      "mapped_field_groups": {
+        "fa_list": ["asset_category", "asset_id", "asset_name", "start_date", "original_value", "accumulated_depreciation", "useful_life_months"],
+        "addition_list": ["useful_life_months", "start_date", "asset_id", "asset_name", "asset_category", "addition_method", "original_value", "salvage_rate", "impairment_provision", "accumulated_depreciation", "current_depreciation"],
+        "disposal_list": []
+      },
+      "reconciliation_baseline": [
+        {"link_id": "fa_list_rollforward_net", "status": "missing_left"},
+        {"link_id": "fa_list_rollforward_original", "status": "mismatch"},
+        {"link_id": "fa_list_rollforward_accum_dep", "status": "mismatch"},
+        {"link_id": "addition_list_rollforward", "status": "match"},
+        {"link_id": "disposal_list_rollforward", "status": "not_applicable"}
+      ],
+      "module_notes": {
+        "addition_test": ["addition_test_waiver_note_detected", "addition_test_amounts_detected:5", "addition_test_modules_detected:6"],
+        "disposal_test": ["disposal_test_waiver_note_detected", "disposal_test_amounts_detected:4", "disposal_test_samples_detected:3", "disposal_test_modules_detected:6"]
+      },
+      "best_for_tests": ["non_swp_workbook_routing", "addition_waiver", "addition_in_progress_transfer", "fa_list_misclassification_guard", "disposal_waiver", "k03_sheet_classification"],
+      "known_risk_points": [
+        "当前 selected.fa_list 为“处置清单”，而实际存在“FA list” sheet，适合测试 sheet 选择优先级和读取层 bug。",
+        "FA list 被识别到 addition_list 候选，适合防止读取层把台账误当新增清单。",
+        "处置测试存在豁免说明，但 disposal_list 未选中，适合测试不执行/豁免场景。"
+      ]
+    },
+    {
+      "case_id": "J",
+      "file": "K1 固定资产 20251231 J有限公司.xlsx",
+      "size_mb": 3.92,
+      "sheet_count": 19,
+      "profile": "较大完整底稿，包含新增和处置完整测试、选样输出、多张 K.03/SAP/折旧相关表；适合作为端到端稳定性样本。",
+      "selected_sheets": {
+        "summary": "汇总",
+        "lead": "K.00 Lead Sheet",
+        "rollforward": "K.01 Agree SL to GL",
+        "fa_list": "FA list",
+        "addition_list": "新增清单",
+        "addition_test": "K.02.1 新增测试",
+        "addition_sample_output": "K.02.1a 新增选样输出",
+        "disposal_list": "处置清单",
+        "disposal_test": "K.02.2 处置测试 ",
+        "disposal_sample_output": "K.02.2a 处置选样输出",
+        "k03_sheets": ["K.03.1 SAP-中精确度", "K.03.1 SAP-高精确度", "K.03.2 折旧测试TOD-by item测试", "K.03.3 折旧政策复核", "K.03.2 折旧测试TOD-抽样", "K.03.2a 折旧选样输出"]
+      },
+      "sheet_dimensions": [
+        {"name": "For Disclosure", "rows": 34, "cols": 45},
+        {"name": "汇总", "rows": 21, "cols": 11},
+        {"name": "K.00 Lead Sheet", "rows": 95, "cols": 31},
+        {"name": "K.01 Agree SL to GL", "rows": 202, "cols": 111},
+        {"name": "FA list", "rows": 11402, "cols": 25},
+        {"name": "K.02.1a 新增选样输出", "rows": 109, "cols": 17},
+        {"name": "K.02.1 新增测试", "rows": 90, "cols": 20},
+        {"name": "新增清单", "rows": 1019, "cols": 16},
+        {"name": "处置清单", "rows": 53, "cols": 20},
+        {"name": "K.02.2 处置测试 ", "rows": 86, "cols": 23},
+        {"name": "K.02.2a 处置选样输出", "rows": 106, "cols": 15},
+        {"name": "K.03.1 SAP-中精确度", "rows": 129, "cols": 66},
+        {"name": "K.03.1 SAP-高精确度", "rows": 121, "cols": 44},
+        {"name": "K.03.2 折旧测试TOD-by item测试", "rows": 11457, "cols": 22},
+        {"name": "K.03.3 折旧政策复核", "rows": 51, "cols": 16},
+        {"name": "K.03.2 折旧测试TOD-抽样", "rows": 75, "cols": 36},
+        {"name": "K.03.2a 折旧选样输出", "rows": 116, "cols": 15},
+        {"name": "本期计提", "rows": 11447, "cols": 11}
+      ],
+      "recognized_sheets_by_kind": {
+        "summary": ["汇总"],
+        "lead": ["K.00 Lead Sheet"],
+        "rollforward": ["For Disclosure", "K.01 Agree SL to GL", "K.03.2 折旧测试TOD-by item测试", "本期计提"],
+        "fa_list": ["FA list"],
+        "addition_sample_output": ["K.02.1a 新增选样输出"],
+        "addition_test": ["K.02.1 新增测试"],
+        "addition_list": ["新增清单"],
+        "disposal_list": ["处置清单"],
+        "disposal_test": ["K.02.2 处置测试 "],
+        "disposal_sample_output": ["K.02.2a 处置选样输出"],
+        "depreciation_tod": ["K.03.1 SAP-中精确度", "K.03.2 折旧测试TOD-抽样"],
+        "depreciation_tod_sample": ["K.03.1 SAP-高精确度", "K.03.2a 折旧选样输出"],
+        "depreciation_policy": ["K.03.3 折旧政策复核"]
+      },
+      "key_counts": {
+        "summary_programs": 16,
+        "lead_cra_rows": 5,
+        "lead_movement_rows": 4,
+        "lead_expectations": 0,
+        "fa_records": 11394,
+        "addition_records": 1006,
+        "disposal_records": 42,
+        "k03_sheet_count": 6,
+        "reconciliation_count": 5
+      },
+      "mapped_field_groups": {
+        "fa_list": ["asset_category", "asset_id", "asset_name", "start_date", "useful_life_months", "salvage_rate", "original_value", "accumulated_depreciation", "impairment_provision", "net_value", "fully_depreciated_flag", "fully_depreciated_date"],
+        "addition_list": ["asset_category", "asset_id", "asset_name", "start_date", "useful_life_months", "salvage_rate", "original_value", "addition_method"],
+        "disposal_list": ["asset_category", "asset_id", "asset_name", "original_value", "accumulated_depreciation", "impairment_provision", "net_value", "disposal_date", "disposal_method", "start_date", "useful_life_months"]
+      },
+      "reconciliation_baseline": [
+        {"link_id": "fa_list_rollforward_net", "status": "match"},
+        {"link_id": "fa_list_rollforward_original", "status": "match"},
+        {"link_id": "fa_list_rollforward_accum_dep", "status": "match"},
+        {"link_id": "addition_list_rollforward", "status": "match"},
+        {"link_id": "disposal_list_rollforward", "status": "need_review"}
+      ],
+      "module_notes": {
+        "addition_test": ["addition_test_amounts_detected:5", "addition_test_samples_detected:1", "addition_test_modules_detected:6"],
+        "disposal_test": ["disposal_test_amounts_detected:4", "disposal_test_samples_detected:1", "disposal_test_modules_detected:6"]
+      },
+      "best_for_tests": ["full_pipeline_large", "addition_full_execution", "disposal_full_execution", "sample_output_parsing", "k03_multi_sheet", "report_annotation_large", "performance_smoke"],
+      "known_risk_points": [
+        "多张非 K.01 sheet 被列入 rollforward 候选，适合测试候选排序和最终选择是否稳定。",
+        "FA list、新增清单、处置清单记录量较大，适合测试性能和报告去重。",
+        "新增和处置均有测试 sheet 与选样输出，适合作为 K.02 正向完整案例。"
+      ]
+    }
+  ],
+  "recommended_minimal_regression_sets": {
+    "ingest_summary_psp": ["B", "G", "H", "J"],
+    "lead_k00": ["B", "G", "H", "J"],
+    "rollforward_k01": ["B", "G", "H", "J"],
+    "addition_k02_1": ["B", "G", "H", "J"],
+    "disposal_k02_2": ["G", "H", "J"],
+    "k03": ["B", "G", "H", "J"],
+    "report_annotation_ui": ["B", "J"],
+    "sheet_routing_edge_cases": ["G", "H", "J"]
+  }
+}
