@@ -51,12 +51,25 @@ Input:
 """
 
 _LABELS = {
-    "waiver_reason": "不执行理由",
-    "sample_selection": "样本选择依据",
-    "evidence_description": "支持性证据描述",
-    "exception_followup": "异常跟进",
-    "other_reduction_treatment": "其他减少处理",
+    "waiver_reason": "\u4e0d\u6267\u884c\u7406\u7531",
+    "sample_selection": "\u6837\u672c\u9009\u62e9\u4f9d\u636e",
+    "evidence_description": "\u652f\u6301\u6027\u8bc1\u636e\u63cf\u8ff0",
+    "exception_followup": "\u5f02\u5e38\u8ddf\u8fdb",
+    "other_reduction_treatment": "\u5176\u4ed6\u51cf\u5c11\u5904\u7406",
 }
+
+_WAIVED_PATH_KINDS = {
+    "summary_waived",
+    "test_sheet_waiver_note",
+    "documented_limited",
+}
+
+_EXECUTED_ONLY_TOPICS = {
+    "sample_selection",
+    "evidence_description",
+    "exception_followup",
+}
+
 
 
 def build_disposal_review_payload(
@@ -78,6 +91,9 @@ def build_disposal_review_payload(
                 "field": issue.field,
                 "severity": issue.severity.value,
                 "message": issue.message,
+                "source_sheet": issue.source_sheet,
+                "source_row": issue.source_row,
+                "source_col": getattr(issue, "source_col", None),
             }
             for issue in (prior_issues or [])[:25]
         ],
@@ -166,14 +182,13 @@ def _issues_from_review(review: dict[str, Any], payload: dict[str, Any]) -> list
             continue
         topic = str(item.get("topic", "disposal_semantic")).strip()
         path = payload.get("disposal_execution_path") or {}
-        if topic == "waiver_reason" and path.get("path_kind") not in {
-            "summary_waived",
-            "test_sheet_waiver_note",
-            "documented_limited",
-        }:
+        path_kind = path.get("path_kind") if isinstance(path, dict) else None
+        if topic == "waiver_reason" and path_kind not in _WAIVED_PATH_KINDS:
+            continue
+        if topic in _EXECUTED_ONLY_TOPICS and path_kind in _WAIVED_PATH_KINDS:
             continue
         summary = payload.get("disposal_list_summary") or {}
-        other_amount = summary.get("other_reduction_net_value")
+        other_amount = summary.get("other_reduction_net_value") if isinstance(summary, dict) else None
         if topic == "other_reduction_treatment" and str(other_amount or "0").strip() in {
             "",
             "0",
@@ -184,9 +199,13 @@ def _issues_from_review(review: dict[str, Any], payload: dict[str, Any]) -> list
         rationale = str(item.get("rationale", "")).strip()
         action = str(item.get("suggested_action", "")).strip()
         severity = Severity.WARN if assessment == "insufficient" else Severity.NEED_REVIEW
-        message = f"K.02.2 {_LABELS.get(topic, topic)}{'说明不足' if assessment == 'insufficient' else '需人工复核'}"
+        message = (
+            f"K.02.2 {_LABELS.get(topic, topic)}"
+            f"{'\u8bf4\u660e\u4e0d\u8db3' if assessment == 'insufficient' else '\u9700\u4eba\u5de5\u590d\u6838'}"
+        )
         if rationale:
-            message += f"：{rationale}"
+            message += f"\uff1a{rationale}"
+        source_sheet, source_row, source_col = _topic_anchor(topic, payload)
         issues.append(
             QcIssue(
                 asset_id=None,
@@ -194,12 +213,13 @@ def _issues_from_review(review: dict[str, Any], payload: dict[str, Any]) -> list
                 field=topic,
                 severity=severity,
                 message=message,
-                suggestion=action or "补充具体说明，并回应确定性规则发现。",
+                suggestion=action or "\u8865\u5145\u5177\u4f53\u8bf4\u660e\uff0c\u5e76\u56de\u5e94\u786e\u5b9a\u6027\u89c4\u5219\u53d1\u73b0\u3002",
                 procedure_code="K.02.2",
-                source_sheet=_source_sheet(payload),
-                source_row=_source_row(payload),
-                review_source="LLM辅助判断",
-                llm_review_type="K.02.2 处置测试语义复核",
+                source_sheet=source_sheet,
+                source_row=source_row,
+                source_col=source_col,
+                review_source="LLM\u8f85\u52a9\u5224\u65ad",
+                llm_review_type="K.02.2 \u5904\u7f6e\u6d4b\u8bd5\u8bed\u4e49\u590d\u6838",
             )
         )
     return issues
@@ -214,7 +234,52 @@ def _source_sheet(payload: dict[str, Any]) -> str:
 
 
 def _source_row(payload: dict[str, Any]) -> int | None:
-    path = payload.get("disposal_execution_path")
-    if isinstance(path, dict) and isinstance(path.get("summary_source_row"), int):
-        return path["summary_source_row"]
+    test = payload.get("disposal_test")
+    if isinstance(test, dict):
+        samples = test.get("tested_samples")
+        if isinstance(samples, list):
+            for sample in samples:
+                if isinstance(sample, dict) and isinstance(sample.get("source_row"), int):
+                    return sample["source_row"]
+    output = payload.get("disposal_sample_output")
+    if isinstance(output, dict):
+        selected = output.get("selected_samples")
+        if isinstance(selected, list):
+            for sample in selected:
+                if isinstance(sample, dict) and isinstance(sample.get("source_row"), int):
+                    return sample["source_row"]
     return None
+
+
+def _topic_anchor(topic: str, payload: dict[str, Any]) -> tuple[str, int | None, int | None]:
+    if topic == "other_reduction_treatment":
+        summary = payload.get("disposal_list_summary")
+        if isinstance(summary, dict):
+            buckets = summary.get("buckets")
+            if isinstance(buckets, list):
+                for bucket in buckets:
+                    if not isinstance(bucket, dict) or bucket.get("bucket_key") != "other":
+                        continue
+                    rows = bucket.get("source_rows")
+                    if isinstance(rows, list):
+                        for row in rows:
+                            if isinstance(row, int):
+                                return str(summary.get("source_sheet") or "\u5904\u7f6e\u6e05\u5355"), row, None
+    if topic in _EXECUTED_ONLY_TOPICS:
+        for hint in payload.get("deterministic_rule_findings") or []:
+            if not isinstance(hint, dict):
+                continue
+            if hint.get("source_sheet") and isinstance(hint.get("source_row"), int):
+                return (
+                    str(hint.get("source_sheet")),
+                    hint.get("source_row"),
+                    hint.get("source_col") if isinstance(hint.get("source_col"), int) else None,
+                )
+    if topic == "waiver_reason":
+        path = payload.get("disposal_execution_path")
+        if isinstance(path, dict) and isinstance(path.get("summary_source_row"), int):
+            return "\u6c47\u603b", path["summary_source_row"], None
+        test = payload.get("disposal_test")
+        if isinstance(test, dict) and test.get("waiver_note_text"):
+            return str(test.get("source_sheet") or "K.02.2"), _source_row(payload), None
+    return _source_sheet(payload), _source_row(payload), None

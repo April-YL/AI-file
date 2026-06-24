@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from ingest.disposal_test_sheet import DisposalExecutionPathDataset, DisposalTestSheetDataset
+from ingest.records import DisposalListSummary, DisposalMethodBucket
 from llm.config import LlmConfig
 from llm.disposal_review import SYSTEM_PROMPT, build_disposal_llm_issues, build_disposal_review_payload
 from rules.models import QcIssue, Severity
@@ -72,3 +73,43 @@ def test_executed_disposal_skips_waiver_and_zero_other_reduction_topics():
             ),
         )
     assert issues == []
+
+
+def test_waived_disposal_skips_executed_topics_and_anchors_other_reduction():
+    review = {
+        "topics": [
+            {"topic": "sample_selection", "assessment": "insufficient"},
+            {"topic": "evidence_description", "assessment": "insufficient"},
+            {"topic": "other_reduction_treatment", "assessment": "insufficient"},
+        ]
+    }
+    summary = DisposalListSummary(
+        source_file="case.xlsx",
+        source_sheet="处置清单",
+        record_count=1,
+        other_reduction_net_value="757124.60",
+        buckets=[
+            DisposalMethodBucket(
+                bucket_key="other",
+                bucket_label="其他减少",
+                record_count=1,
+                net_value_total="757124.60",
+                source_rows=[27],
+            )
+        ],
+    )
+    with patch("llm.disposal_review.chat_completion_json", return_value=review):
+        issues = build_disposal_llm_issues(
+            _config(),
+            disposal_list_summary=summary,
+            disposal_execution_path=DisposalExecutionPathDataset(
+                path_kind="summary_waived",
+                recognition_confidence=0.9,
+                summary_source_row=15,
+            ),
+        )
+
+    assert len(issues) == 1
+    assert issues[0].field == "other_reduction_treatment"
+    assert issues[0].source_sheet == "处置清单"
+    assert issues[0].source_row == 27

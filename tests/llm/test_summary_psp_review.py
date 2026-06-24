@@ -123,10 +123,12 @@ def test_review_waiver_reason_prompt_uses_calibrated_psp_criteria():
     user = mock_call.call_args.kwargs["user"]
     assert "包括但不限于" in system
     assert "N/A" in system and "NA" in system and "N/a" in system
-    assert "总体金额小于 TE" in system
-    assert "无单项大于 TT" in system
-    assert "新增/处置金额小于底稿内 SAD" in system
-    assert "底稿内读取到的数据" in system
+    assert "TE、TT、SAD 不是并列标准" in system
+    assert "第一层" in system and "小于 K.00 Lead Sheet 的 SAD" in system
+    assert "第二层" in system and "小于 K.00 Lead Sheet 的 TT" in system
+    assert "第三层" in system and "小于 K.00 Lead Sheet 的 TE" in system
+    assert "不得仍要求补充 TT/TE" in system
+    assert "K.00 Lead Sheet 中读取到的对应金额" in system
     assert "K.01 Agree SL to GL" in system
     assert "减值迹象" in system
     assert "不得编造" in system
@@ -157,14 +159,65 @@ def test_review_waiver_reason_prompt_rejects_te_only_disposal_reason():
     assert res.adequacy == "insufficient"
     system = mock_call.call_args.kwargs["system"]
     user = mock_call.call_args.kwargs["user"]
-    assert "总体金额小于底稿内 TE" in system
-    assert "无单项大于底稿内 TT" in system
-    assert "新增/处置金额小于底稿内 TT" in system
-    assert "新增/处置金额小于底稿内 SAD" in system
-    assert "仅写“总体金额小于 TE”" in system
-    assert "处置资产净值小于 TE" in system
-    assert "不足以判断充分" in system
+    assert "如理由仅说明总体金额、处置资产净值或新增金额小于 K.00 Lead Sheet 的 TE" in system
+    assert "还必须同时说明无单项金额大于 K.00 Lead Sheet 的 TT" in system
+    assert "已明确小于 SAD 时，不得仍要求补充 TT/TE" in system
+    assert "已明确小于 TT 且无性质异常项时，不得仍要求补充 TE" in system
     assert '"waiver_reason": "本期处置资产净值小于TE。"' in user
+
+
+def test_review_waiver_reason_prompt_does_not_over_require_te_or_tt_when_below_sad():
+    row = PspProgramRow(
+        procedure_name="K.02.1 新增测试",
+        sheet_ref="K.02.1 新增测试",
+        execution_status="否",
+        waiver_reason="本期新增金额小于SAD，未发现性质异常项。",
+        notes=None,
+        source_row=12,
+        is_psp=False,
+    )
+    with patch(
+        "llm.summary_psp_review.chat_completion_json",
+        return_value={
+            "adequacy": "sufficient",
+            "rationale": "命中SAD层级。",
+            "suggested_action": "",
+        },
+    ) as mock_call:
+        res = review_waiver_reason_with_llm(row, _config())
+
+    assert res is not None
+    system = mock_call.call_args.kwargs["system"]
+    assert "小于 K.00 Lead Sheet 的 SAD，则金额层面可接受" in system
+    assert "除非输入摘录显示存在性质异常项，否则不得再要求补充 TE 或 TT" in system
+    assert "已明确小于 SAD 时，不得仍要求补充 TT/TE" in system
+
+
+def test_review_waiver_reason_prompt_does_not_require_te_when_below_tt_and_no_nature_exception():
+    row = PspProgramRow(
+        procedure_name="K.02.2 处置测试",
+        sheet_ref="K.02.2 处置测试",
+        execution_status="否",
+        waiver_reason="本期处置金额小于TT，且无性质异常项。",
+        notes=None,
+        source_row=18,
+        is_psp=False,
+    )
+    with patch(
+        "llm.summary_psp_review.chat_completion_json",
+        return_value={
+            "adequacy": "sufficient",
+            "rationale": "命中TT层级且无性质异常项。",
+            "suggested_action": "",
+        },
+    ) as mock_call:
+        res = review_waiver_reason_with_llm(row, _config())
+
+    assert res is not None
+    system = mock_call.call_args.kwargs["system"]
+    assert "小于 K.00 Lead Sheet 的 TT，则金额层面可接受" in system
+    assert "仍需说明或能从输入摘录判断不存在性质异常项" in system
+    assert "不得再要求补充 TE" in system
 
 
 def test_review_waiver_reason_prompt_includes_workbook_context():

@@ -36,6 +36,12 @@ _REQUIRED_FIELDS = (
     "management_depreciation",
     "audit_recalculated_depreciation",
 )
+_FIELD_LABELS = {
+    "management_depreciation": "管理层折旧额",
+    "audit_recalculated_depreciation": "审计重新计算折旧额",
+    "depreciation_difference": "折旧差异",
+    "current_depreciation": "本期折旧额",
+}
 _EXPLANATION_HEADER_TOKENS = (
     "备注",
     "说明",
@@ -83,8 +89,8 @@ def run_k03_tod_by_item_rules(
                 "k03_tod_by_item_detail_unreadable",
                 "detail_table",
                 Severity.NEED_REVIEW,
-                "K.03 TOD-by item detail table was not reliably identified.",
-                "Open the K.03.2 sheet and confirm the by-item depreciation test detail area, headers, and total row.",
+                "未能可靠识别 K.03.2 by-item 折旧测试明细表。",
+                "请打开 K.03.2 工作表，确认 by-item 折旧测试明细区、表头和合计行是否完整。",
             )
         ]
         _record_k03_execution(recorder, issues, ("k03_tod_by_item_detail_unreadable",))
@@ -99,8 +105,8 @@ def run_k03_tod_by_item_rules(
                 "k03_tod_by_item_detail_unreadable",
                 "detail_table",
                 Severity.NEED_REVIEW,
-                "K.03 TOD-by item detail table reference exists, but no full detail rows could be read.",
-                "Check whether the workbook path, sheet name, and detail table range are still valid.",
+                "已识别 K.03.2 by-item 明细表位置，但未能读取到完整明细行。",
+                "请检查工作簿路径、工作表名称和明细表范围是否仍然有效。",
             )
         )
         _record_k03_execution(recorder, issues, ("k03_tod_by_item_required_fields", "k03_tod_by_item_detail_unreadable"))
@@ -124,8 +130,8 @@ def run_k03_tod_by_item_rules(
                     "k03_tod_by_item_sad_unavailable",
                     "sad",
                     Severity.NEED_REVIEW,
-                    "K.03 TOD-by item has depreciation differences, but SAD could not be read reliably from K.00 Lead.",
-                    "Confirm the SAD in K.00 Lead before deciding whether the differences require further explanation.",
+                    "K.03.2 by-item 折旧测试存在折旧差异，但无法从 K.00 Lead 可靠读取 SAD。",
+                    "请先确认 K.00 Lead 中的 SAD，再判断这些差异是否需要进一步说明。",
                     source_row=material_candidates[0][0].source_row,
                 )
             )
@@ -148,10 +154,10 @@ def run_k03_tod_by_item_rules(
                     "conclusion_area",
                     Severity.FAIL,
                     (
-                        "K.03 TOD-by item has multiple asset-level depreciation differences over SAD, "
-                        "but no valid sheet-level conclusion or explanation was identified."
+                        "K.03.2 by-item 折旧测试存在多项资产层面的超过 SAD 差异，"
+                        "但未识别到有效的工作表层面结论或说明。"
                     ),
-                    "Add a conclusion or difference explanation on the K.03.2 sheet covering the over-SAD differences.",
+                    "请在 K.03.2 工作表补充结论或差异说明，覆盖超过 SAD 的折旧差异。",
                     source_row=dataset.conclusion_area.start_row if dataset.conclusion_area else None,
                 )
             )
@@ -163,10 +169,10 @@ def run_k03_tod_by_item_rules(
                     _field_ref(row, "depreciation_difference"),
                     Severity.FAIL,
                     (
-                        f"K.03 TOD-by item asset depreciation difference exceeds SAD without a valid explanation: "
-                        f"asset={_identity(row)}, difference={diff}, SAD={sad}."
+                        f"K.03.2 by-item 折旧测试中，资产折旧差异超过 SAD 且未见有效说明："
+                        f"资产={_identity(row)}，差异={diff}，SAD={sad}。"
                     ),
-                    "Explain the over-SAD depreciation difference in the row remark/conclusion or the sheet conclusion area.",
+                    "请在该行备注/结论或工作表结论区说明超过 SAD 的折旧差异。",
                     source_row=row.source_row,
                     asset_id=_asset_id(row),
                 )
@@ -179,10 +185,10 @@ def run_k03_tod_by_item_rules(
                     "depreciation_difference",
                     Severity.FAIL,
                     (
-                        f"K.03 TOD-by item has {len(unexplained)} unexplained asset-level differences over SAD; "
-                        f"showing first {_MAX_ROW_FINDINGS} row findings only."
+                        f"K.03.2 by-item 折旧测试有 {len(unexplained)} 项资产层面的超过 SAD 差异未说明；"
+                        f"当前仅展示前 {_MAX_ROW_FINDINGS} 条明细。"
                     ),
-                    "Review all over-SAD rows and document explanations or follow-up conclusions.",
+                    "请复核所有超过 SAD 的行，并记录差异说明或后续跟进结论。",
                     source_row=unexplained[_MAX_ROW_FINDINGS][0].source_row,
                 )
             )
@@ -233,9 +239,9 @@ def _check_required_fields(dataset: K03SheetDataset) -> list[QcIssue]:
             "k03_tod_by_item_required_fields",
             ",".join(missing),
             Severity.WARN,
-            "K.03 TOD-by item is missing key depreciation comparison fields: "
-            + ", ".join(missing),
-            "Confirm whether management depreciation and audit recalculated depreciation columns are present or mapped under variant headers.",
+            "K.03.2 by-item 折旧测试缺少关键折旧比对字段："
+            + ", ".join(_field_label(field) for field in missing),
+            "请确认管理层折旧额和审计重新计算折旧额等栏目是否存在，或是否使用了变体表头。",
             source_row=_detail_table_anchor_row(dataset),
         )
     ]
@@ -267,11 +273,11 @@ def _check_difference_column(
                     _field_ref(row, "depreciation_difference"),
                     Severity.FAIL,
                     (
-                        "K.03 TOD-by item difference column does not equal management depreciation "
-                        f"minus audit recalculated depreciation: asset={_identity(row)}, "
-                        f"recorded={recorded}, expected={expected}."
+                        "K.03.2 by-item 折旧测试的差异列不等于管理层折旧额"
+                        f"减审计重新计算折旧额：资产={_identity(row)}，"
+                        f"底稿记录差异={recorded}，应计算差异={expected}。"
                     ),
-                    "Check the difference formula or pasted value for this row.",
+                    "请检查该行差异公式或粘贴值是否正确。",
                     source_row=row.source_row,
                     asset_id=_asset_id(row),
                 )
@@ -292,8 +298,8 @@ def _check_total_difference(
                 "k03_tod_by_item_total_difference_over_sad",
                 "total_rows",
                 Severity.NEED_REVIEW,
-                "K.03 TOD-by item total row was not identified, so total depreciation difference could not be checked.",
-                "Confirm whether the K.03.2 by-item test includes a total row for management and audit recalculated depreciation.",
+                "未识别到 K.03.2 by-item 折旧测试合计行，无法检查总体折旧差异。",
+                "请确认 K.03.2 by-item 测试是否包含管理层折旧额和审计重新计算折旧额的合计行。",
             )
         ]
     issues: list[QcIssue] = []
@@ -311,8 +317,8 @@ def _check_total_difference(
                 "k03_tod_by_item_total_difference_over_sad",
                 _field_ref(row, "depreciation_difference"),
                 Severity.FAIL,
-                f"K.03 TOD-by item total depreciation difference exceeds SAD without a valid explanation: difference={diff}, SAD={sad}.",
-                "Add a total-level explanation or conclusion for the over-SAD depreciation difference.",
+                f"K.03.2 by-item 折旧测试总体折旧差异超过 SAD 且未见有效说明：差异={diff}，SAD={sad}。",
+                "请针对超过 SAD 的总体折旧差异补充总体层面的说明或结论。",
                 source_row=row.source_row,
             )
         )
@@ -337,8 +343,8 @@ def _check_rollforward_depreciation(
                 "k03_tod_by_item_rollforward_depreciation",
                 "current_depreciation",
                 Severity.NEED_REVIEW,
-                "K.03 TOD-by item current-period depreciation total could not be read reliably.",
-                "Confirm whether the K.03.2 by-item test includes current-period depreciation or management depreciation columns.",
+                "无法可靠读取 K.03.2 by-item 折旧测试的本期折旧合计。",
+                "请确认 K.03.2 by-item 测试是否包含本期折旧额或管理层折旧额栏目。",
             )
         ]
 
@@ -357,8 +363,8 @@ def _check_rollforward_depreciation(
                 "k03_tod_by_item_rollforward_depreciation",
                 "rollforward_depreciation",
                 Severity.NEED_REVIEW,
-                "K.01 rollforward depreciation charge could not be read reliably for comparison with K.03 TOD-by item.",
-                "Use the K.01 rollforward depreciation transaction row or table 4 depreciation amount when the template is stable.",
+                "无法可靠读取 K.01 后推表中的本期计提折旧金额，不能与 K.03.2 by-item 折旧测试比对。",
+                "模板稳定后，请优先使用 K.01 后推表折旧交易行或表4折旧金额作为比对来源。",
             )
         ]
 
@@ -374,10 +380,10 @@ def _check_rollforward_depreciation(
             "current_depreciation",
             Severity.FAIL,
             (
-                "K.03 TOD-by item current-period depreciation does not agree to K.01 rollforward depreciation charge "
-                f"and the difference exceeds SAD: K.03={k03_total}, K.01={rf_amount}, difference={diff}, SAD={sad}."
+                "K.03.2 by-item 折旧测试本期折旧额与 K.01 后推表本期计提折旧金额不一致，"
+                f"且差异超过 SAD：K.03={k03_total}，K.01={rf_amount}，差异={diff}，SAD={sad}。"
             ),
-            "Explain the K.03 vs K.01 depreciation difference or correct the linked depreciation amount.",
+            "请说明 K.03 与 K.01 的折旧差异，或更正相关链接/取数金额。",
             source_row=rf_row,
         )
     ]
@@ -425,6 +431,10 @@ def _detail_table_anchor_row(dataset: K03SheetDataset) -> int | None:
     if dataset.detail_table_range and dataset.detail_table_range.start_row:
         return dataset.detail_table_range.start_row
     return None
+
+
+def _field_label(field: str) -> str:
+    return _FIELD_LABELS.get(field, field)
 
 
 def _has_valid_row_explanation(row: K03DetailRow) -> bool:

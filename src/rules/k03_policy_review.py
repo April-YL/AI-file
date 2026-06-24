@@ -69,8 +69,8 @@ def run_k03_policy_review_rules(
                 rule_id="k03_policy_sheet_missing",
                 field="sheet",
                 severity=Severity.NEED_REVIEW,
-                message="K.03.3 depreciation policy review sheet was not identified.",
-                suggestion="Confirm whether the workbook includes K.03.3 depreciation policy review.",
+                message="K.03.3折旧政策复核页未识别。",
+                suggestion="请人工确认底稿是否包含 K.03.3 折旧政策复核页。",
                 procedure_code="K.03.3",
                 source_sheet="K.03.3 折旧政策复核",
             )
@@ -91,8 +91,8 @@ def run_k03_policy_review_rules(
                 "k03_policy_table_unreadable",
                 "policy_table",
                 Severity.NEED_REVIEW,
-                "K.03.3 policy table 1 could not be identified or parsed.",
-                "Check the policy review sheet for the asset category, current/prior policy, difference, and notes columns.",
+                "K.03.3 折旧政策表 1 未能识别或解析。",
+                "请复核该页是否包含资产类别、本期/上期政策、差异判断和 Notes/说明等栏目。",
                 source_row=table.header_row if table else None,
             )
         ]
@@ -137,8 +137,8 @@ def _check_structure(dataset: K03SheetDataset) -> list[QcIssue]:
                     "k03_policy_sections_incomplete",
                     group,
                     Severity.NEED_REVIEW,
-                    f"K.03.3 policy table is missing or cannot map the {group} columns.",
-                    "Confirm the table 1 current/prior policy columns and difference area.",
+                    f"K.03.3 折旧政策表缺少或无法映射 {group} 相关栏目。",
+                    "请确认表 1 是否完整列示本期政策、上期政策和差异判断/说明区。",
                     source_row=table.header_row,
                 )
             )
@@ -149,8 +149,8 @@ def _check_structure(dataset: K03SheetDataset) -> list[QcIssue]:
                 "k03_policy_sections_incomplete",
                 "note_area",
                 Severity.WARN,
-                "K.03.3 Notes area was not identified.",
-                "If policy changes exist, document explanations in the difference explanation column or Notes area.",
+                "未识别到 K.03.3 Notes/说明区。",
+                "如折旧政策存在变化，请在差异说明列或 Notes 区补充原因和结论。",
                 source_row=table.range.end_row if table.range else table.header_row,
             )
         )
@@ -174,8 +174,8 @@ def _check_policy_rows(dataset: K03SheetDataset) -> list[QcIssue]:
                     "k03_policy_difference_marker",
                     "useful_life_same_marker",
                     Severity.WARN,
-                    "Current and prior useful life appear consistent, but the difference marker is not TRUE/equivalent.",
-                    "Check the useful life difference formula or marker.",
+                    "本期与上期使用寿命看起来一致，但差异标记未显示为 TRUE 或等同含义。",
+                    "请检查使用寿命差异公式或标记是否正确。",
                 )
             )
         if "salvage_rate" in same_fields and not _marker_is_true(row.salvage_rate_same_marker):
@@ -186,8 +186,8 @@ def _check_policy_rows(dataset: K03SheetDataset) -> list[QcIssue]:
                     "k03_policy_difference_marker",
                     "salvage_rate_same_marker",
                     Severity.WARN,
-                    "Current and prior salvage rate appear consistent, but the difference marker is not TRUE/equivalent.",
-                    "Check the salvage rate difference formula or marker.",
+                    "本期与上期残值率看起来一致，但差异标记未显示为 TRUE 或等同含义。",
+                    "请检查残值率差异公式或标记是否正确。",
                 )
             )
 
@@ -199,8 +199,8 @@ def _check_policy_rows(dataset: K03SheetDataset) -> list[QcIssue]:
                     "k03_policy_difference_marker",
                     "useful_life_same_marker",
                     Severity.WARN,
-                    "Useful life changed compared with prior period, but the difference marker remains TRUE.",
-                    "Check whether the policy change has been identified correctly.",
+                    "使用寿命较上期发生变化，但差异标记仍显示为 TRUE。",
+                    "请确认该折旧政策变化是否已被正确识别并说明。",
                 )
             )
         if "salvage_rate" in changed_fields and _marker_is_true(row.salvage_rate_same_marker):
@@ -211,8 +211,8 @@ def _check_policy_rows(dataset: K03SheetDataset) -> list[QcIssue]:
                     "k03_policy_difference_marker",
                     "salvage_rate_same_marker",
                     Severity.WARN,
-                    "Salvage rate changed compared with prior period, but the difference marker remains TRUE.",
-                    "Check whether the policy change has been identified correctly.",
+                    "残值率较上期发生变化，但差异标记仍显示为 TRUE。",
+                    "请确认该折旧政策变化是否已被正确识别并说明。",
                 )
             )
         if changed_fields and not (sheet_explained or _has_valid_explanation(row.difference_explanation)):
@@ -223,8 +223,8 @@ def _check_policy_rows(dataset: K03SheetDataset) -> list[QcIssue]:
                     "k03_policy_change_without_explanation",
                     "difference_explanation",
                     Severity.FAIL,
-                    "Current and prior depreciation policy differ, but no valid explanation or Notes were identified.",
-                    "Add a difference explanation or Notes for the policy change.",
+                    "本期与上期折旧政策存在差异，但未识别到有效差异说明或 Notes。",
+                    "请针对折旧政策变化补充差异说明或 Notes，说明原因和处理结论。",
                 )
             )
     return issues
@@ -241,8 +241,8 @@ def _check_fa_list_consistency(
                 "k03_policy_fa_unit_or_category_review",
                 "fa_list",
                 Severity.NEED_REVIEW,
-                "FA list was not available for comparison with K.03.3 policy table.",
-                "Confirm the FA list sheet and mapped asset category, useful life, and salvage rate fields.",
+                "未取得可用于与 K.03.3 折旧政策表比对的 FA list。",
+                "请确认 FA list 工作表及资产类别、使用寿命、残值率字段是否已正确识别。",
             )
         ]
     if dataset.policy_table is None:
@@ -294,8 +294,8 @@ def _check_fa_list_consistency(
                 "k03_policy_fa_unit_or_category_review",
                 "asset_category",
                 Severity.NEED_REVIEW,
-                f"{category_review_count} FA list rows could not be matched to a K.03.3 policy category.",
-                "Review asset category naming or add a category mapping table in a later phase.",
+                f"有 {category_review_count} 行 FA list 资产类别无法匹配到 K.03.3 折旧政策类别。",
+                "请复核资产类别命名是否一致；如属于模板差异，后续可补充类别映射表。",
                 source_sheet=fa_list.source_sheet,
             )
         )
@@ -311,8 +311,8 @@ def _check_fa_list_consistency(
                     rule_id,
                     field,
                     Severity.WARN,
-                    f"{count} FA list rows triggered {field} findings; only first {_MAX_DETAIL_FINDINGS} detail findings are shown.",
-                    "Review all affected FA list rows for policy consistency.",
+                    f"有 {count} 行 FA list 触发 {field} 相关提示，当前仅展示前 {_MAX_DETAIL_FINDINGS} 条明细。",
+                    "请复核所有受影响的 FA list 行，确认折旧政策是否一致或是否已有合理说明。",
                     source_sheet=fa_list.source_sheet,
                 )
             )
@@ -333,8 +333,8 @@ def _fa_life_issue(
             rule_id="k03_policy_fa_unit_or_category_review",
             field="useful_life_months",
             severity=Severity.NEED_REVIEW,
-            message="Useful life could not be parsed for K.03.3 policy vs FA list comparison.",
-            suggestion="Confirm whether useful life is expressed in years or months.",
+            message="无法解析使用寿命，不能完成 K.03.3 折旧政策与 FA list 的使用寿命比对。",
+            suggestion="请确认使用寿命是按年还是按月列示，并检查该字段是否存在非标准格式。",
             procedure_code="K.03.3",
             source_sheet=fa_list.source_sheet,
             source_row=rec.source_row,
@@ -347,10 +347,10 @@ def _fa_life_issue(
             field="useful_life_months",
             severity=Severity.WARN,
             message=(
-                f"FA list useful life is outside K.03.3 policy range for category {rec.asset_category}: "
-                f"asset={rec.useful_life_months}, policy={policy.current_useful_life}."
+                f"FA list 使用寿命超出 K.03.3 折旧政策范围：资产类别={rec.asset_category}，"
+                f"资产使用寿命={rec.useful_life_months}，政策范围={policy.current_useful_life}。"
             ),
-            suggestion="Check the FA list useful life or update the policy table explanation if the exception is valid.",
+            suggestion="请检查 FA list 使用寿命是否正确；如该差异合理，请在折旧政策表中补充说明。",
             procedure_code="K.03.3",
             source_sheet=fa_list.source_sheet,
             source_row=rec.source_row,
@@ -372,8 +372,8 @@ def _fa_salvage_issue(
             rule_id="k03_policy_fa_unit_or_category_review",
             field="salvage_rate",
             severity=Severity.NEED_REVIEW,
-            message="Salvage rate could not be parsed for K.03.3 policy vs FA list comparison.",
-            suggestion="Confirm whether salvage rate is expressed as a percentage or decimal.",
+            message="无法解析残值率，不能完成 K.03.3 折旧政策与 FA list 的残值率比对。",
+            suggestion="请确认残值率是按百分比还是小数列示，并检查该字段是否存在非标准格式。",
             procedure_code="K.03.3",
             source_sheet=fa_list.source_sheet,
             source_row=rec.source_row,
@@ -385,10 +385,10 @@ def _fa_salvage_issue(
             field="salvage_rate",
             severity=Severity.WARN,
             message=(
-                f"FA list salvage rate differs from K.03.3 policy for category {rec.asset_category}: "
-                f"asset={rec.salvage_rate}, policy={policy.current_salvage_rate}."
+                f"FA list 残值率与 K.03.3 折旧政策不一致：资产类别={rec.asset_category}，"
+                f"资产残值率={rec.salvage_rate}，政策残值率={policy.current_salvage_rate}。"
             ),
-            suggestion="Check the FA list salvage rate or document why the asset uses a different rate.",
+            suggestion="请检查 FA list 残值率是否正确；如该资产采用不同残值率，请补充原因说明。",
             procedure_code="K.03.3",
             source_sheet=fa_list.source_sheet,
             source_row=rec.source_row,
@@ -404,21 +404,21 @@ def _fa_anomaly_issues(
     issues: list[QcIssue] = []
     life = parse_life_range(rec.useful_life_months, assume_number_unit="month")
     if is_blank(rec.useful_life_months):
-        issues.append(_fa_anomaly(fa_list, rec, "useful_life_months", "FA list useful life is blank."))
+        issues.append(_fa_anomaly(fa_list, rec, "useful_life_months", "FA list 使用寿命为空。"))
     elif life is None:
-        issues.append(_fa_anomaly(fa_list, rec, "useful_life_months", "FA list useful life unit or format could not be parsed."))
+        issues.append(_fa_anomaly(fa_list, rec, "useful_life_months", "FA list 使用寿命单位或格式无法解析。"))
     elif life.min_months <= 0:
-        issues.append(_fa_anomaly(fa_list, rec, "useful_life_months", "FA list useful life is zero or negative."))
+        issues.append(_fa_anomaly(fa_list, rec, "useful_life_months", "FA list 使用寿命为 0 或负数。"))
     elif life.max_months > _EXTREME_LIFE_MONTHS:
-        issues.append(_fa_anomaly(fa_list, rec, "useful_life_months", "FA list useful life is extremely high and needs review."))
+        issues.append(_fa_anomaly(fa_list, rec, "useful_life_months", "FA list 使用寿命异常偏高，需要复核。"))
 
     rate = parse_rate(rec.salvage_rate)
     if is_blank(rec.salvage_rate):
-        issues.append(_fa_anomaly(fa_list, rec, "salvage_rate", "FA list salvage rate is blank."))
+        issues.append(_fa_anomaly(fa_list, rec, "salvage_rate", "FA list 残值率为空。"))
     elif rate is None:
-        issues.append(_fa_anomaly(fa_list, rec, "salvage_rate", "FA list salvage rate could not be parsed or is outside 0-100%."))
+        issues.append(_fa_anomaly(fa_list, rec, "salvage_rate", "FA list 残值率无法解析或不在 0-100% 范围内。"))
     elif rate < 0 or rate > 1:
-        issues.append(_fa_anomaly(fa_list, rec, "salvage_rate", "FA list salvage rate is outside 0-100%."))
+        issues.append(_fa_anomaly(fa_list, rec, "salvage_rate", "FA list 残值率不在 0-100% 范围内。"))
     return issues
 
 
@@ -434,7 +434,7 @@ def _fa_anomaly(
         field=field,
         severity=Severity.WARN,
         message=message,
-        suggestion="Review the FA list value before applying detailed depreciation policy checks.",
+        suggestion="请先复核 FA list 中该字段取值，再判断是否适用详细折旧政策比对。",
         procedure_code="K.03.3",
         source_sheet=fa_list.source_sheet,
         source_row=rec.source_row,
@@ -475,19 +475,19 @@ def _check_policy_anomalies(dataset: K03SheetDataset, row: K03PolicyRow) -> list
     issues: list[QcIssue] = []
     life = parse_life_range(row.current_useful_life, assume_number_unit=None)
     if is_blank(row.current_useful_life):
-        issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_useful_life", Severity.WARN, "Policy useful life is blank.", "Fill in the current-period useful life range."))
+        issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_useful_life", Severity.WARN, "折旧政策中的本期使用寿命为空。", "请补充本期使用寿命范围。"))
     elif life is None:
-        issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_useful_life", Severity.NEED_REVIEW, "Policy useful life could not be parsed.", "Confirm whether the policy useful life is expressed in years or months."))
+        issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_useful_life", Severity.NEED_REVIEW, "折旧政策中的本期使用寿命无法解析。", "请确认政策使用寿命是按年还是按月列示，并检查格式是否标准。"))
     elif life.min_months <= 0:
-        issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_useful_life", Severity.FAIL, "Policy useful life is zero or negative.", "Correct the current-period useful life."))
+        issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_useful_life", Severity.FAIL, "折旧政策中的本期使用寿命为 0 或负数。", "请更正本期使用寿命。"))
     elif life.max_months > _EXTREME_LIFE_MONTHS:
-        issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_useful_life", Severity.NEED_REVIEW, "Policy useful life is extremely high.", "Review whether this policy life is valid."))
+        issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_useful_life", Severity.NEED_REVIEW, "折旧政策中的本期使用寿命异常偏高。", "请复核该政策寿命是否合理。"))
 
     rate = parse_rate(row.current_salvage_rate)
     if is_blank(row.current_salvage_rate):
-        issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_salvage_rate", Severity.WARN, "Policy salvage rate is blank.", "Fill in current-period salvage rate."))
+        issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_salvage_rate", Severity.WARN, "折旧政策中的本期残值率为空。", "请补充本期残值率。"))
     elif rate is None or rate < 0 or rate > 1:
-        issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_salvage_rate", Severity.WARN, "Policy salvage rate is outside 0-100% or cannot be parsed.", "Correct the current-period salvage rate."))
+        issues.append(_policy_row_issue(dataset, row, "k03_policy_obvious_anomaly", "current_salvage_rate", Severity.WARN, "折旧政策中的本期残值率无法解析或不在 0-100% 范围内。", "请更正本期残值率。"))
     return issues
 
 
@@ -570,7 +570,7 @@ def _policy_row_issue(
 ) -> QcIssue:
     cell = row.cell_refs.get(field)
     if cell:
-        message = f"{message} Cell={cell}."
+        message = f"{message} 单元格={cell}。"
     return _issue(
         dataset,
         rule_id,

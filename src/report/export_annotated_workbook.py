@@ -101,10 +101,14 @@ def _quote_sheet_for_location(sheet: str) -> str:
     return f"'{escaped}'"
 
 
-def _cell_location(sheet: str | None, row: int | None) -> str | None:
+def _cell_location(sheet: str | None, row: int | None, col: int | None = None) -> str | None:
     if not sheet or not row or row < 1:
         return None
-    return f"{_quote_sheet_for_location(sheet)}!{_cell_ref_plain(row)}"
+    return f"{_quote_sheet_for_location(sheet)}!{_cell_ref_plain(row, _issue_col(col))}"
+
+
+def _issue_col(col: int | None) -> int:
+    return col if isinstance(col, int) and col > 0 else _DEFAULT_COMMENT_COL
 
 
 def _issue_comment_text(issue: QcIssue) -> str:
@@ -223,7 +227,7 @@ def build_main_comments_rows(
             (
                 ey,
                 issue.source_sheet or "—",
-                _cell_ref_a1(issue.source_row),
+                _cell_ref_a1(issue.source_row, _issue_col(issue.source_col)),
                 _question_text(issue),
                 _answer_for_preparer(),
                 "No",
@@ -272,7 +276,7 @@ def build_main_comments_hyperlinks(
             i.source_row or 0,
         ),
     ):
-        loc = _cell_location(issue.source_sheet, issue.source_row)
+        loc = _cell_location(issue.source_sheet, issue.source_row, issue.source_col)
         if loc:
             links[(row_idx, 3)] = loc
         row_idx += 1
@@ -324,7 +328,7 @@ def build_fa_list_detail_rows(fa_list_issues: list[QcIssue]) -> list[tuple]:
             (
                 idx,
                 issue.source_sheet or "—",
-                _cell_ref_a1(issue.source_row),
+                _cell_ref_a1(issue.source_row, _issue_col(issue.source_col)),
                 _question_text(issue),
                 _answer_for_preparer(),
                 "No",
@@ -344,7 +348,7 @@ def build_fa_list_detail_hyperlinks(
     )
     links: dict[tuple[int, int], str] = {}
     for idx, issue in enumerate(sorted_issues, start=2):
-        loc = _cell_location(issue.source_sheet, issue.source_row)
+        loc = _cell_location(issue.source_sheet, issue.source_row, issue.source_col)
         if loc:
             links[(idx, 3)] = loc
     return links
@@ -366,7 +370,7 @@ def build_locator_rows(issues: list[QcIssue]) -> list[tuple]:
     for idx, issue in enumerate(sorted_issues, start=1):
         code = issue.dict_rule_code or issue.rule_id
         tab = issue.source_sheet or "—"
-        cell_ref = _cell_ref_a1(issue.source_row)
+        cell_ref = _cell_ref_a1(issue.source_row, _issue_col(issue.source_col))
         navigate = ""
         if tab != "—":
             navigate = tab if not cell_ref else f"{tab}!{cell_ref.replace('$', '')}"
@@ -399,7 +403,7 @@ def build_locator_hyperlinks(issues: list[QcIssue]) -> dict[tuple[int, int], str
     )
     links: dict[tuple[int, int], str] = {}
     for idx, issue in enumerate(sorted_issues, start=2):
-        loc = _cell_location(issue.source_sheet, issue.source_row)
+        loc = _cell_location(issue.source_sheet, issue.source_row, issue.source_col)
         if loc:
             links[(idx, 5)] = loc
             links[(idx, 8)] = loc
@@ -494,9 +498,13 @@ def _apply_cell_annotations(wb: openpyxl.Workbook, issues: list[QcIssue]) -> int
             row = issue.source_row
             if not row or row < 1:
                 continue
-            anchor_row, anchor_col = _annotation_cell_position(ws, row)
+            anchor_row, anchor_col = _annotation_cell_position(ws, row, _issue_col(issue.source_col))
             cell = ws.cell(row=anchor_row, column=anchor_col)
-            cell.comment = Comment(_issue_comment_text(issue), _AUTHOR)
+            text = _issue_comment_text(issue)
+            if cell.comment:
+                cell.comment = Comment(f"{cell.comment.text}\n\n{text}", _AUTHOR)
+            else:
+                cell.comment = Comment(text, _AUTHOR)
             fill = _fill_for_severity(issue.severity)
             if fill:
                 cell.fill = fill
@@ -538,7 +546,7 @@ def _ooxml_comments_by_sheet(
             sheet = (issue.source_sheet or "").strip()
             if not sheet or sheet not in wb.sheetnames:
                 continue
-            cell = _annotation_cell_ref(wb[sheet], issue.source_row)
+            cell = _annotation_cell_ref(wb[sheet], issue.source_row, _issue_col(issue.source_col))
             if not cell:
                 continue
             by_sheet.setdefault(sheet, []).append((cell, _issue_comment_text(issue), _AUTHOR))

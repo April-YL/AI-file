@@ -192,13 +192,29 @@ def _addition_list_excerpt(addition_list: FaListDataset | None) -> dict[str, Any
     if addition_list is None:
         return None
     methods: dict[str, int] = {}
+    nonpurchase_examples: list[dict[str, Any]] = []
     for record in addition_list.records:
         method = str(getattr(record, "addition_method", "") or "").strip() or "(blank)"
         methods[method] = methods.get(method, 0) + 1
+        norm = method.lower()
+        if not any(
+            term in norm
+            for term in ("购置", "采购", "购买", "外购", "purchase", "acquisition")
+        ):
+            if len(nonpurchase_examples) < 5:
+                nonpurchase_examples.append(
+                    {
+                        "method": method,
+                        "asset_id": getattr(record, "asset_id", None),
+                        "asset_name": getattr(record, "asset_name", None),
+                        "source_row": getattr(record, "source_row", None),
+                    }
+                )
     return {
         "source_sheet": addition_list.source_sheet,
         "record_count": len(addition_list.records),
         "addition_methods": methods,
+        "nonpurchase_examples": nonpurchase_examples,
         "mapped_fields": [m.standard_field for m in addition_list.mapped_fields],
     }
 
@@ -281,6 +297,9 @@ def _issue_hints(issues: list[QcIssue]) -> list[dict[str, Any]]:
                 "field": issue.field,
                 "severity": issue.severity.value,
                 "procedure_code": issue.procedure_code,
+                "source_sheet": issue.source_sheet,
+                "source_row": issue.source_row,
+                "source_col": getattr(issue, "source_col", None),
                 "message": issue.message,
             }
         )
@@ -290,8 +309,6 @@ def _issue_hints(issues: list[QcIssue]) -> list[dict[str, Any]]:
 def _issues_from_review(review: dict[str, Any], payload: dict[str, Any]) -> list[QcIssue]:
     raw_topics = review.get("topics") if isinstance(review.get("topics"), list) else []
     issues: list[QcIssue] = []
-    source_sheet = _source_sheet(payload)
-    source_row = _source_row(payload)
     for item in raw_topics:
         if not isinstance(item, dict):
             continue
@@ -318,6 +335,8 @@ def _issues_from_review(review: dict[str, Any], payload: dict[str, Any]) -> list
         if missing_text:
             msg += f"；缺少依据：{', '.join(missing_text)}"
 
+        source_sheet, source_row, source_col = _topic_anchor(topic, payload)
+
         issues.append(
             QcIssue(
                 asset_id=None,
@@ -329,6 +348,7 @@ def _issues_from_review(review: dict[str, Any], payload: dict[str, Any]) -> list
                 procedure_code="K.02.1",
                 source_sheet=source_sheet,
                 source_row=source_row,
+                source_col=source_col,
                 review_source="LLM辅助判断",
                 llm_review_type="K.02.1 新增测试语义复核",
             )
@@ -364,14 +384,45 @@ def _source_sheet(payload: dict[str, Any]) -> str:
 
 
 def _source_row(payload: dict[str, Any]) -> int | None:
-    execution = payload.get("addition_execution_path")
-    if isinstance(execution, dict):
-        row = execution.get("summary_source_row")
-        if isinstance(row, int):
-            return row
     test = payload.get("addition_test")
     if isinstance(test, dict):
         rows = test.get("waiver_note_rows")
         if isinstance(rows, list) and rows and isinstance(rows[0], int):
             return rows[0]
     return None
+
+
+def _topic_anchor(topic: str, payload: dict[str, Any]) -> tuple[str, int | None, int | None]:
+    if topic == "special_addition_source":
+        addition_list = payload.get("addition_list")
+        if isinstance(addition_list, dict):
+            examples = addition_list.get("nonpurchase_examples")
+            if isinstance(examples, list):
+                for item in examples:
+                    row = item.get("source_row") if isinstance(item, dict) else None
+                    if isinstance(row, int):
+                        return str(addition_list.get("source_sheet") or "K.02.1"), row, None
+    if topic == "cross_sheet_explanation":
+        for hint in payload.get("deterministic_rule_findings") or []:
+            if not isinstance(hint, dict):
+                continue
+            if hint.get("field") in {"sample_pool_amount", "purchase_rollforward_amount", "original_value"}:
+                return (
+                    str(hint.get("source_sheet") or _source_sheet(payload)),
+                    hint.get("source_row") if isinstance(hint.get("source_row"), int) else None,
+                    hint.get("source_col") if isinstance(hint.get("source_col"), int) else None,
+                )
+    test = payload.get("addition_test")
+    if isinstance(test, dict):
+        amounts = test.get("amounts")
+        if isinstance(amounts, dict):
+            item = amounts.get("difference_amount") or amounts.get("rollforward_purchase_amount")
+            if isinstance(item, dict):
+                row = item.get("source_row")
+                col = item.get("source_column")
+                return (
+                    str(test.get("source_sheet") or "K.02.1"),
+                    row if isinstance(row, int) else None,
+                    col if isinstance(col, int) else None,
+                )
+    return _source_sheet(payload), _source_row(payload), None

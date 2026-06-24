@@ -70,6 +70,7 @@ def run_addition_rules(
                 addition_list,
                 rollforward=rollforward,
                 lead=lead,
+                addition_test=addition_test,
             )
         )
     issues.extend(
@@ -101,6 +102,8 @@ def run_addition_rules(
             check_addition_sample_pool_purchase_amount_match,
             addition_list,
             addition_sample_output,
+            rollforward=rollforward,
+            addition_test=addition_test,
         )
     )
     issues.extend(recorder.execute_rule("addition_sampling_te_cra_consistency", check_addition_sampling_te_cra_consistency, addition_sample_output, lead))

@@ -55,6 +55,25 @@ def _sample_output(
     )
 
 
+def _addition_test_amounts(
+    *,
+    rollforward_purchase_amount: str = "100",
+) -> AdditionTestSheetDataset:
+    return AdditionTestSheetDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.1 新增测试",
+        amounts={
+            "rollforward_purchase_amount": AdditionAmountItem(
+                "Breakdown中购置金额",
+                rollforward_purchase_amount,
+                13,
+                6,
+                formula="='K.01 Agree SL to GL'!Z13",
+            ),
+        },
+    )
+
+
 def _lead(
     *,
     te: str = "100",
@@ -77,6 +96,7 @@ def test_sample_pool_matches_purchase_amount():
     issues = check_addition_sample_pool_purchase_amount_match(
         _addition_list(["40", "60"]),
         _sample_output(sample_pool="100"),
+        addition_test=_addition_test_amounts(rollforward_purchase_amount="100"),
     )
 
     assert issues == []
@@ -86,11 +106,14 @@ def test_sample_pool_mismatch_fails():
     issues = check_addition_sample_pool_purchase_amount_match(
         _addition_list(["40", "60"]),
         _sample_output(sample_pool="110"),
+        addition_test=_addition_test_amounts(rollforward_purchase_amount="100"),
     )
 
     assert len(issues) == 1
     assert issues[0].severity == Severity.FAIL
     assert issues[0].rule_id == "addition_sample_pool_purchase_amount_match"
+    assert issues[0].source_row == 41
+    assert issues[0].source_col == 6
 
 
 def test_sampling_rules_are_skipped_when_addition_is_summary_waived():

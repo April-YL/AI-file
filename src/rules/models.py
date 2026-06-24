@@ -51,6 +51,7 @@ class QcIssue:
     procedure_code: str = "FA_LIST"
     source_sheet: str = "FA list"
     source_row: int | None = None
+    source_col: int | None = None
     # 规则字典扩展（见 docs/rule-dictionary-mapping.md）
     dict_rule_code: str | None = None
     rule_name: str | None = None
@@ -69,6 +70,7 @@ class QcIssue:
             "procedure_code": self.procedure_code,
             "source_sheet": self.source_sheet,
             "source_row": self.source_row,
+            "source_col": self.source_col,
             "rule_id": self.rule_id,
             "field": self.field,
             "severity": self.severity.value,

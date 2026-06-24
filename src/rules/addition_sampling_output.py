@@ -10,6 +10,7 @@ from ingest.addition_test_sheet import (
 )
 from ingest.lead_sheet import CraAssertionRow, LeadSheetDataset
 from ingest.records import FaListDataset
+from ingest.rollforward_sheet import RollforwardSheetDataset, get_movement_transaction_amount
 from rules.addition_common import sum_purchase_original_value
 from rules.lead_common import cra_tier, field_values
 from rules.models import QcIssue, Severity
@@ -26,6 +27,9 @@ _RISK_RANK = {"lowest": 0, "low": 1, "moderate": 2, "high": 3}
 def check_addition_sample_pool_purchase_amount_match(
     addition_list: FaListDataset | None,
     addition_sample_output: AdditionSampleOutputDataset | None,
+    *,
+    rollforward: RollforwardSheetDataset | None = None,
+    addition_test: AdditionTestSheetDataset | None = None,
 ) -> list[QcIssue]:
     if addition_sample_output is None:
         return []
@@ -37,41 +41,31 @@ def check_addition_sample_pool_purchase_amount_match(
                 rule_id=RULE_POOL_AMOUNT,
                 field="sample_pool_amount",
                 severity=Severity.NEED_REVIEW,
-                message="K.02.1a 未可靠读取样本池总体金额，无法与新增清单购置金额核对。",
-                suggestion="请核对抽样输出的样本池总体金额是否已完整保留，并确认读取锚点是否需要补充。",
+                message="K.02.1a 未能可靠读取样本池金额，无法与 K.01 后推购置金额核对。",
+                suggestion="请确认 K.02.1a 新增选样输出中的样本金额是否存在，并补充金额读取锚点。",
                 source_sheet=addition_sample_output.source_sheet,
                 source_row=item.source_row if item else None,
+                source_col=item.source_column if item else None,
             )
         ]
-    if addition_list is None:
+
+    target, target_label = _rollforward_purchase_amount(addition_test, rollforward)
+    if target is None:
         return [
             _issue(
                 rule_id=RULE_POOL_AMOUNT,
                 field="sample_pool_amount",
                 severity=Severity.NEED_REVIEW,
-                message=f"K.02.1a 样本池总体金额为 {sample_pool}，但未读取到新增清单，无法核对购置金额。",
-                suggestion="请确认底稿包含新增清单，且新增清单 sheet 可被识别。",
+                message=f"K.02.1a 样本池金额为 {sample_pool}，但未能读取 K.01 后推购置金额，无法完成核对。",
+                suggestion="请确认 K.02.1 测试页 Breakdown 购置金额或 K.01 后推购置金额是否可读取。",
                 source_sheet=addition_sample_output.source_sheet,
                 source_row=item.source_row if item else None,
+                source_col=item.source_column if item else None,
             )
         ]
 
-    mapped = {m.standard_field for m in addition_list.mapped_fields}
-    purchase_total, purchase_count = sum_purchase_original_value(addition_list.records, mapped)
-    if purchase_total is None:
-        return [
-            _issue(
-                rule_id=RULE_POOL_AMOUNT,
-                field="sample_pool_amount",
-                severity=Severity.NEED_REVIEW,
-                message="新增清单未能可靠汇总购置/外购新增原值，无法与 K.02.1a 样本池总体金额核对。",
-                suggestion="请确认新增清单已映射原值和新增方式，并区分购置/外购与其他新增方式。",
-                source_sheet=addition_list.source_sheet,
-            )
-        ]
-
-    diff = sample_pool - purchase_total
-    tolerance = amount_tolerance(max(abs(sample_pool), abs(purchase_total), Decimal("1")))
+    diff = sample_pool - target
+    tolerance = amount_tolerance(max(abs(sample_pool), abs(target), Decimal("1")))
     if abs(diff) <= tolerance:
         return []
     return [
@@ -80,12 +74,13 @@ def check_addition_sample_pool_purchase_amount_match(
             field="sample_pool_amount",
             severity=Severity.FAIL,
             message=(
-                "K.02.1a 样本池总体金额与新增清单购置/外购金额不一致："
-                f"样本池 {sample_pool}，新增清单购置/外购 {purchase_total}（{purchase_count} 行），差异 {diff}。"
+                "K.02.1a 样本池金额与 K.01 后推购置金额不一致："
+                f"样本池={sample_pool}，{target_label}={target}，差异={diff}。"
             ),
-            suggestion="请核对导入 Skywind 的总体是否仅为本期购置/外购新增，并检查是否混入或遗漏其他新增方式。",
+            suggestion="请核对 Skywind 选样输出是否使用了 K.01 后推购置金额，并检查 K.02.1 测试页 Breakdown 金额。",
             source_sheet=addition_sample_output.source_sheet,
             source_row=item.source_row if item else None,
+            source_col=item.source_column if item else None,
         )
     ]
 
@@ -383,6 +378,32 @@ def _norm(value: str | None) -> str:
     return re.sub(r"[\s_\-（）()，,、/]", "", str(value).strip().lower())
 
 
+
+def _rollforward_purchase_amount(
+    addition_test: AdditionTestSheetDataset | None,
+    rollforward: RollforwardSheetDataset | None,
+) -> tuple[Decimal | None, str]:
+    if addition_test is not None:
+        item = addition_test.amounts.get("rollforward_purchase_amount")
+        amount = parse_amount(item.amount if item else None)
+        if amount is not None:
+            label = "K.02.1 测试页 Breakdown 购置金额"
+            if getattr(item, "formula", None):
+                label += "（公式/link）"
+            else:
+                label += "（手输/未识别公式）"
+            return amount, label
+    if rollforward is not None:
+        amount, _row = get_movement_transaction_amount(
+            rollforward,
+            transaction_key="purchase",
+            measure="original_value",
+        )
+        if amount is not None:
+            return amount, "K.01 后推购置金额"
+    return None, "K.01 后推购置金额"
+
+
 def _issue(
     *,
     rule_id: str,
@@ -392,6 +413,7 @@ def _issue(
     suggestion: str,
     source_sheet: str | None,
     source_row: int | None = None,
+    source_col: int | None = None,
 ) -> QcIssue:
     return QcIssue(
         asset_id=None,
@@ -403,4 +425,5 @@ def _issue(
         procedure_code="K.02.1",
         source_sheet=source_sheet,
         source_row=source_row,
+        source_col=source_col,
     )

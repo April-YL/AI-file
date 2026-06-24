@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from decimal import Decimal
 
 from ingest.lead_sheet import CraAssertionRow, LeadSheetDataset
@@ -59,6 +60,18 @@ _TRIVIAL_FLUCTUATION_PHRASES = (
 )
 
 
+@dataclass(frozen=True)
+class LeadThresholds:
+    te: Decimal | None
+    sad: Decimal | None
+    tt: Decimal | None
+    source_sheet: str | None
+    te_source: str | None = None
+    sad_source: str | None = None
+    tt_source: str | None = None
+    notes: tuple[str, ...] = ()
+
+
 def field_values(lead: LeadSheetDataset) -> dict[str, str | None]:
     by_key = {f.field_key: f.value for f in lead.basic_info_fields}
     for cap in lead.materiality:
@@ -112,6 +125,57 @@ def effective_overall_threshold(cra_rows: list[CraAssertionRow]) -> Decimal | No
         return overall
     tts = assertion_tt_values(cra_rows)
     return min(tts) if tts else None
+
+
+def lead_thresholds(lead: LeadSheetDataset | None) -> LeadThresholds:
+    if lead is None:
+        return LeadThresholds(
+            te=None,
+            sad=None,
+            tt=None,
+            source_sheet=None,
+            notes=("lead_missing",),
+        )
+
+    values = field_values(lead)
+    te = _positive_amount(values.get("te"))
+    sad = _positive_amount(values.get("sad"))
+    tt = _positive_amount(effective_overall_threshold(lead.cra_rows))
+    notes: list[str] = []
+    if te is None:
+        notes.append("te_missing_from_lead")
+    if sad is None:
+        notes.append("sad_missing_from_lead")
+    if tt is None:
+        notes.append("tt_missing_from_lead_cra_rows")
+
+    return LeadThresholds(
+        te=te,
+        sad=sad,
+        tt=tt,
+        source_sheet=lead.source_sheet,
+        te_source="lead_materiality" if te is not None else None,
+        sad_source="lead_materiality" if sad is not None else None,
+        tt_source="lead_cra_rows" if tt is not None else None,
+        notes=tuple(notes),
+    )
+
+
+def lead_te(lead: LeadSheetDataset | None) -> Decimal | None:
+    return lead_thresholds(lead).te
+
+
+def lead_sad(lead: LeadSheetDataset | None) -> Decimal | None:
+    return lead_thresholds(lead).sad
+
+
+def lead_tt(lead: LeadSheetDataset | None) -> Decimal | None:
+    return lead_thresholds(lead).tt
+
+
+def _positive_amount(value: str | Decimal | None) -> Decimal | None:
+    amount = value if isinstance(value, Decimal) else parse_threshold_amount(value)
+    return amount if amount is not None and amount > 0 else None
 
 
 def amounts_close(a: Decimal, b: Decimal, *, ref: Decimal | None = None) -> bool:

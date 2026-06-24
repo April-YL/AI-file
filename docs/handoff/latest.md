@@ -953,3 +953,73 @@ Next recommended work:
 3. If missing-execution visibility is needed later, prefer a narrow missing-rule list over a complex reconciliation panel.
 4. Keep registry display tests that block question-mark mojibake and lock key K.03 display names.
 
+## 2026-06-24 K02 anchors, Lead thresholds, Summary LLM, and K03 Chinese cmts
+
+This note records the repair scope completed after the UI/ledger round. The scope is intentionally limited to K.02 addition/disposal anchoring, K.00 Lead threshold access, summary-page LLM waiver semantics, and K.03 comment wording. It does not change the frozen architecture, severity model, or report structure.
+
+### K.02 addition and disposal anchors
+
+The core issue was that some K.02 findings were landing in one generic Comments cell because the issue anchor was not a real business-sheet anchor. The fix direction is:
+
+- Findings should carry a real source_sheet plus source_row whenever a specific workbook row exists.
+- For addition sampling and disposal sampling, sample-level findings should land on the actual sample output or test-sheet sample row, not on a generic sheet-level placeholder.
+- Report annotation now supports source_col so a finding can land on the relevant business column when the rule knows the field-level anchor.
+- When multiple findings truly share the same source cell, cell comments are merged instead of overwriting each other.
+
+Important business rule for K.02 addition:
+
+- K.02.1 addition test mainly covers purchase-type additions.
+- Addition list totals must distinguish purchase additions from non-purchase additions such as transfer-in, construction in progress transfer, merger, reclassification, or allocation.
+- If the K.02.1 test page contains formulas or links to source sheets, prefer those workbook formulas/links as the first source of truth.
+- If the test page uses hard-coded numbers, re-check against the underlying addition list and K.01 rollforward because hard-coded numbers are the most likely to become stale.
+- K.02.1a sample amount differences should land on the K.02.1a sample amount row, not all on the K.02.1 test page.
+
+### Lead threshold fixed entry point
+
+TE, SAD, and TT should be read through the Lead helper entry point instead of each rule finding thresholds by itself.
+
+- `lead_te()` reads TE from K.00 Lead.
+- `lead_sad()` reads SAD from K.00 Lead.
+- `lead_tt()` reads TT from K.00 Lead CRA/TT rows and chooses the reliable positive overall threshold value.
+- Disposal other-reduction-over-TT now uses this shared Lead TT entry point.
+
+This reduces repeated threshold-search logic and makes later rules more stable: future K.01/K.02/K.03 rules should call the Lead helper first, and only fall back to local parsing when the helper cannot provide a reliable value.
+
+### Summary page LLM waiver prompt
+
+The summary-page LLM prompt now constrains addition/disposal waiver reasoning with a threshold decision tree instead of treating TE, TT, and SAD as parallel standards.
+
+Current intended meaning:
+
+- SAD layer: if the addition/disposal amount is below K.00 Lead SAD, the amount basis is normally acceptable. Do not require extra TE or TT support unless the input shows nature-risk exceptions.
+- TT layer: if the addition/disposal amount is below K.00 Lead TT, the amount basis is acceptable, but the reason still needs to state or support that there are no nature-risk exceptions. Do not require TE.
+- TE layer: if the reason only says the total amount, disposal net value, or addition amount is below K.00 Lead TE, that is not enough by itself. It must also state that no single item exceeds TT and that no nature-risk exception exists.
+- Vague wording such as "small amount", "immaterial", or "below materiality" without a named SAD/TT/TE basis remains insufficient or unclear.
+
+The prompt also requires the model rationale to state which SAD/TT/TE layer was applied, and the suggested action should only ask for the missing information at that layer.
+
+### K.03 Chinese cmts output
+
+K.03 rule output wording was changed from English to Chinese for auditor-facing comments.
+
+- `k03_tod_by_item` messages now describe by-item depreciation-test issues in Chinese, including missing detail table, missing key depreciation fields, over-SAD differences, total difference issues, and K.03 vs K.01 depreciation reconciliation.
+- `k03_policy_review` messages now describe depreciation-policy review issues in Chinese, including unreadable policy table, missing policy sections, policy change without explanation, FA list useful-life/rate mismatches, and obvious policy anomalies.
+- The rule logic and severity model were not intentionally changed; this is an output wording repair.
+
+### Verification notes
+
+Focused verification completed in this round:
+
+- `pytest tests\\llm\\test_summary_psp_review.py -q -p no:cacheprovider -k "not weak_match"` -> 7 passed, 1 deselected.
+- Earlier focused checks for Lead TT and disposal threshold behavior passed: `tests\\rules\\test_disposal_list_rules.py` -> 8 passed.
+
+Known environment note:
+
+- Full `tests\\llm\\test_summary_psp_review.py` currently hits a Windows pytest temp-directory permission problem on the test that uses `tmp_path`. The prompt-related tests passed; the remaining error is environmental temp-directory access, not a summary LLM assertion failure.
+
+Next recommended work:
+
+1. Re-run the real workbook through the UI and inspect K.02 addition/disposal Comments anchors on the annotated workbook.
+2. Confirm summary-page waiver LLM output no longer asks for TE/TT when the reason already satisfies the SAD layer.
+3. Extend the shared Lead threshold helper pattern to future rules before adding new local threshold parsing.
+4. Add a small K.03 output-language regression later if the project wants to lock Chinese cmts wording at the test level.

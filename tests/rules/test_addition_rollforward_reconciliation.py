@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from ingest.addition_test_sheet import AdditionAmountItem, AdditionTestSheetDataset
 from ingest.lead_sheet import LeadBasicInfoField, LeadSheetDataset, MaterialityCapture
 from ingest.models import AssetRecord, FieldMapping, RollforwardPeriodRole
 from ingest.records import FaListDataset
@@ -53,6 +54,44 @@ def _lead_with_sad(value: str = "5") -> LeadSheetDataset:
                 source_col_workpaper=2,
             )
         ],
+    )
+
+
+def _addition_test_page(
+    *,
+    purchase: str = "100",
+    rollforward: str = "100",
+    difference: str = "0",
+    formula: bool = True,
+) -> AdditionTestSheetDataset:
+    return AdditionTestSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.02.1 新增测试",
+        amounts={
+            "purchase_population_amount": AdditionAmountItem(
+                "购置总金额",
+                purchase,
+                12,
+                6,
+                formula="=SUMIFS('K.02.1b 新增清单'!I:I,'K.02.1b 新增清单'!J:J,\"购置\")"
+                if formula
+                else None,
+            ),
+            "rollforward_purchase_amount": AdditionAmountItem(
+                "Breakdown中购置金额",
+                rollforward,
+                13,
+                6,
+                formula="='K.01 Agree SL to GL'!Z13" if formula else None,
+            ),
+            "difference_amount": AdditionAmountItem(
+                "差异",
+                difference,
+                14,
+                6,
+                formula="=F12-F13" if formula else None,
+            ),
+        },
     )
 
 
@@ -173,6 +212,87 @@ def test_reconciliation_pass_when_amounts_match():
         ],
     )
     assert not check_addition_rollforward_reconciliation(addition, rollforward=rf)
+
+
+def test_reconciliation_prefers_formula_linked_test_page_amounts():
+    addition = _addition_dataset(
+        [
+            AssetRecord(
+                source_row=2,
+                asset_id="FA-TEST-001",
+                original_value="999",
+                addition_method="璐疆",
+            )
+        ]
+    )
+    rf = RollforwardSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.01 Agree SL to GL",
+        header_row=1,
+        mapped_fields=[],
+        movement_transactions=[
+            MovementTransactionAmount(
+                transaction_key="purchase",
+                transaction_label="璐疆",
+                measure="original_value",
+                amount=Decimal("999"),
+                source_row=11,
+            )
+        ],
+    )
+
+    issues = check_addition_rollforward_reconciliation(
+        addition,
+        rollforward=rf,
+        addition_test=_addition_test_page(purchase="100", rollforward="100", difference="0"),
+    )
+
+    assert issues == []
+
+
+def test_reconciliation_dead_number_rechecks_source_amounts():
+    addition = _addition_dataset(
+        [
+            AssetRecord(
+                source_row=2,
+                asset_id="FA-TEST-001",
+                original_value="120",
+                addition_method="璐疆",
+            )
+        ]
+    )
+    rf = RollforwardSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.01 Agree SL to GL",
+        header_row=1,
+        mapped_fields=[],
+        movement_transactions=[
+            MovementTransactionAmount(
+                transaction_key="purchase",
+                transaction_label="璐疆",
+                measure="original_value",
+                amount=Decimal("120"),
+                source_row=11,
+            )
+        ],
+    )
+
+    issues = check_addition_rollforward_reconciliation(
+        addition,
+        rollforward=rf,
+        addition_test=_addition_test_page(
+            purchase="100",
+            rollforward="100",
+            difference="0",
+            formula=False,
+        ),
+    )
+
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.WARN
+    assert issues[0].source_sheet == "K.02.1 新增测试"
+    assert issues[0].source_row == 14
+    assert issues[0].source_col == 6
 
 
 def test_reconciliation_warn_when_mismatch_within_sad():

@@ -1,4 +1,5 @@
 from ingest.models import AssetRecord, FieldMapping
+from ingest.lead_sheet import CraAssertionRow, LeadSheetDataset
 from ingest.disposal_test_sheet import DisposalExecutionPathDataset
 from ingest.records import DisposalListSummary, DisposalMethodBucket, FaListDataset
 from rules.disposal_list_rules import (
@@ -9,6 +10,7 @@ from rules.disposal_list_rules import (
 )
 from rules.models import Severity
 from rules.disposal_runner import run_disposal_rules
+from rules.lead_common import lead_thresholds, lead_tt
 
 
 def _dataset(record: AssetRecord, fields: tuple[str, ...]) -> FaListDataset:
@@ -99,6 +101,63 @@ def test_unclassified_and_other_reductions_are_review_items():
     assert method_issues[0].severity == Severity.NEED_REVIEW
     assert method_issues[0].source_row == 8
     assert other_issues[0].severity == Severity.NEED_REVIEW
+
+
+def test_lead_tt_uses_cra_rows_when_basic_info_has_no_tt():
+    lead = LeadSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        cra_rows=[
+            CraAssertionRow(assertion="存在", tt="300"),
+            CraAssertionRow(assertion="计价", tt="200"),
+        ],
+    )
+
+    thresholds = lead_thresholds(lead)
+
+    assert lead_tt(lead) == thresholds.tt == 200
+    assert thresholds.tt_source == "lead_cra_rows"
+
+
+def test_other_reduction_uses_lead_cra_tt():
+    summary = DisposalListSummary(
+        source_file="test.xlsx",
+        source_sheet="处置清单",
+        record_count=1,
+        other_reduction_net_value="150",
+    )
+    lead = LeadSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        cra_rows=[
+            CraAssertionRow(assertion="存在", tt="200"),
+            CraAssertionRow(assertion="计价", tt="300"),
+        ],
+    )
+
+    assert check_disposal_other_reduction_over_tt(summary, lead) == []
+
+
+def test_other_reduction_warns_when_over_lead_cra_tt():
+    summary = DisposalListSummary(
+        source_file="test.xlsx",
+        source_sheet="处置清单",
+        record_count=1,
+        other_reduction_net_value="250",
+    )
+    lead = LeadSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.00 Lead Sheet",
+        cra_rows=[
+            CraAssertionRow(assertion="存在", tt="200"),
+            CraAssertionRow(assertion="计价", tt="300"),
+        ],
+    )
+
+    issues = check_disposal_other_reduction_over_tt(summary, lead)
+
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.NEED_REVIEW
 
 
 def test_summary_waived_does_not_run_disposal_list_rules():

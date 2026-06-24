@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import openpyxl
+from openpyxl.utils import get_column_letter
 
 from ingest.records import FaListDataset
 from ingest.sheet_loader import find_sheets_by_kind
@@ -21,6 +22,7 @@ class AdditionAmountItem:
     amount: str | None
     source_row: int
     source_column: int | None = None
+    formula: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -28,6 +30,12 @@ class AdditionAmountItem:
             "amount": self.amount,
             "source_row": self.source_row,
             "source_column": self.source_column,
+            "formula": self.formula,
+            "cell_ref": (
+                f"{get_column_letter(self.source_column)}{self.source_row}"
+                if self.source_column
+                else None
+            ),
         }
 
 
@@ -682,7 +690,11 @@ def load_addition_test_from_workbook(
         return None
     rows = candidate["rows"]
     waiver_text, waiver_rows = _scan_waiver_notes(rows)
-    amounts = _extract_amount_items(rows, _TEST_AMOUNT_ANCHORS)
+    amounts = _extract_amount_items(
+        rows,
+        _TEST_AMOUNT_ANCHORS,
+        formula_rows=candidate.get("formula_rows"),
+    )
     tested_samples = _extract_tested_samples(rows)
     if waiver_text:
         path_kind = "test_sheet_waiver_note"
@@ -745,7 +757,11 @@ def load_addition_sample_output_from_workbook(
         return None
     rows = candidate["rows"]
     parameters = _extract_parameter_items(rows, _SAMPLE_PARAMETER_ANCHORS)
-    amounts = _extract_amount_items(rows, _SAMPLE_AMOUNT_ANCHORS)
+    amounts = _extract_amount_items(
+        rows,
+        _SAMPLE_AMOUNT_ANCHORS,
+        formula_rows=candidate.get("formula_rows"),
+    )
     selected_samples = _extract_selected_samples(rows)
     module_assessments = _build_sample_output_module_assessments(
         rows,
@@ -851,21 +867,35 @@ def _choose_candidate(
 ) -> dict[str, Any] | None:
     if sheet_name:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        formula_wb = openpyxl.load_workbook(path, read_only=True, data_only=False)
         try:
             ws = wb[sheet_name]
             rows = read_worksheet_rows(ws, max_rows=max_rows)
+            formula_rows = read_worksheet_rows(formula_wb[sheet_name], max_rows=max_rows)
         finally:
             wb.close()
-        return {"sheet_name": sheet_name, "confidence": 0.9, "rows": rows}
+            formula_wb.close()
+        return {
+            "sheet_name": sheet_name,
+            "confidence": 0.9,
+            "rows": rows,
+            "formula_rows": formula_rows,
+        }
 
     candidates = find_sheets_by_kind(path, kind, max_rows=max_rows or 150)
     if not candidates:
         return None
     chosen = candidates[0]
+    formula_wb = openpyxl.load_workbook(path, read_only=True, data_only=False)
+    try:
+        formula_rows = read_worksheet_rows(formula_wb[chosen.sheet_name], max_rows=max_rows)
+    finally:
+        formula_wb.close()
     return {
         "sheet_name": chosen.sheet_name,
         "confidence": chosen.confidence,
         "rows": chosen.rows,
+        "formula_rows": formula_rows,
     }
 
 
@@ -933,6 +963,7 @@ def _extract_amount_items(
     anchors: dict[str, tuple[str, ...]],
     *,
     max_anchor_col: int = 18,
+    formula_rows: list[tuple[Any, ...]] | None = None,
 ) -> dict[str, AdditionAmountItem]:
     found: dict[str, AdditionAmountItem] = {}
     for r_idx, row in enumerate(rows, 1):
@@ -963,8 +994,26 @@ def _extract_amount_items(
                     amount=_stringify_cell(value),
                     source_row=r_idx,
                     source_column=value_col,
+                    formula=_formula_at(formula_rows, r_idx, value_col),
                 )
     return found
+
+
+def _formula_at(
+    rows: list[tuple[Any, ...]] | None,
+    row_idx: int,
+    col_idx: int | None,
+) -> str | None:
+    if rows is None or col_idx is None:
+        return None
+    if row_idx < 1 or row_idx > len(rows):
+        return None
+    row = rows[row_idx - 1]
+    if col_idx < 1 or col_idx > len(row):
+        return None
+    value = row[col_idx - 1]
+    text = str(value).strip() if value is not None else ""
+    return text if text.startswith("=") else None
 
 
 def _amount_item_requires_numeric(key: str) -> bool:

@@ -6,7 +6,7 @@ from ingest.lead_sheet import LeadSheetDataset
 from ingest.models import AssetRecord
 from ingest.records import DisposalListSummary, FaListDataset
 from rules.execution_recorder import RuleExecutionRecorder
-from rules.lead_common import field_values
+from rules.lead_common import lead_tt
 from rules.models import QcIssue, Severity
 from rules.parsing import amount_tolerance, is_blank, parse_amount, record_has_identity, record_is_empty_data_row
 
@@ -169,7 +169,7 @@ def check_disposal_other_reduction_over_tt(
     other = parse_amount(summary.other_reduction_net_value) or Decimal("0")
     if other == 0:
         return []
-    tt = _lead_threshold(lead, "tt")
+    tt = lead_tt(lead)
     if tt is not None and abs(other) <= tt:
         return []
     threshold_text = f"超过 TT（{tt}）" if tt is not None else "未读取到 TT，无法判断是否超过测试阈值"
@@ -183,14 +183,6 @@ def check_disposal_other_reduction_over_tt(
             summary.source_sheet,
         )
     ]
-
-
-def _lead_threshold(lead: LeadSheetDataset | None, key: str) -> Decimal | None:
-    if lead is None:
-        return None
-    amount = parse_amount(field_values(lead).get(key))
-    return amount if amount is not None and amount > 0 else None
-
 
 def _issue(
     rule_id: str,

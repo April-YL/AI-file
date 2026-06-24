@@ -211,6 +211,55 @@ def test_main_comments_cell_ref_has_internal_hyperlink(tmp_path: Path):
     wb2.close()
 
 
+def test_main_comments_uses_source_column_for_anchor(tmp_path: Path):
+    src = tmp_path / "source_col.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.02.1a 新增选样输出"
+    ws["F41"] = 100
+    wb.save(src)
+    wb.close()
+
+    issue = QcIssue(
+        asset_id=None,
+        rule_id="addition_sample_pool_purchase_amount_match",
+        field="sample_pool_amount",
+        severity=Severity.FAIL,
+        message="样本池金额与后推金额不一致",
+        suggestion="核对样本池金额",
+        procedure_code="K.02.1",
+        source_sheet="K.02.1a 新增选样输出",
+        source_row=41,
+        source_col=6,
+    )
+    report = QcReport(
+        source_file=str(src),
+        source_sheet="K.02.1a 新增选样输出",
+        procedure_code="K.02.1",
+        rule_ids=["addition_sample_pool_purchase_amount_match"],
+        issues=[issue],
+        asset_results=[],
+        summary=ReportSummary(
+            total_records=0,
+            pass_count=0,
+            warn_count=0,
+            fail_count=1,
+            need_review_count=0,
+            overall_severity=Severity.FAIL,
+        ),
+    )
+    out = tmp_path / "out.xlsx"
+    export_annotated_workbook(report, src, out)
+
+    wb2 = openpyxl.load_workbook(out)
+    cell = wb2[COMMENTS_SHEET_NAME]["C2"]
+    assert cell.value == "$F$41"
+    assert cell.hyperlink.location == "'K.02.1a 新增选样输出'!F41"
+    assert wb2["K.02.1a 新增选样输出"]["F41"].comment is not None
+    assert wb2["K.02.1a 新增选样输出"]["B41"].comment is None
+    wb2.close()
+
+
 def test_external_link_workbook_gets_ooxml_cell_comment(tmp_path: Path):
     src = tmp_path / "source_external.xlsx"
     wb = openpyxl.Workbook()
