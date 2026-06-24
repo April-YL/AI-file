@@ -2,6 +2,13 @@
 
 > 每次收工前更新本文。新成员接手先读 `docs/ONBOARDING.md`，再读 `AGENTS.md` 和本文。
 
+## 2026-06-24 K1 mapping 编号补全复核
+
+- 正式映射工作簿 `固定资产质检agent/资料库/K1 check list_rule_mapping.xlsx` 的最新 sheet `规则映射v0.4编号补全版` 已由 102 行更新为 110 行，并经人工检查确认问题已解决。
+- 本轮补入 registry 已登记但映射表缺失的 `DP-BI-PRE-001`～`DP-BI-PRE-004`、`DP-BI-004`、`DP-POL-PRE-001`～`DP-POL-PRE-002`、`DP-POL-007`。
+- 已修复 `MT-002 / special_movement_identification` 与 `GL-003 / lead_prior_year_reconciliation` 复核意见中的疑问口径；当前说明明确这些点的 runner 纳入状态、人工复核边界和与既有规则的重叠关系。
+- 本轮只更新 K1 mapping Excel 与说明文档，不改变 `src/rules/registry.py`、runner、execution_ledger、severity 或 finding 判断逻辑。
+
 ## 固定资料入口
 
 以后查标准底稿、SOP 和程序执行方法，不再靠全仓搜索，统一先看这里：
