@@ -7,6 +7,7 @@ import re
 import zipfile
 from collections import defaultdict
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import openpyxl
 from openpyxl.comments import Comment
@@ -37,7 +38,14 @@ _COMMENT_HEADERS = (
     "Closed?",
     _AGENT_REF_HEADER,
     _REVIEW_SOURCE_HEADER,
+    "Severity",
+    "Rule",
+    "Field",
 )
+_COMMENT_COLUMN_WIDTHS = {
+    4: 80,  # Question/Comment
+    7: 55,  # Agent 参考（质检建议）
+}
 _LOCATOR_HEADERS = (
     "EY Ref.",
     "Severity",
@@ -73,6 +81,10 @@ _FILL_NR = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="soli
 
 _SEV_RANK = {Severity.FAIL: 0, Severity.WARN: 1, Severity.NEED_REVIEW: 2}
 _WORKBOOK_XML = "xl/workbook.xml"
+_NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_Q_COLS = f"{{{_NS_MAIN}}}cols"
+_Q_COL = f"{{{_NS_MAIN}}}col"
+_Q_SHEETDATA = f"{{{_NS_MAIN}}}sheetData"
 _SHEET_TAG_RE = re.compile(
     r"<sheet\s+[^>]*name=\"([^\"]*)\"[^>]*/>",
     re.IGNORECASE,
@@ -176,9 +188,47 @@ def _issue_comment_text(issue: QcIssue) -> str:
 
 def _question_text(issue: QcIssue) -> str:
     """Question/Comment：仅质检问题；建议见最后一列。"""
-    code = issue.dict_rule_code or issue.rule_id
-    short = _short_title_for_issue(issue) or _compact_issue_message(issue.message)
-    return f"[{issue.severity.value}] {code} {short}"
+    return _short_title_for_issue(issue) or _compact_issue_message(issue.message)
+
+
+def _rule_ref(issue: QcIssue) -> str:
+    return issue.dict_rule_code or issue.rule_id
+
+
+def _field_ref(issue: QcIssue) -> str:
+    return issue.field or ""
+
+
+def _worksheet_xml_with_widths(
+    headers: tuple[str, ...],
+    rows: list[tuple],
+    *,
+    footer: str | None = None,
+    hyperlinks: dict[tuple[int, int], str] | None = None,
+    column_widths: dict[int, int] | None = None,
+) -> bytes:
+    xml = build_worksheet_xml(headers, rows, footer=footer, hyperlinks=hyperlinks)
+    if not column_widths:
+        return xml
+    root = ET.fromstring(xml)
+    sheet_data = root.find(_Q_SHEETDATA)
+    if sheet_data is None:
+        return xml
+    cols = ET.Element(_Q_COLS)
+    for idx, width in sorted(column_widths.items()):
+        ET.SubElement(
+            cols,
+            _Q_COL,
+            attrib={
+                "min": str(idx),
+                "max": str(idx),
+                "width": str(width),
+                "customWidth": "1",
+            },
+        )
+    root.insert(list(root).index(sheet_data), cols)
+    ET.indent(root, space="  ")
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
 def _agent_suggestion(issue: QcIssue) -> str | None:
@@ -236,15 +286,13 @@ def _aggregate_fa_list_issues(
 
 
 def _fa_list_summary_question(rep: QcIssue, count: int) -> str:
-    code = rep.dict_rule_code or rep.rule_id
-    field_part = f"\uff08\u5b57\u6bb5\uff1a{rep.field}\uff09" if rep.field else ""
     detail = _compact_issue_message(rep.message)
     if detail:
         return (
-            f"[{rep.severity.value}] {code}{field_part} \u2014 \u5171 {count} \u6761\u540c\u7c7b\u95ee\u9898\uff1b"
+            f"\u5171 {count} \u6761\u540c\u7c7b\u95ee\u9898\uff1b"
             f"\u4ee3\u8868\u6027\u95ee\u9898\uff1a{detail}\u3002\u8be6\u89c1\u300a{FA_LIST_COMMENTS_SHEET_NAME}\u300b"
         )
-    return f"[{rep.severity.value}] {code}{field_part} \u2014 \u5171 {count} \u6761\u540c\u7c7b\u95ee\u9898\uff0c\u8be6\u89c1\u300a{FA_LIST_COMMENTS_SHEET_NAME}\u300b"
+    return f"\u5171 {count} \u6761\u540c\u7c7b\u95ee\u9898\uff0c\u8be6\u89c1\u300a{FA_LIST_COMMENTS_SHEET_NAME}\u300b"
 
 
 def build_main_comments_rows(
@@ -275,6 +323,9 @@ def build_main_comments_rows(
                 "No",
                 _agent_suggestion(issue),
                 _review_source_text(issue),
+                issue.severity.value,
+                _rule_ref(issue),
+                _field_ref(issue),
             )
         )
 
@@ -296,6 +347,9 @@ def build_main_comments_rows(
                 "No",
                 _agent_suggestion(rep),
                 _review_source_text(rep),
+                rep.severity.value,
+                _rule_ref(rep),
+                _field_ref(rep),
             )
         )
 
@@ -376,6 +430,9 @@ def build_fa_list_detail_rows(fa_list_issues: list[QcIssue]) -> list[tuple]:
                 "No",
                 _agent_suggestion(issue),
                 _review_source_text(issue),
+                issue.severity.value,
+                _rule_ref(issue),
+                _field_ref(issue),
             )
         )
     return rows
@@ -643,20 +700,22 @@ def export_annotated_workbook(
         [
             (
                 COMMENTS_SHEET_NAME,
-                build_worksheet_xml(
+                _worksheet_xml_with_widths(
                     _COMMENT_HEADERS,
                     main_rows,
                     footer=f"源文件: {input_path.name}{footer}",
                     hyperlinks=main_links,
+                    column_widths=_COMMENT_COLUMN_WIDTHS,
                 ),
             ),
             (
                 FA_LIST_COMMENTS_SHEET_NAME,
-                build_worksheet_xml(
+                _worksheet_xml_with_widths(
                     _COMMENT_HEADERS,
                     fa_rows,
                     footer=f"源文件: {input_path.name} | FA list 专项明细",
                     hyperlinks=fa_links,
+                    column_widths=_COMMENT_COLUMN_WIDTHS,
                 ),
             ),
             (
