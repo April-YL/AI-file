@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import shutil
+import re
+import zipfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -70,6 +72,11 @@ _FILL_WARN = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="so
 _FILL_NR = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
 
 _SEV_RANK = {Severity.FAIL: 0, Severity.WARN: 1, Severity.NEED_REVIEW: 2}
+_WORKBOOK_XML = "xl/workbook.xml"
+_SHEET_TAG_RE = re.compile(
+    r"<sheet\s+[^>]*name=\"([^\"]*)\"[^>]*/>",
+    re.IGNORECASE,
+)
 _SHORT_TITLE_BY_CODE_FIELD: dict[tuple[str, str], str] = {
     ("AE-003", "execution_status_consistency"): "汇总勾选与底稿证据不一致（K.03.2/TOD）",
     ("AE-003", "waiver_reason"): "不执行理由不充分（需补风险/阈值/替代程序）",
@@ -109,6 +116,41 @@ def _cell_location(sheet: str | None, row: int | None, col: int | None = None) -
 
 def _issue_col(col: int | None) -> int:
     return col if isinstance(col, int) and col > 0 else _DEFAULT_COMMENT_COL
+
+
+def _hide_locator_sheet(workbook_path: str | Path) -> None:
+    path = Path(workbook_path)
+    with zipfile.ZipFile(path, "r") as zf:
+        archive = {name: zf.read(name) for name in zf.namelist()}
+    workbook_xml = archive.get(_WORKBOOK_XML)
+    if not workbook_xml:
+        return
+
+    text = workbook_xml.decode("utf-8")
+    patched = text
+    for match in _SHEET_TAG_RE.finditer(text):
+        if match.group(1) != LOCATOR_SHEET_NAME:
+            continue
+        tag = match.group(0)
+        if re.search(r'\bstate="[^"]*"', tag):
+            hidden_tag = re.sub(r'\bstate="[^"]*"', 'state="hidden"', tag, count=1)
+        else:
+            hidden_tag = tag[:-2] + ' state="hidden"/>'
+        patched = patched.replace(tag, hidden_tag, 1)
+        break
+    if patched == text:
+        return
+
+    archive[_WORKBOOK_XML] = patched.encode("utf-8")
+    tmp = path.with_name(f"{path.name}.tmp")
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+            for name, data in archive.items():
+                zout.writestr(name, data)
+        tmp.replace(path)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
 
 
 def _issue_comment_text(issue: QcIssue) -> str:
@@ -649,6 +691,7 @@ def export_annotated_workbook(
             LLM_INGEST_REVIEW_SHEET_NAME,
         ),
     )
+    _hide_locator_sheet(out)
 
     annotation_result = inject_cell_comments(out, _ooxml_comments_by_sheet(out, issues))
     skipped = annotation_result.get("skipped_sheets") or []

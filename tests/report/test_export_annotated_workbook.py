@@ -94,6 +94,9 @@ def test_export_two_comment_sheets(tmp_path: Path):
     assert wb.sheetnames[1] == FA_LIST_COMMENTS_SHEET_NAME
     assert wb.sheetnames[2] == LOCATOR_SHEET_NAME
     assert wb.sheetnames[3] == LLM_INGEST_REVIEW_SHEET_NAME
+    visible_sheetnames = [ws.title for ws in wb.worksheets if ws.sheet_state == "visible"]
+    assert LOCATOR_SHEET_NAME not in visible_sheetnames
+    assert wb[LOCATOR_SHEET_NAME].sheet_state == "hidden"
     assert wb[COMMENTS_SHEET_NAME].cell(1, 1).value == "EY Ref."
     assert wb[LOCATOR_SHEET_NAME].cell(1, 1).value == "EY Ref."
     wb.close()
