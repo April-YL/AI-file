@@ -6,6 +6,8 @@
 
 业务规则需求以脱敏规则字典（`tests/fixtures/rule_dictionary_sanitized.csv`）为准；代码注册表见 `src/rules/registry.py`。
 
+规则真源、资料识别事实、执行台账、执行证据和 UI 展示边界见 [fa_qc_governance_plan.md](architecture/fa_qc_governance_plan.md)。
+
 ## 数据流
 
 ### 当前（M1 / M2a）

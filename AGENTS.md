@@ -166,6 +166,7 @@ $p = (Get-ChildItem -LiteralPath 'E:\AI file\固定资产质检agent\资料库' 
 ## 开发约定
 
 - 开发新规则前，先查看 `docs/domain-glossary.md`、`docs/qc-checklist.md` 和 `docs/handoff/latest.md`。
+- 新增或修改规则、runner、`execution_ledger`、observation、UI/JSON 展示或 LLM 结论使用方式前，必须对照 `docs/architecture/fa_qc_governance_plan.md`；未通过其中“新增/修改规则准入 checklist”的规则，不得作为已实现自动规则进入 runner 或 UI/JSON 已执行展示。
 - 修改 `src/rules/` 时，必须同步增加或更新 `tests/rules/`。
 - 规则含义、错误码或严重级别发生变化时，更新 `docs/architecture.md` 或 `docs/decisions/`。
 - 每天收工前更新 `docs/handoff/latest.md`，说明已完成、进行中、下一步和风险。

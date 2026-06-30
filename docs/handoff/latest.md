@@ -2,6 +2,13 @@
 
 > 每次收工前更新本文。新成员接手先读 `docs/ONBOARDING.md`，再读 `AGENTS.md` 和本文。
 
+## 2026-06-30 黑箱治理与 HOW 样板沉淀
+
+- 新增治理主文档 `docs/architecture/fa_qc_governance_plan.md`，明确 `registry.py` 是系统承认的可执行规则真源，`review_rules.md` / skill rules 仅作为 reference / backlog，未完成迁移闭环的规则不得在 UI/JSON 中展示为已检查或已执行。
+- 治理链路已明确为：input workbook → `ingest_result` / 现有 ingest 输出 → `registry.py` → runner / rules → `execution_ledger` → `observation` → UI / JSON；其中 UI/JSON 只展示，不推断。
+- 当前代码层已先做 K.01 两条证据级 HOW 样板，后续推广到其他模块前，应按治理文档先确认规则类型和 observation 模板。
+- 本轮文档沉淀不改变 runner、execution_ledger 顶层结构、severity、finding 判断逻辑或 LLM 调用逻辑。
+
 ## 2026-06-24 K1 mapping 编号补全复核
 
 - 正式映射工作簿 `固定资产质检agent/资料库/K1 check list_rule_mapping.xlsx` 的最新 sheet `规则映射v0.4编号补全版` 已由 102 行更新为 110 行，并经人工检查确认问题已解决。

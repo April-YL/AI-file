@@ -30,6 +30,7 @@ git pull origin main
 | 3 | [handoff/latest.md](handoff/latest.md) | **最新进度**、下一步、已知问题 |
 | 4 | [progress.md](progress.md) | 里程碑 M0 / M0.5 / M1… |
 | 5 | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) | 每个目录/文件的作用 |
+| 6 | [architecture/fa_qc_governance_plan.md](architecture/fa_qc_governance_plan.md) | 规则真源、资料识别事实、执行证据和 UI 展示边界 |
 
 PowerShell 一次查看前四份：
 
