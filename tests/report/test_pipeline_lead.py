@@ -23,3 +23,24 @@ def test_workbook_with_lead_includes_lead_section_and_rules():
     assert items["psp_completion"]["observation"]["checked_data"][0]["section"] == "汇总页 PSP / 程序执行清单"
     assert items["lead_required_fields"]["observation"]["checked_data"][0]["section"] == "K.00 Lead Sheet 基础信息"
     assert items["lead_ingest_readability"]["observation"]["checked_data"][0]["section"] == "K.00 Lead Sheet 资料识别质量"
+
+
+def test_workbook_with_lead_records_parameter_data_insufficient_how():
+    path = FIXTURES / "workbook_with_lead.xlsx"
+    if not path.is_file():
+        pytest.skip("fixture missing")
+    report = run_workbook_qc_from_path(str(path))
+    items = {item["rule_id"]: item for item in report.execution_ledger["items"]}
+
+    for rule_id in (
+        "lead_analysis_date_after_period_end",
+        "materiality_consistency",
+        "risk_threshold_consistency",
+        "lead_tt_overall_min",
+        "lead_tt_gam_range",
+        "lead_volatility_threshold_link",
+    ):
+        observation = items[rule_id]["observation"]
+        assert items[rule_id]["status"] == "DATA_INSUFFICIENT"
+        assert observation["checked_data"][0]["section"] == "K.00 Lead Sheet 参数类规则执行前置条件"
+        assert observation["checked_data"][0]["values_read"] == []

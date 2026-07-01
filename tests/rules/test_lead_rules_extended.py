@@ -422,3 +422,49 @@ def test_run_lead_rules_records_ingest_readability_how_when_paused(swp_lead_xlsx
     observation = items["lead_ingest_readability"]["observation"]
     assert observation["checked_data"][0]["section"] == "K.00 Lead Sheet 资料识别质量"
     assert items["lead_analysis_date_after_period_end"]["status"] == "DATA_INSUFFICIENT"
+def test_run_lead_rules_records_parameter_rules_evidence_how(swp_lead_xlsx: Path):
+    lead = load_lead_from_workbook(swp_lead_xlsx)
+    recorder = RuleExecutionRecorder()
+    run_lead_rules(lead, recorder=recorder)
+    items = {item["rule_id"]: item for item in recorder.to_ledger()["items"]}
+
+    for rule_id in (
+        "lead_analysis_date_after_period_end",
+        "materiality_consistency",
+        "risk_threshold_consistency",
+        "lead_tt_overall_min",
+        "lead_tt_gam_range",
+        "lead_volatility_threshold_link",
+    ):
+        observation = items[rule_id]["observation"]
+        assert set(observation) == {
+            "checked_data",
+            "check_logic",
+            "expected_result",
+            "actual_result",
+            "result_summary",
+        }
+        assert observation["checked_data"][0]["sheet"] == "K.00 Lead Sheet"
+        assert observation["checked_data"][0]["values_read"]
+
+
+def test_run_lead_rules_records_parameter_data_insufficient_how(swp_lead_xlsx: Path):
+    lead = load_lead_from_workbook(swp_lead_xlsx)
+    lead.usable_for_rules = False
+    recorder = RuleExecutionRecorder()
+    run_lead_rules(lead, recorder=recorder)
+    items = {item["rule_id"]: item for item in recorder.to_ledger()["items"]}
+
+    for rule_id in (
+        "lead_analysis_date_after_period_end",
+        "materiality_consistency",
+        "risk_threshold_consistency",
+        "lead_tt_overall_min",
+        "lead_tt_gam_range",
+        "lead_volatility_threshold_link",
+    ):
+        observation = items[rule_id]["observation"]
+        assert items[rule_id]["status"] == "DATA_INSUFFICIENT"
+        assert observation["checked_data"][0]["section"] == "K.00 Lead Sheet 参数类规则执行前置条件"
+        assert observation["checked_data"][0]["values_read"] == []
+        assert observation["checked_data"][0]["missing_data"]
