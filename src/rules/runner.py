@@ -5,9 +5,12 @@ from rules.asset_amount_non_negative import check_asset_amount_non_negative
 from rules.asset_value_consistency import check_asset_value_consistency
 from rules.execution_recorder import RuleExecutionRecorder
 from rules.fa_list_observations import (
+    build_asset_amount_non_negative_observation,
     build_asset_value_consistency_observation,
     build_required_fields_observation,
+    build_salvage_rate_range_observation,
     build_unique_asset_id_observation,
+    build_useful_life_positive_observation,
 )
 from rules.fa_list_required_fields import check_fa_list_required_fields
 from rules.models import ColumnContext, QcIssue
@@ -46,13 +49,28 @@ def run_fa_list_rules(
         build_unique_asset_id_observation(records, ctx, unique_issues),
     )
     issues.extend(unique_issues)
-    issues.extend(recorder.execute_rule("asset_amount_non_negative", check_asset_amount_non_negative, records, ctx))
+    amount_issues = recorder.execute_rule("asset_amount_non_negative", check_asset_amount_non_negative, records, ctx)
+    recorder.record_observation(
+        "asset_amount_non_negative",
+        build_asset_amount_non_negative_observation(records, ctx, amount_issues),
+    )
+    issues.extend(amount_issues)
     value_issues = recorder.execute_rule("asset_value_consistency", check_asset_value_consistency, records, ctx)
     recorder.record_observation(
         "asset_value_consistency",
         build_asset_value_consistency_observation(records, ctx, value_issues),
     )
     issues.extend(value_issues)
-    issues.extend(recorder.execute_rule("useful_life_positive", check_useful_life_positive, records, ctx))
-    issues.extend(recorder.execute_rule("salvage_rate_range", check_salvage_rate_range, records, ctx))
+    useful_life_issues = recorder.execute_rule("useful_life_positive", check_useful_life_positive, records, ctx)
+    recorder.record_observation(
+        "useful_life_positive",
+        build_useful_life_positive_observation(records, ctx, useful_life_issues),
+    )
+    issues.extend(useful_life_issues)
+    salvage_rate_issues = recorder.execute_rule("salvage_rate_range", check_salvage_rate_range, records, ctx)
+    recorder.record_observation(
+        "salvage_rate_range",
+        build_salvage_rate_range_observation(records, ctx, salvage_rate_issues),
+    )
+    issues.extend(salvage_rate_issues)
     return attach_rule_metadata(issues)
