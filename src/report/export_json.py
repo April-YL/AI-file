@@ -20,6 +20,8 @@ def run_fa_list_qc(
 ) -> QcReport:
     ctx = ColumnContext(
         mapped_fields={m.standard_field for m in dataset.mapped_fields},
+        mapped_headers={m.standard_field: m.source_header for m in dataset.mapped_fields},
+        mapped_columns={m.standard_field: m.column_index for m in dataset.mapped_fields},
         source_sheet=dataset.source_sheet,
         procedure_code="FA_LIST",
     )

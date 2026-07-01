@@ -95,6 +95,8 @@ def run_workbook_qc(
     if ctx.fa_list:
         fa_ctx = ColumnContext(
             mapped_fields={m.standard_field for m in ctx.fa_list.mapped_fields},
+            mapped_headers={m.standard_field: m.source_header for m in ctx.fa_list.mapped_fields},
+            mapped_columns={m.standard_field: m.column_index for m in ctx.fa_list.mapped_fields},
             source_sheet=ctx.fa_list.source_sheet,
             procedure_code="FA_LIST",
         )

@@ -38,6 +38,8 @@ class ColumnContext:
     mapped_fields: set[str] = field(default_factory=set)
     source_sheet: str = "FA list"
     procedure_code: str = "FA_LIST"
+    mapped_headers: dict[str, str] = field(default_factory=dict)
+    mapped_columns: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass

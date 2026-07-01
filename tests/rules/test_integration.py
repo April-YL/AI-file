@@ -26,6 +26,33 @@ def test_mixed_fixture_all_severities():
     assert report.summary.pass_count >= 1
 
 
+def test_fa_list_rules_record_evidence_how_for_first_three_rules():
+    dataset = load_fa_list_csv(FIXTURES / "fa_list_mixed.csv")
+    report = run_fa_list_qc(dataset)
+
+    items = {item["rule_id"]: item for item in report.execution_ledger["items"]}
+    for rule_id in (
+        "fa_list_required_fields",
+        "unique_asset_id",
+        "asset_value_consistency",
+    ):
+        observation = items[rule_id]["observation"]
+        assert set(observation) == {
+            "checked_data",
+            "check_logic",
+            "expected_result",
+            "actual_result",
+            "result_summary",
+        }
+        assert observation["checked_data"]
+        assert "finding" in observation["result_summary"]
+        assert str(items[rule_id]["finding_count"]) in observation["result_summary"]
+
+    assert "observation" not in items["asset_amount_non_negative"]
+    assert "observation" not in items["useful_life_positive"]
+    assert "observation" not in items["salvage_rate_range"]
+
+
 def test_no_asset_id_fixture_need_review():
     dataset = load_fa_list_csv(FIXTURES / "fa_list_no_asset_id.csv")
     report = run_fa_list_qc(dataset)
