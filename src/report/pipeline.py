@@ -4,7 +4,7 @@ from pathlib import Path
 from time import perf_counter
 
 from ingest.workbook_context import WorkbookQcContext, load_workbook_context
-from llm.config import load_llm_config
+from llm.config import LlmConfig, load_llm_config
 from llm.review import enrich_report_with_llm
 from report.manual_review import build_manual_review_sections
 from report.addition_test_report import build_addition_sheet_section
@@ -52,10 +52,11 @@ def run_workbook_qc(
     ctx: WorkbookQcContext,
     *,
     llm: bool | None = None,
+    llm_config: LlmConfig | None = None,
     delivery_context: DeliveryCompletionContext | None = None,
 ) -> QcReport:
     qc_start = perf_counter()
-    config = load_llm_config(cli_enabled=llm)
+    config = llm_config if llm_config is not None else load_llm_config(cli_enabled=llm)
     llm_seconds = 0.0
     llm_details = {}
 
@@ -626,6 +627,7 @@ def run_workbook_qc_from_path(
     addition_sheet: str | None = None,
     disposal_sheet: str | None = None,
     llm: bool | None = None,
+    llm_config: LlmConfig | None = None,
     delivery_context: DeliveryCompletionContext | None = None,
 ) -> QcReport:
     ingest_t0 = perf_counter()
@@ -639,7 +641,12 @@ def run_workbook_qc_from_path(
         disposal_sheet=disposal_sheet,
     )
     ingest_seconds = perf_counter() - ingest_t0
-    report = run_workbook_qc(ctx, llm=llm, delivery_context=delivery_context)
+    report = run_workbook_qc(
+        ctx,
+        llm=llm,
+        llm_config=llm_config,
+        delivery_context=delivery_context,
+    )
     report.runtime_timings.update({"ingest_seconds": round(ingest_seconds, 3)})
     return report
 
@@ -654,6 +661,7 @@ def run_input_qc(
     addition_sheet: str | None = None,
     disposal_sheet: str | None = None,
     llm: bool | None = None,
+    llm_config: LlmConfig | None = None,
     delivery_context: DeliveryCompletionContext | None = None,
 ) -> QcReport:
     """CSV 仅 FA list；Excel 走整本 workbook 流水线。"""
@@ -664,7 +672,11 @@ def run_input_qc(
 
     p = Path(path)
     if p.suffix.lower() == ".csv":
-        report = run_fa_list_qc(load_fa_list_csv(p), llm=llm)
+        report = run_fa_list_qc(
+            load_fa_list_csv(p),
+            llm=llm,
+            llm_config=llm_config,
+        )
         if delivery_context:
             delivery_recorder = RuleExecutionRecorder()
             delivery_rule_id = (
@@ -733,5 +745,6 @@ def run_input_qc(
         addition_sheet=addition_sheet,
         disposal_sheet=disposal_sheet,
         llm=llm,
+        llm_config=llm_config,
         delivery_context=delivery_context,
     )

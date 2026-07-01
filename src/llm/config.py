@@ -110,3 +110,49 @@ def load_llm_config(*, cli_enabled: bool | None = None) -> LlmConfig:
         proxy=proxy,
         trust_env=trust_env,
     )
+
+
+def build_llm_config(
+    *,
+    enabled: bool,
+    base_url: str = "https://api.openai.com/v1",
+    api_key: str = "",
+    model: str = "gpt-4o-mini",
+    timeout: float = 60.0,
+    max_tokens: int = 4096,
+    max_retries: int = 2,
+    retry_backoff: float = 1.5,
+    proxy: str | None = None,
+    trust_env: bool = True,
+) -> LlmConfig:
+    """Build LLM config from explicit UI/runtime inputs without reading .env."""
+    base_url = (base_url or "").strip() or "https://api.openai.com/v1"
+    api_key = (api_key or "").strip()
+    model = (model or "").strip()
+    proxy = (proxy or "").strip() or None
+
+    if enabled and not api_key:
+        raise LlmConfigError("已启用大模型，但未填写 API Key。")
+    if enabled and not model:
+        raise LlmConfigError("已启用大模型，但未填写模型名称。")
+    if timeout <= 0:
+        raise LlmConfigError("超时时间必须大于 0。")
+    if max_tokens <= 0:
+        raise LlmConfigError("最大输出 token 必须大于 0。")
+    if max_retries < 0:
+        raise LlmConfigError("重试次数不能小于 0。")
+    if retry_backoff < 0:
+        raise LlmConfigError("重试等待时间不能小于 0。")
+
+    return LlmConfig(
+        enabled=enabled,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        timeout=timeout,
+        max_tokens=max_tokens,
+        max_retries=max_retries,
+        retry_backoff=retry_backoff,
+        proxy=proxy,
+        trust_env=trust_env,
+    )

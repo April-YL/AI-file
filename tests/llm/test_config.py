@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from llm.config import LlmConfigError, load_llm_config
+from llm.config import LlmConfigError, build_llm_config, load_llm_config
 
 
 def test_load_llm_config_disabled_by_default(monkeypatch):
@@ -41,3 +41,23 @@ def test_load_llm_config_rejects_invalid_retry(monkeypatch):
     monkeypatch.setenv("FA_QC_LLM_MAX_RETRIES", "-1")
     with pytest.raises(LlmConfigError, match="FA_QC_LLM_MAX_RETRIES"):
         load_llm_config(cli_enabled=True)
+
+
+def test_build_llm_config_uses_explicit_ui_values(monkeypatch):
+    monkeypatch.setenv("FA_QC_LLM_API_KEY", "sk-from-env")
+    monkeypatch.setenv("FA_QC_LLM_BASE_URL", "https://env.example/v1")
+    cfg = build_llm_config(
+        enabled=True,
+        base_url="https://ui.example/v1",
+        api_key="sk-from-ui",
+        model="ui-model",
+    )
+    assert cfg.enabled is True
+    assert cfg.base_url == "https://ui.example/v1"
+    assert cfg.api_key == "sk-from-ui"
+    assert cfg.model == "ui-model"
+
+
+def test_build_llm_config_requires_api_key_when_enabled():
+    with pytest.raises(LlmConfigError, match="API Key"):
+        build_llm_config(enabled=True, api_key="", model="ui-model")

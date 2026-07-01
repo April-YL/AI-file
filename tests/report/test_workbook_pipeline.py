@@ -21,6 +21,7 @@ from ingest.rollforward_sheet import (
     RollforwardSheetDataset,
 )
 from ingest.workbook_context import WorkbookQcContext
+from llm.config import build_llm_config
 from report.pipeline import run_workbook_qc, run_workbook_qc_from_path
 from rules.delivery_completion import DeliveryCompletionContext
 from rules.models import QcIssue, Severity
@@ -441,6 +442,48 @@ def test_workbook_qc_includes_disposal_llm_issue(monkeypatch):
 
     assert any(issue.rule_id == "disposal_semantic_review" for issue in report.issues)
     assert "disposal_semantic" in {d["key"] for d in report.runtime_timings["llm_details"]}
+
+
+def test_workbook_qc_uses_explicit_llm_config_instead_of_env(monkeypatch):
+    monkeypatch.setenv("FA_QC_LLM_API_KEY", "")
+    ctx = WorkbookQcContext(
+        source_file="ui_llm_config_demo.xlsx",
+        fa_list=None,
+        summary=None,
+        lead=None,
+        disposal_test=DisposalTestSheetDataset(
+            source_file="ui_llm_config_demo.xlsx",
+            source_sheet="K.02.2 处置测试",
+        ),
+    )
+    seen = {}
+
+    def fake_disposal_issues(config, **kwargs):
+        seen["api_key"] = config.api_key
+        seen["base_url"] = config.base_url
+        seen["model"] = config.model
+        return []
+
+    monkeypatch.setattr("llm.disposal_review.build_disposal_llm_issues", fake_disposal_issues)
+    monkeypatch.setattr("llm.ingest_review.run_workbook_ingest_reviews", lambda *args, **kwargs: [])
+    monkeypatch.setattr("report.pipeline.enrich_report_with_llm", lambda report, config, **kwargs: report)
+
+    report = run_workbook_qc(
+        ctx,
+        llm_config=build_llm_config(
+            enabled=True,
+            base_url="https://ui.example/v1",
+            api_key="sk-ui",
+            model="ui-model",
+        ),
+    )
+
+    assert report.runtime_timings["llm_enabled"] is True
+    assert seen == {
+        "api_key": "sk-ui",
+        "base_url": "https://ui.example/v1",
+        "model": "ui-model",
+    }
 
 
 def test_workbook_qc_includes_k01_ingest_review_section(monkeypatch):

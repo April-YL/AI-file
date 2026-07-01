@@ -16,6 +16,7 @@ def run_fa_list_qc(
     dataset: FaListDataset,
     *,
     llm: bool | None = None,
+    llm_config: LlmConfig | None = None,
 ) -> QcReport:
     ctx = ColumnContext(
         mapped_fields={m.standard_field for m in dataset.mapped_fields},
@@ -35,7 +36,7 @@ def run_fa_list_qc(
         issues=issues,
         execution_ledger=execution_ledger,
     )
-    config = load_llm_config(cli_enabled=llm)
+    config = llm_config if llm_config is not None else load_llm_config(cli_enabled=llm)
     if config.enabled:
         report = enrich_report_with_llm(report, config, summary=None)
     return report
