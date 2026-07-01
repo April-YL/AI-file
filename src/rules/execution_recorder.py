@@ -15,7 +15,14 @@ _STATUS_PRIORITY = {
     STATUS_DATA_INSUFFICIENT: 2,
     STATUS_EXECUTED: 3,
 }
-_OBSERVATION_KEYS = {"path", "inputs", "checks", "notes"}
+_LEGACY_OBSERVATION_KEYS = {"path", "inputs", "checks", "notes"}
+_EVIDENCE_OBSERVATION_KEYS = {
+    "checked_data",
+    "check_logic",
+    "expected_result",
+    "actual_result",
+    "result_summary",
+}
 _OBSERVATION_PATHS = {
     "primary",
     "fallback",
@@ -47,10 +54,41 @@ _CHECK_OPERATORS = {
     "not_matched",
 }
 _CHECK_RESULTS = {"passed", "triggered", "not_applicable", "data_insufficient"}
+_EVIDENCE_ITEM_KEYS = {
+    "sheet",
+    "section",
+    "location",
+    "identified_by",
+    "key_columns",
+    "values_read",
+    "missing_data",
+}
+_IDENTIFIED_BY_KEYS = {
+    "sheet_name",
+    "section",
+    "matched_keywords",
+    "matched_rows",
+    "matched_columns",
+}
+_VALUE_READ_KEYS = {
+    "label",
+    "value",
+    "row",
+    "column",
+    "cell",
+    "unit",
+    "amount_type",
+}
 _MAX_INPUTS = 8
 _MAX_CHECKS = 8
 _MAX_NOTES = 5
+_MAX_EVIDENCE_ITEMS = 8
+_MAX_KEY_COLUMNS = 12
+_MAX_VALUES_READ = 20
+_MAX_MISSING_DATA = 12
+_MAX_IDENTIFIED_TERMS = 12
 _MAX_TEXT_LEN = 120
+_MAX_HOW_TEXT_LEN = 500
 
 
 @dataclass
@@ -215,8 +253,18 @@ def validate_observation(observation: dict[str, Any] | None) -> dict[str, Any] |
     if not isinstance(observation, dict):
         raise ValueError("execution observation must be a dict")
     keys = set(observation)
-    if keys != _OBSERVATION_KEYS:
-        raise ValueError("execution observation must contain only path, inputs, checks, notes")
+    if keys == _LEGACY_OBSERVATION_KEYS:
+        return _validate_legacy_observation(observation)
+    if keys == _EVIDENCE_OBSERVATION_KEYS:
+        return _validate_evidence_observation(observation)
+    raise ValueError(
+        "execution observation must be either legacy path/inputs/checks/notes "
+        "or evidence checked_data/check_logic/expected_result/actual_result/result_summary"
+    )
+
+
+def _validate_legacy_observation(observation: dict[str, Any]) -> dict[str, Any]:
+    """Validate the original v1 observation shape for backward compatibility."""
 
     path = observation.get("path")
     if path is not None and path not in _OBSERVATION_PATHS:
@@ -240,6 +288,110 @@ def validate_observation(observation: dict[str, Any] | None) -> dict[str, Any] |
         "inputs": checked_inputs,
         "checks": checked_checks,
         "notes": checked_notes,
+    }
+
+
+def _validate_evidence_observation(observation: dict[str, Any]) -> dict[str, Any]:
+    checked_data = observation.get("checked_data")
+    if not isinstance(checked_data, list) or len(checked_data) > _MAX_EVIDENCE_ITEMS:
+        raise ValueError("execution observation checked_data must be a bounded list")
+    return {
+        "checked_data": [_validate_evidence_item(item) for item in checked_data],
+        "check_logic": _validate_how_text_or_none(
+            observation.get("check_logic"), "check_logic"
+        ),
+        "expected_result": _validate_how_text_or_none(
+            observation.get("expected_result"), "expected_result"
+        ),
+        "actual_result": _validate_how_text_or_none(
+            observation.get("actual_result"), "actual_result"
+        ),
+        "result_summary": _validate_how_text_or_none(
+            observation.get("result_summary"), "result_summary"
+        ),
+    }
+
+
+def _validate_evidence_item(item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict) or set(item) != _EVIDENCE_ITEM_KEYS:
+        raise ValueError("execution observation checked_data has unsupported fields")
+    key_columns = item.get("key_columns")
+    values_read = item.get("values_read")
+    missing_data = item.get("missing_data")
+    if not isinstance(key_columns, list) or len(key_columns) > _MAX_KEY_COLUMNS:
+        raise ValueError("execution observation key_columns must be a bounded list")
+    if not isinstance(values_read, list) or len(values_read) > _MAX_VALUES_READ:
+        raise ValueError("execution observation values_read must be a bounded list")
+    if not isinstance(missing_data, list) or len(missing_data) > _MAX_MISSING_DATA:
+        raise ValueError("execution observation missing_data must be a bounded list")
+    return {
+        "sheet": _validate_short_text_or_none(item.get("sheet"), "checked_data.sheet"),
+        "section": _validate_short_text_or_none(
+            item.get("section"), "checked_data.section"
+        ),
+        "location": _validate_short_text_or_none(
+            item.get("location"), "checked_data.location"
+        ),
+        "identified_by": _validate_identified_by(item.get("identified_by")),
+        "key_columns": [
+            _validate_short_text_or_none(value, "checked_data.key_columns")
+            for value in key_columns
+        ],
+        "values_read": [_validate_value_read(value) for value in values_read],
+        "missing_data": [
+            _validate_short_text_or_none(value, "checked_data.missing_data")
+            for value in missing_data
+        ],
+    }
+
+
+def _validate_identified_by(item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict) or set(item) != _IDENTIFIED_BY_KEYS:
+        raise ValueError("execution observation identified_by has unsupported fields")
+    matched_keywords = item.get("matched_keywords")
+    matched_rows = item.get("matched_rows")
+    matched_columns = item.get("matched_columns")
+    if not isinstance(matched_keywords, list) or len(matched_keywords) > _MAX_IDENTIFIED_TERMS:
+        raise ValueError("execution observation matched_keywords must be a bounded list")
+    if not isinstance(matched_rows, list) or len(matched_rows) > _MAX_IDENTIFIED_TERMS:
+        raise ValueError("execution observation matched_rows must be a bounded list")
+    if not isinstance(matched_columns, list) or len(matched_columns) > _MAX_IDENTIFIED_TERMS:
+        raise ValueError("execution observation matched_columns must be a bounded list")
+    return {
+        "sheet_name": _validate_short_text_or_none(
+            item.get("sheet_name"), "identified_by.sheet_name"
+        ),
+        "section": _validate_short_text_or_none(
+            item.get("section"), "identified_by.section"
+        ),
+        "matched_keywords": [
+            _validate_short_text_or_none(value, "identified_by.matched_keywords")
+            for value in matched_keywords
+        ],
+        "matched_rows": [
+            _validate_int_or_none(value, "identified_by.matched_rows")
+            for value in matched_rows
+        ],
+        "matched_columns": [
+            _validate_int_or_none(value, "identified_by.matched_columns")
+            for value in matched_columns
+        ],
+    }
+
+
+def _validate_value_read(item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict) or set(item) != _VALUE_READ_KEYS:
+        raise ValueError("execution observation values_read has unsupported fields")
+    return {
+        "label": _validate_short_text_or_none(item.get("label"), "values_read.label"),
+        "value": _validate_short_text_or_none(item.get("value"), "values_read.value"),
+        "row": _validate_int_or_none(item.get("row"), "values_read.row"),
+        "column": _validate_int_or_none(item.get("column"), "values_read.column"),
+        "cell": _validate_short_text_or_none(item.get("cell"), "values_read.cell"),
+        "unit": _validate_short_text_or_none(item.get("unit"), "values_read.unit"),
+        "amount_type": _validate_short_text_or_none(
+            item.get("amount_type"), "values_read.amount_type"
+        ),
     }
 
 
@@ -290,6 +442,17 @@ def _validate_short_text_or_none(value: Any, field: str) -> str | None:
         value = str(value)
     text = value.strip()
     if len(text) > _MAX_TEXT_LEN:
+        raise ValueError(f"execution observation {field} is too long")
+    return text
+
+
+def _validate_how_text_or_none(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        value = str(value)
+    text = value.strip()
+    if len(text) > _MAX_HOW_TEXT_LEN:
         raise ValueError(f"execution observation {field} is too long")
     return text
 

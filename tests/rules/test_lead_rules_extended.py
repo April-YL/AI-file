@@ -12,7 +12,10 @@ from ingest.models import RollforwardColumnBinding, RollforwardPeriodRole
 from ingest.rollforward_sheet import RollforwardSheetDataset, parse_rollforward_rows
 from rules.lead_expectation_analysis import check_lead_expectation_analysis
 from rules.lead_movement_rows_complete import check_lead_movement_rows_complete
-from rules.lead_rollforward_tb_reconciliation import check_lead_rollforward_tb_reconciliation
+from rules.lead_rollforward_tb_reconciliation import (
+    build_lead_rollforward_tb_reconciliation_observation,
+    check_lead_rollforward_tb_reconciliation,
+)
 from rules.lead_runner import run_lead_rules
 from rules.lead_tt_gam_range import check_lead_tt_gam_range
 from rules.lead_tt_overall_min import check_lead_tt_overall_min
@@ -316,6 +319,20 @@ def test_rollforward_reconciliation_prefers_k01_check_column(tmp_path: Path):
     assert {i.source_sheet for i in issues} == {"K.01 Agree SL to GL"}
     assert {i.procedure_code for i in issues} == {"K.01"}
     assert {i.source_row for i in issues} == {18}
+
+    observation = build_lead_rollforward_tb_reconciliation_observation(lead, rf)
+    assert set(observation) == {
+        "checked_data",
+        "check_logic",
+        "expected_result",
+        "actual_result",
+        "result_summary",
+    }
+    checked = observation["checked_data"][0]
+    assert checked["sheet"] == "K.01 Agree SL to GL"
+    assert checked["identified_by"]["section"] == "table1_check_values"
+    assert checked["values_read"][0]["label"] == "原值 Check"
+    assert checked["values_read"][0]["row"] == 18
 
 
 def test_rollforward_reconciliation_checks_opening_and_merges_derived_net():

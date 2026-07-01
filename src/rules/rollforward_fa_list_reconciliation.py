@@ -197,91 +197,230 @@ def build_rollforward_fa_list_reconciliation_observation(
     rollforward: RollforwardSheetDataset | None = None,
     lead: LeadSheetDataset | None = None,
 ) -> dict:
-    inputs = []
-    checks = []
-    notes = []
     if rollforward is None or not rollforward.source_sheet:
-        return {"path": "data_insufficient", "inputs": [], "checks": [], "notes": ["rollforward_missing"]}
+        return _evidence_observation(
+            checked_data=[
+                _evidence_item(
+                    sheet=None,
+                    section="K.01 后推与 FA list 勾稽",
+                    missing_data=["未识别到 K.01 后推工作表"],
+                )
+            ],
+            check_logic="未取得 K.01 后推工作表，未执行后推与 FA list 勾稽检查。",
+            expected_result="应识别到 K.01 表3 Check 区或表2 FA list 汇总区。",
+            actual_result="未识别到 K.01 后推工作表。",
+            result_summary="资料不足，未触发 finding。",
+        )
 
     sad = _sad_from_lead(lead)
     if rollforward.section_presence.get("b4_table3_check_with_table1") and rollforward.table3_check_values:
-        path = "primary"
-        inputs.append(
-            {
-                "source_sheet": rollforward.source_sheet,
-                "section": "b4_table3_check_with_table1",
-                "field": "table3_check_values",
-                "row": rollforward.table3_check_row,
-                "column": None,
-                "range": None,
-            }
-        )
-        if sad is not None:
-            inputs.append(
-                {
-                    "source_sheet": lead.source_sheet if lead else None,
-                    "section": "materiality",
-                    "field": "SAD",
-                    "row": None,
-                    "column": None,
-                    "range": None,
-                }
-            )
         diffs = [v for v in rollforward.table3_check_values if abs(v) > _AMOUNT_TOL]
         max_diff = max(diffs, key=lambda d: abs(d)) if diffs else Decimal("0")
-        if sad is None:
-            result = "data_insufficient" if diffs else "passed"
-            operator = "exists"
-            right_value = None
-        else:
-            result = "triggered" if abs(max_diff) > sad else "passed"
-            operator = ">"
-            right_value = str(sad)
-        checks.append(
-            {
-                "name": "table3_difference_vs_sad",
-                "left_label": "max_difference",
-                "left_value": str(max_diff),
-                "operator": operator,
-                "right_label": "SAD",
-                "right_value": right_value,
-                "result": result,
-            }
-        )
-        notes.append(
-            "table3_notes_present" if rollforward.table3_notes_text_present else "table3_notes_not_detected"
-        )
-    else:
-        path = "fallback"
-        region = rollforward.section_regions.get("b3_table2_fa_summary")
-        inputs.append(
-            {
-                "source_sheet": rollforward.source_sheet,
-                "section": "b3_table2_fa_summary",
-                "field": "table2_amount_count",
-                "row": region.anchor_row if region else None,
-                "column": None,
-                "range": None,
-            }
-        )
-        relevant = [
-            c
-            for c in (reconciliations or [])
-            if c.link_id in _FIELD_BY_LINK_ID
+        finding_count = 1 if (diffs and (sad is None or abs(max_diff) > sad)) else 0
+        checked_data = [
+            _evidence_item(
+                sheet=rollforward.source_sheet,
+                section="K.01 表3 FA list汇总与后推明细 Check 区",
+                location=_rows_location([rollforward.table3_check_row]),
+                identified_by=_identified_by(
+                    sheet=rollforward.source_sheet,
+                    section="b4_table3_check_with_table1",
+                    keywords=["K.01", "表3", "FA list", "Check", "差异"],
+                    rows=[rollforward.table3_check_row],
+                ),
+                key_columns=["FA list汇总", "K.01后推明细", "Check/差异"],
+                values_read=[
+                    _value_read(
+                        f"表3 Check {idx}",
+                        value,
+                        row=rollforward.table3_check_row,
+                        amount_type="勾稽差异",
+                    )
+                    for idx, value in enumerate(rollforward.table3_check_values, start=1)
+                ],
+            )
         ]
-        checks.append(
-            {
-                "name": "fallback_reconciliation_count",
-                "left_label": "relevant_reconciliations",
-                "left_value": str(len(relevant)),
-                "operator": "exists",
-                "right_label": "fallback_checks",
-                "right_value": None,
-                "result": "triggered" if relevant else "data_insufficient",
-            }
+        if sad is not None:
+            checked_data.append(
+                _evidence_item(
+                    sheet=lead.source_sheet if lead else None,
+                    section="K.00 Lead SAD",
+                    identified_by=_identified_by(
+                        sheet=lead.source_sheet if lead else None,
+                        section="materiality",
+                        keywords=["SAD", "名义金额"],
+                        rows=[],
+                    ),
+                    key_columns=["SAD"],
+                    values_read=[
+                        _value_read("SAD", sad, amount_type="审计阈值")
+                    ],
+                )
+            )
+        return _evidence_observation(
+            checked_data=checked_data,
+            check_logic="优先使用 K.01 表3 Check 区核对 FA list 汇总与 K.01 后推明细是否一致。",
+            expected_result="表3 Check 差异应为 0；如存在差异，应结合 SAD 判断是否需要记录异常。",
+            actual_result=f"读取到 {len(rollforward.table3_check_values)} 个表3 Check 值，最大差异 {max_diff}。",
+            result_summary=f"触发 finding {finding_count} 条。",
         )
-        notes.append("table3_check_values_not_available")
-    return {"path": path, "inputs": inputs[:8], "checks": checks[:8], "notes": notes[:5]}
+
+    region = rollforward.section_regions.get("b3_table2_fa_summary")
+    relevant = [c for c in (reconciliations or []) if c.link_id in _FIELD_BY_LINK_ID]
+    relevant_bad = [
+        c
+        for c in relevant
+        if c.status
+        in (
+            ReconciliationStatus.MISMATCH,
+            ReconciliationStatus.MISSING_LEFT,
+            ReconciliationStatus.MISSING_RIGHT,
+            ReconciliationStatus.NEED_REVIEW,
+        )
+    ]
+    finding_count = 1
+    if not rollforward.section_presence.get("b3_table2_fa_summary"):
+        finding_count += 1
+    elif rollforward.table2_amount_count <= 0:
+        finding_count += 1
+    if relevant_bad:
+        finding_count += 1
+    missing_data = ["未可靠识别 K.01 表3 Check 区"]
+    if not rollforward.section_presence.get("b3_table2_fa_summary"):
+        missing_data.append("未可靠识别 K.01 表2 FA list 汇总区")
+    elif rollforward.table2_amount_count <= 0:
+        missing_data.append("K.01 表2未读取到可用于核对的汇总金额")
+    return _evidence_observation(
+        checked_data=[
+            _evidence_item(
+                sheet=rollforward.source_sheet,
+                section="K.01 表2 FA list 汇总区",
+                location=_rows_location([region.anchor_row if region else None]),
+                identified_by=_identified_by(
+                    sheet=rollforward.source_sheet,
+                    section="b3_table2_fa_summary",
+                    keywords=["K.01", "表2", "FA list", "SUMIF", "汇总"],
+                    rows=[region.anchor_row if region else None],
+                ),
+                key_columns=["FA list汇总金额"],
+                values_read=[
+                    _value_read(
+                        "表2可读取金额数量",
+                        rollforward.table2_amount_count,
+                        row=region.anchor_row if region else None,
+                        amount_type="读取数量",
+                    )
+                ]
+                if rollforward.table2_amount_count > 0
+                else [],
+                missing_data=missing_data,
+            ),
+            _evidence_item(
+                sheet="FA list / K.01",
+                section="Agent 兜底勾稽结果",
+                identified_by=_identified_by(
+                    sheet="FA list / K.01",
+                    section="reconciliations",
+                    keywords=["FA list", "K.01", "兜底勾稽"],
+                    rows=[],
+                ),
+                key_columns=["FA list金额", "K.01金额", "差异"],
+                values_read=[
+                    _value_read(
+                        _FIELD_LABELS.get(_FIELD_BY_LINK_ID.get(check.link_id, ""), check.link_id),
+                        check.difference,
+                        amount_type="兜底差异",
+                    )
+                    for check in relevant[:6]
+                ],
+                missing_data=[] if relevant else ["未形成可用的兜底勾稽结果"],
+            ),
+        ],
+        check_logic="K.01 表3 Check 区不可读时，仅记录表2识别情况和 Agent 兜底勾稽结果，不能替代表3正式勾稽结论。",
+        expected_result="应优先取得 K.01 表3 Check 结果；表3不可读时，应提示人工复核正式勾稽区域。",
+        actual_result=f"表3 Check 未可靠读取；表2读取金额数量 {rollforward.table2_amount_count}；兜底勾稽 {len(relevant)} 项。",
+        result_summary=f"触发 finding {finding_count} 条。",
+    )
+
+
+def _evidence_observation(
+    *,
+    checked_data: list[dict],
+    check_logic: str,
+    expected_result: str,
+    actual_result: str,
+    result_summary: str,
+) -> dict:
+    return {
+        "checked_data": checked_data,
+        "check_logic": check_logic,
+        "expected_result": expected_result,
+        "actual_result": actual_result,
+        "result_summary": result_summary,
+    }
+
+
+def _evidence_item(
+    *,
+    sheet: str | None,
+    section: str,
+    location: str | None = None,
+    identified_by: dict | None = None,
+    key_columns: list[str] | None = None,
+    values_read: list[dict] | None = None,
+    missing_data: list[str] | None = None,
+) -> dict:
+    return {
+        "sheet": sheet,
+        "section": section,
+        "location": location,
+        "identified_by": identified_by
+        or _identified_by(sheet=sheet, section=section, keywords=[], rows=[]),
+        "key_columns": key_columns or [],
+        "values_read": values_read or [],
+        "missing_data": missing_data or [],
+    }
+
+
+def _identified_by(
+    *,
+    sheet: str | None,
+    section: str,
+    keywords: list[str],
+    rows,
+) -> dict:
+    return {
+        "sheet_name": sheet,
+        "section": section,
+        "matched_keywords": keywords,
+        "matched_rows": [row for row in rows if isinstance(row, int)],
+        "matched_columns": [],
+    }
+
+
+def _value_read(
+    label: str,
+    value: object,
+    *,
+    row: int | None = None,
+    amount_type: str | None = None,
+) -> dict:
+    return {
+        "label": label,
+        "value": None if value is None else str(value),
+        "row": row,
+        "column": None,
+        "cell": None,
+        "unit": None,
+        "amount_type": amount_type,
+    }
+
+
+def _rows_location(rows) -> str | None:
+    row_list = sorted({row for row in rows if isinstance(row, int)})
+    if not row_list:
+        return None
+    return "行 " + ", ".join(str(row) for row in row_list)
 
 def check_rollforward_fa_list_reconciliation(
     reconciliations: list[ReconciliationCheck] | None,

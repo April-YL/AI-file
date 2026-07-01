@@ -20,6 +20,8 @@ _FIELD_LABELS = {
     "net_value": "净值",
 }
 
+_HOW_FIELD_LABELS = dict(_FIELD_LABELS)
+
 
 def _check_from_k01_check_column(
     rollforward: RollforwardSheetDataset,
@@ -57,87 +59,259 @@ def build_lead_rollforward_tb_reconciliation_observation(
     rollforward: RollforwardSheetDataset | None,
 ) -> dict:
     if lead is None or not lead.source_sheet:
-        return {"path": "data_insufficient", "inputs": [], "checks": [], "notes": ["lead_missing"]}
-    inputs = [
-        {
-            "source_sheet": lead.source_sheet,
-            "section": "movement_rows",
-            "field": "lead_book_balance",
-            "row": None,
-            "column": None,
-            "range": None,
-        }
-    ]
+        return _evidence_observation(
+            checked_data=[
+                _evidence_item(
+                    sheet=None,
+                    section="K.00 Lead 固定资产余额行",
+                    missing_data=["未识别到 K.00 Lead Sheet"],
+                )
+            ],
+            check_logic="未取得 Lead 固定资产余额行，未执行 Lead 与 K.01 勾稽检查。",
+            expected_result="应识别到 Lead 中固定资产原值、累计折旧、减值准备、净值余额行。",
+            actual_result="未识别到 Lead 资料。",
+            result_summary="资料不足，未触发 finding。",
+        )
     if rollforward is None or not (rollforward.ending_totals or rollforward.opening_totals):
-        return {
-            "path": "data_insufficient",
-            "inputs": inputs,
-            "checks": [],
-            "notes": ["rollforward_totals_missing"],
-        }
+        return _evidence_observation(
+            checked_data=[
+                _lead_evidence_item(lead),
+                _evidence_item(
+                    sheet=_rf_sheet(rollforward),
+                    section="K.01 后推汇总",
+                    missing_data=["未识别到 K.01 后推期初/期末汇总金额"],
+                ),
+            ],
+            check_logic="已读取 Lead 固定资产余额行，但未取得 K.01 后推汇总金额，无法执行勾稽。",
+            expected_result="K.01 应包含可用于勾稽的后推汇总金额或 Check 列。",
+            actual_result="K.01 后推汇总金额未识别。",
+            result_summary="资料不足，未触发 finding。",
+        )
 
     checks = getattr(rollforward, "table1_check_values", None) or {}
     if checks:
-        path = "primary"
         rows = getattr(rollforward, "table1_check_rows", None) or {}
-        first_row = next((row for row in rows.values() if row), None)
-        inputs.append(
-            {
-                "source_sheet": rollforward.source_sheet,
-                "section": "table1_check_column",
-                "field": "table1_check_values",
-                "row": first_row,
-                "column": None,
-                "range": None,
-            }
-        )
         non_zero = [
             value
             for value in checks.values()
             if value is not None and not amounts_close(value, 0, ref=max(abs(value), 1))
         ]
-        checks_out = [
-            {
-                "name": "k01_check_column_difference",
-                "left_label": "non_zero_check_count",
-                "left_value": str(len(non_zero)),
-                "operator": "=",
-                "right_label": "expected_non_zero_count",
-                "right_value": "0",
-                "result": "triggered" if non_zero else "passed",
-            }
-        ]
-        notes = ["used_k01_check_column"]
-    else:
-        path = "fallback"
-        inputs.append(
-            {
-                "source_sheet": rollforward.source_sheet,
-                "section": "rollforward_totals",
-                "field": "opening_totals/ending_totals",
-                "row": rollforward.total_row,
-                "column": None,
-                "range": None,
-            }
+        return _evidence_observation(
+            checked_data=[
+                _evidence_item(
+                    sheet=rollforward.source_sheet,
+                    section="K.01 表1后推汇总 Check 列",
+                    location=_rows_location(rows.values()),
+                    identified_by=_identified_by(
+                        sheet=rollforward.source_sheet,
+                        section="table1_check_values",
+                        keywords=["K.01", "表1", "Check", "原值", "累计折旧", "净值"],
+                        rows=rows.values(),
+                    ),
+                    key_columns=["原值", "累计折旧", "减值准备", "净值", "Check"],
+                    values_read=[
+                        _value_read(
+                            _HOW_FIELD_LABELS.get(field_key, field_key) + " Check",
+                            value,
+                            row=rows.get(field_key),
+                            amount_type="勾稽差异",
+                        )
+                        for field_key, value in checks.items()
+                        if field_key in _HOW_FIELD_LABELS
+                    ],
+                )
+            ],
+            check_logic="优先使用 K.01 表1 Check 列判断后推汇总与账面/TB是否一致。",
+            expected_result="原值、累计折旧、减值准备、净值的 Check 均应为 0。",
+            actual_result=f"识别到 {len(checks)} 个 Check 值，其中非零差异 {len(non_zero)} 个。",
+            result_summary=f"触发 finding {1 if non_zero else 0} 条。",
         )
-        compared_fields = 0
-        for row in lead.movement_rows:
-            field_key = movement_field_key(row.account_label)
-            if field_key and field_key in rollforward.ending_totals:
-                compared_fields += 1
-        checks_out = [
-            {
-                "name": "direct_lead_k01_compared_fields",
-                "left_label": "compared_fields",
-                "left_value": str(compared_fields),
-                "operator": "exists",
-                "right_label": "direct_check_fields",
-                "right_value": None,
-                "result": "passed" if compared_fields else "data_insufficient",
-            }
-        ]
-        notes = ["k01_check_column_not_available"]
-    return {"path": path, "inputs": inputs[:8], "checks": checks_out[:8], "notes": notes[:5]}
+
+    ending_diffs, compared_fields = _direct_differences(lead, rollforward, period="ending")
+    opening_diffs, _opening_compared = _direct_differences(lead, rollforward, period="opening")
+    finding_count = (1 if ending_diffs else 0) + (1 if opening_diffs else 0)
+    return _evidence_observation(
+        checked_data=[
+            _lead_evidence_item(lead),
+            _rollforward_totals_evidence_item(rollforward),
+        ],
+        check_logic="K.01 表1 Check 列未识别时，改用 Lead 固定资产余额与 K.01 后推汇总金额直接比对。",
+        expected_result="Lead 与 K.01 对应项目的期初、期末金额应一致，差异应为 0。",
+        actual_result=f"直接比对 {compared_fields} 个期末项目，发现差异项目 {len(ending_diffs) + len(opening_diffs)} 个。",
+        result_summary=f"触发 finding {finding_count} 条。",
+    )
+
+
+def _evidence_observation(
+    *,
+    checked_data: list[dict],
+    check_logic: str,
+    expected_result: str,
+    actual_result: str,
+    result_summary: str,
+) -> dict:
+    return {
+        "checked_data": checked_data,
+        "check_logic": check_logic,
+        "expected_result": expected_result,
+        "actual_result": actual_result,
+        "result_summary": result_summary,
+    }
+
+
+def _evidence_item(
+    *,
+    sheet: str | None,
+    section: str,
+    location: str | None = None,
+    identified_by: dict | None = None,
+    key_columns: list[str] | None = None,
+    values_read: list[dict] | None = None,
+    missing_data: list[str] | None = None,
+) -> dict:
+    return {
+        "sheet": sheet,
+        "section": section,
+        "location": location,
+        "identified_by": identified_by
+        or _identified_by(sheet=sheet, section=section, keywords=[], rows=[]),
+        "key_columns": key_columns or [],
+        "values_read": values_read or [],
+        "missing_data": missing_data or [],
+    }
+
+
+def _identified_by(
+    *,
+    sheet: str | None,
+    section: str,
+    keywords: list[str],
+    rows,
+) -> dict:
+    return {
+        "sheet_name": sheet,
+        "section": section,
+        "matched_keywords": keywords,
+        "matched_rows": [row for row in rows if isinstance(row, int)],
+        "matched_columns": [],
+    }
+
+
+def _value_read(
+    label: str,
+    value: object,
+    *,
+    row: int | None = None,
+    amount_type: str | None = None,
+) -> dict:
+    return {
+        "label": label,
+        "value": None if value is None else str(value),
+        "row": row,
+        "column": None,
+        "cell": None,
+        "unit": None,
+        "amount_type": amount_type,
+    }
+
+
+def _rows_location(rows) -> str | None:
+    row_list = sorted({row for row in rows if isinstance(row, int)})
+    if not row_list:
+        return None
+    return "行 " + ", ".join(str(row) for row in row_list)
+
+
+def _lead_evidence_item(lead: LeadSheetDataset) -> dict:
+    rows = []
+    values = []
+    for row in lead.movement_rows:
+        field_key = movement_field_key(row.account_label)
+        if field_key is None:
+            continue
+        rows.append(row.source_row)
+        values.append(
+            _value_read(
+                _HOW_FIELD_LABELS.get(field_key, field_key) + " Lead期末余额",
+                lead_book_balance(row.values),
+                row=row.source_row,
+                amount_type="Lead余额",
+            )
+        )
+    return _evidence_item(
+        sheet=lead.source_sheet,
+        section="K.00 Lead 固定资产余额行",
+        location=_rows_location(rows),
+        identified_by=_identified_by(
+            sheet=lead.source_sheet,
+            section="movement_rows",
+            keywords=["Lead", "原值", "累计折旧", "减值准备", "净值"],
+            rows=rows,
+        ),
+        key_columns=["科目名称", "期初审定数", "期末审定数", "索引号"],
+        values_read=values,
+    )
+
+
+def _rollforward_totals_evidence_item(rollforward: RollforwardSheetDataset) -> dict:
+    values = []
+    for field_key, value in (rollforward.ending_totals or {}).items():
+        if field_key in _HOW_FIELD_LABELS:
+            values.append(
+                _value_read(
+                    _HOW_FIELD_LABELS.get(field_key, field_key) + " K.01期末汇总",
+                    value,
+                    row=rollforward.total_row,
+                    amount_type="K.01后推汇总",
+                )
+            )
+    missing = [] if values else ["未识别到 K.01 可比对的期末汇总金额"]
+    return _evidence_item(
+        sheet=rollforward.source_sheet,
+        section="K.01 后推汇总金额",
+        location=_rows_location([rollforward.total_row]),
+        identified_by=_identified_by(
+            sheet=rollforward.source_sheet,
+            section="ending_totals/opening_totals",
+            keywords=["K.01", "后推", "合计", "原值", "累计折旧", "净值"],
+            rows=[rollforward.total_row],
+        ),
+        key_columns=["原值", "累计折旧", "减值准备", "净值"],
+        values_read=values,
+        missing_data=missing,
+    )
+
+
+def _direct_differences(
+    lead: LeadSheetDataset,
+    rollforward: RollforwardSheetDataset,
+    *,
+    period: str,
+) -> tuple[dict[str, object], int]:
+    totals = rollforward.opening_totals if period == "opening" else rollforward.ending_totals
+    value_role = "py_audited" if period == "opening" else "audited_ending"
+    differences: dict[str, object] = {}
+    compared_fields = 0
+    for row in lead.movement_rows:
+        field_key = movement_field_key(row.account_label)
+        if field_key is None:
+            continue
+        lead_amt = (
+            parse_threshold_amount(row.values.get(value_role))
+            if period == "opening"
+            else lead_book_balance(row.values)
+        )
+        rf_amt = totals.get(field_key)
+        if lead_amt is None or rf_amt is None:
+            continue
+        compared_fields += 1
+        if not amounts_close(lead_amt, rf_amt, ref=max(abs(lead_amt), abs(rf_amt))):
+            differences[field_key] = lead_amt - rf_amt
+    return differences, compared_fields
+
+
+def _rf_sheet(rollforward: RollforwardSheetDataset | None) -> str | None:
+    return rollforward.source_sheet if rollforward and rollforward.source_sheet else None
 
 def check_lead_rollforward_tb_reconciliation(
     lead: LeadSheetDataset | None,

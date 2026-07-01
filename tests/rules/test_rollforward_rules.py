@@ -16,7 +16,10 @@ from rules.rollforward_depreciation_pl_reconciliation import (
 )
 from rules.rollforward_difference_over_sad import check_rollforward_difference_over_sad
 from rules.rollforward_exists import check_rollforward_exists
-from rules.rollforward_fa_list_reconciliation import check_rollforward_fa_list_reconciliation
+from rules.rollforward_fa_list_reconciliation import (
+    build_rollforward_fa_list_reconciliation_observation,
+    check_rollforward_fa_list_reconciliation,
+)
 from rules.rollforward_runner import run_rollforward_rules
 from rules.models import Severity
 
@@ -469,6 +472,24 @@ def test_rollforward_fa_list_reconciliation_table3_material_difference_without_n
     assert "超过 SAD" in issue.message
     assert "Notes" in issue.suggestion
 
+
+    observation = build_rollforward_fa_list_reconciliation_observation(
+        [_reconciliation_check(status=ReconciliationStatus.MATCH)],
+        rollforward=rf,
+        lead=_lead_with_sad("5"),
+    )
+    assert set(observation) == {
+        "checked_data",
+        "check_logic",
+        "expected_result",
+        "actual_result",
+        "result_summary",
+    }
+    checked = observation["checked_data"][0]
+    assert checked["sheet"] == "K.01 Agree SL to GL"
+    assert checked["identified_by"]["section"] == "b4_table3_check_with_table1"
+    assert checked["values_read"][1]["label"] == "表3 Check 2"
+    assert checked["values_read"][1]["row"] == 30
 
 def test_rollforward_fa_list_reconciliation_table3_material_difference_with_note_passes():
     rf = _minimal_rf(

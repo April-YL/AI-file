@@ -1481,6 +1481,32 @@ def _observation(item: dict) -> dict:
     return observation if isinstance(observation, dict) else {}
 
 
+def _has_evidence_how(item: dict) -> bool:
+    observation = _observation(item)
+    return {
+        "checked_data",
+        "check_logic",
+        "expected_result",
+        "actual_result",
+        "result_summary",
+    }.issubset(set(observation))
+
+
+def _has_legacy_how(item: dict) -> bool:
+    observation = _observation(item)
+    return {"path", "inputs", "checks", "notes"}.issubset(set(observation))
+
+
+def _display_how_status(item: dict) -> str:
+    if _has_evidence_how(item):
+        return "证据级 HOW 已记录"
+    if _has_legacy_how(item):
+        return "旧版 HOW 已记录"
+    if _ledger_status(item) == "EXECUTED":
+        return "HOW 未记录"
+    return "未执行说明见状态"
+
+
 def _display_observation_path(item: dict) -> str:
     path = str(_observation(item).get("path") or "").strip()
     return _OBSERVATION_PATH_LABELS.get(path, path or "未记录")
@@ -1573,6 +1599,9 @@ def _ledger_row(item: dict) -> dict:
         "依赖资料": _display_observation_inputs(item),
         "关键检查摘要": _display_observation_checks(item),
         "规则输出记录数": finding_count_int,
+        "finding 数": finding_count_int,
+        "HOW 状态": _display_how_status(item),
+        "_item": item,
         "_status": status,
         "_finding_count": finding_count_int,
     }
@@ -1608,6 +1637,106 @@ def _group_ledger_rows(rows: list[dict]) -> dict[str, list[dict]]:
     return {program: items for program, items in grouped.items() if items}
 
 
+def _render_evidence_how(item: dict) -> None:
+    observation = _observation(item)
+    checked_data = observation.get("checked_data") or []
+    st.markdown("**检查资料**")
+    if isinstance(checked_data, list) and checked_data:
+        for idx, raw in enumerate(checked_data, start=1):
+            if not isinstance(raw, dict):
+                continue
+            title_parts = [
+                str(raw.get("sheet") or "未记录工作表"),
+                str(raw.get("section") or "未记录资料区块"),
+            ]
+            with st.expander(f"检查资料 {idx} · " + " / ".join(title_parts), expanded=False):
+                st.write(
+                    {
+                        "工作表": raw.get("sheet") or "",
+                        "资料区块": raw.get("section") or "",
+                        "位置": raw.get("location") or "",
+                        "关键列": "；".join(str(v) for v in (raw.get("key_columns") or [])),
+                    }
+                )
+                identified = raw.get("identified_by") or {}
+                if isinstance(identified, dict):
+                    st.write(
+                        {
+                            "命中的工作表名": identified.get("sheet_name") or "",
+                            "命中的资料区块": identified.get("section") or "",
+                            "命中的标题/关键词": "；".join(
+                                str(v) for v in (identified.get("matched_keywords") or [])
+                            ),
+                            "命中的行": "；".join(
+                                str(v) for v in (identified.get("matched_rows") or [])
+                            ),
+                            "命中的列": "；".join(
+                                str(v) for v in (identified.get("matched_columns") or [])
+                            ),
+                        }
+                    )
+                values_read = raw.get("values_read") or []
+                if isinstance(values_read, list) and values_read:
+                    st.markdown("**实际读取值**")
+                    st.dataframe(
+                        [
+                            {
+                                "标签": value.get("label") or "",
+                                "值": value.get("value") or "",
+                                "行": value.get("row") or "",
+                                "列": value.get("column") or "",
+                                "单元格": value.get("cell") or "",
+                                "单位": value.get("unit") or "",
+                                "金额类型": value.get("amount_type") or "",
+                            }
+                            for value in values_read
+                            if isinstance(value, dict)
+                        ],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                missing = raw.get("missing_data") or []
+                if isinstance(missing, list) and missing:
+                    st.warning("缺失资料：" + "；".join(str(v) for v in missing))
+    else:
+        st.info("检查资料未记录。")
+    for label, key in (
+        ("检查逻辑", "check_logic"),
+        ("判断标准", "expected_result"),
+        ("实际结果", "actual_result"),
+        ("执行结果", "result_summary"),
+    ):
+        text = str(observation.get(key) or "").strip()
+        if text:
+            st.markdown(f"**{label}**")
+            st.write(text)
+
+
+def _render_legacy_how(item: dict) -> None:
+    st.info("该规则已记录旧版 HOW，但尚未补充证据级执行说明。")
+    st.write(
+        {
+            "检查方式": _display_observation_path(item),
+            "依赖资料": _display_observation_inputs(item),
+            "关键检查摘要": _display_observation_checks(item),
+        }
+    )
+
+
+def _render_how_details(row: dict) -> None:
+    item = row.get("_item") if isinstance(row.get("_item"), dict) else {}
+    if _has_evidence_how(item):
+        _render_evidence_how(item)
+        return
+    if _has_legacy_how(item):
+        _render_legacy_how(item)
+        return
+    if _ledger_status(item) == "EXECUTED":
+        st.info("HOW 未记录：该规则已执行，但尚未补充证据级执行说明。")
+    else:
+        st.info("HOW 未记录：该规则本次未执行，具体原因请查看执行状态和状态说明。")
+
+
 def _render_execution_ledger_table(data: dict) -> None:
     ledger = _execution_ledger(data)
     _render_section_title("质检点执行台账", "展示系统实际记录到的规则级检查流程。")
@@ -1624,7 +1753,7 @@ def _render_execution_ledger_table(data: dict) -> None:
         return
     rows = sorted((_ledger_row(item) for item in items), key=_ledger_sort_key)
     grouped = _group_ledger_rows(rows)
-    visible_columns = ["质检点", "规则编号", "rule_ID", "执行状态", "检查方式", "依赖资料", "关键检查摘要", "规则输出记录数"]
+    visible_columns = ["质检点", "执行状态", "finding 数", "HOW 状态"]
     for program, group_rows in grouped.items():
         executed = sum(1 for row in group_rows if row["_status"] == "EXECUTED")
         data_insufficient = sum(1 for row in group_rows if row["_status"] == "DATA_INSUFFICIENT")
@@ -1642,6 +1771,13 @@ def _render_execution_ledger_table(data: dict) -> None:
                 use_container_width=True,
                 hide_index=True,
             )
+            for row in group_rows:
+                title = (
+                    f"HOW 明细 · {row.get('质检点') or ''} · "
+                    f"{row.get('执行状态') or ''} · finding {row.get('finding 数') or 0}"
+                )
+                with st.expander(title, expanded=False):
+                    _render_how_details(row)
 
 @st.cache_data(show_spinner=False)
 def _run_qc_cached(
