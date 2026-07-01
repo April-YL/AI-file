@@ -264,17 +264,17 @@ def split_fa_list_issues(issues: list[QcIssue]) -> tuple[list[QcIssue], list[QcI
 
 def _aggregate_fa_list_issues(
     issues: list[QcIssue],
-) -> list[tuple[QcIssue, int, list[str]]]:
+) -> list[tuple[QcIssue, int, list[str], list[QcIssue]]]:
     """按 (rule_id, field, severity) 合并 FA list 共性问题。"""
     buckets: dict[tuple[str, str, Severity], list[QcIssue]] = defaultdict(list)
     for issue in issues:
         key = (issue.rule_id, issue.field or "", issue.severity)
         buckets[key].append(issue)
-    merged: list[tuple[QcIssue, int, list[str]]] = []
+    merged: list[tuple[QcIssue, int, list[str], list[QcIssue]]] = []
     for group in buckets.values():
         rep = group[0]
         sheets = sorted({i.source_sheet for i in group if i.source_sheet})
-        merged.append((rep, len(group), sheets))
+        merged.append((rep, len(group), sheets, group))
     merged.sort(
         key=lambda x: (
             _SEV_RANK.get(x[0].severity, 9),
@@ -286,6 +286,20 @@ def _aggregate_fa_list_issues(
 
 
 def _fa_list_summary_question(rep: QcIssue, count: int) -> str:
+    return _fa_list_summary_question_for_group(rep, count, [rep])
+
+
+def _fa_list_summary_question_for_group(rep: QcIssue, count: int, group: list[QcIssue]) -> str:
+    if _is_fa_net_value_consistency_issue(rep):
+        stats = _net_value_difference_summary(group)
+        if stats:
+            total_abs, max_abs = stats
+            return (
+                f"共 {count} 条同类问题；"
+                f"差异绝对值合计={_format_decimal_for_comment(total_abs)}；"
+                f"最大单项差异={_format_decimal_for_comment(max_abs)}；"
+                f"详见《{FA_LIST_COMMENTS_SHEET_NAME}》"
+            )
     detail = _compact_issue_message(rep.message)
     if detail:
         return (
@@ -329,7 +343,7 @@ def build_main_comments_rows(
             )
         )
 
-    for rep, count, sheets in _aggregate_fa_list_issues(fa_list_issues):
+    for rep, count, sheets, group in _aggregate_fa_list_issues(fa_list_issues):
         ey += 1
         if not sheets:
             tab = "FA list"
@@ -342,7 +356,7 @@ def build_main_comments_rows(
                 ey,
                 tab or "FA list",
                 f"见附表 {FA_LIST_COMMENTS_SHEET_NAME}",
-                _fa_list_summary_question(rep, count),
+                _fa_list_summary_question_for_group(rep, count, group),
                 _answer_for_preparer(),
                 "No",
                 _agent_suggestion(rep),
@@ -376,7 +390,7 @@ def build_main_comments_hyperlinks(
         if loc:
             links[(row_idx, 3)] = loc
         row_idx += 1
-    for _rep, _count, _sheets in _aggregate_fa_list_issues(fa_list_issues):
+    for _rep, _count, _sheets, _group in _aggregate_fa_list_issues(fa_list_issues):
         row_idx += 1
     return links
 
@@ -396,11 +410,39 @@ def _compact_issue_message(message: str | None) -> str:
 
 
 def _short_title_for_issue(issue: QcIssue) -> str | None:
+    if _is_fa_net_value_consistency_issue(issue):
+        return None
     code = (issue.dict_rule_code or issue.rule_id or "").strip().upper()
     field = (issue.field or "").strip().lower()
     if not code:
         return None
     return _SHORT_TITLE_BY_CODE_FIELD.get((code, field)) or _SHORT_TITLE_BY_CODE_FIELD.get((code, ""))
+
+
+def _is_fa_net_value_consistency_issue(issue: QcIssue) -> bool:
+    code = (issue.dict_rule_code or issue.rule_id or "").strip().upper()
+    return code in {"FA-RC-003", "ASSET_VALUE_CONSISTENCY"} and (issue.field or "").strip().lower() == "net_value"
+
+
+def _net_value_difference_summary(issues: list[QcIssue]) -> tuple[float, float] | None:
+    differences: list[float] = []
+    pattern = re.compile(r"差异\s*[=＝]?\s*(-?\d+(?:,\d{3})*(?:\.\d+)?)")
+    for issue in issues:
+        match = pattern.search(issue.message or "")
+        if not match:
+            continue
+        try:
+            differences.append(abs(float(match.group(1).replace(",", ""))))
+        except ValueError:
+            continue
+    if not differences:
+        return None
+    return sum(differences), max(differences)
+
+
+def _format_decimal_for_comment(value: float) -> str:
+    text = f"{value:.2f}"
+    return text.rstrip("0").rstrip(".")
 
 
 def _sheet_group_rank(issue: QcIssue) -> int:

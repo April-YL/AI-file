@@ -60,7 +60,7 @@ def test_main_rows_fewer_than_fa_detail_when_many_fa_dupes():
         assert len(main_rows) < len(fa) + len(other)
 
 
-def test_fa_list_summary_includes_representative_detail():
+def test_fa_list_net_value_summary_uses_difference_totals():
     issue = QcIssue(
         asset_id="FA-TEST-001",
         rule_id="fa_list_recalc",
@@ -78,13 +78,74 @@ def test_fa_list_summary_includes_representative_detail():
 
     assert len(rows) == 1
     assert "共 1 条同类问题" in rows[0][3]
-    assert "代表性问题" in rows[0][3]
-    assert "差异 10" in rows[0][3]
+    assert "差异绝对值合计=10" in rows[0][3]
+    assert "最大单项差异=10" in rows[0][3]
+    assert "代表性问题" not in rows[0][3]
     assert "[FAIL]" not in rows[0][3]
     assert "FA-RC-003" not in rows[0][3]
     assert rows[0][8] == "FAIL"
     assert rows[0][9] == "FA-RC-003"
     assert rows[0][10] == "net_value"
+
+
+def test_fa_list_net_value_summary_shows_total_and_max_difference_without_representative():
+    issues = [
+        QcIssue(
+            asset_id="FA-TEST-001",
+            rule_id="asset_value_consistency",
+            dict_rule_code="FA-RC-003",
+            field="net_value",
+            severity=Severity.FAIL,
+            message="净值与原值减累计折旧不一致：净值=37479.03，计算值=57401.55，差异=19922.52（允差=11.8704）",
+            suggestion="核对净值公式。",
+            procedure_code="FA_LIST",
+            source_sheet="FA list",
+            source_row=10,
+        ),
+        QcIssue(
+            asset_id="FA-TEST-002",
+            rule_id="asset_value_consistency",
+            dict_rule_code="FA-RC-003",
+            field="net_value",
+            severity=Severity.FAIL,
+            message="净值与原值减累计折旧不一致：净值=10，计算值=30，差异=20（允差=0.01）",
+            suggestion="核对净值公式。",
+            procedure_code="FA_LIST",
+            source_sheet="FA list",
+            source_row=11,
+        ),
+    ]
+
+    rows = build_main_comments_rows([], issues)
+
+    assert len(rows) == 1
+    assert "共 2 条同类问题" in rows[0][3]
+    assert "差异绝对值合计=19942.52" in rows[0][3]
+    assert "最大单项差异=19922.52" in rows[0][3]
+    assert f"详见《{FA_LIST_COMMENTS_SHEET_NAME}》" in rows[0][3]
+    assert "代表性问题" not in rows[0][3]
+
+
+def test_fa_list_detail_keeps_net_value_difference_message():
+    issue = QcIssue(
+        asset_id="FA-TEST-001",
+        rule_id="asset_value_consistency",
+        dict_rule_code="FA-RC-003",
+        field="net_value",
+        severity=Severity.FAIL,
+        message="净值与原值减累计折旧不一致：净值=37479.03，计算值=57401.55，差异=19922.52（允差=11.8704）",
+        suggestion="核对净值公式。",
+        procedure_code="FA_LIST",
+        source_sheet="FA list",
+        source_row=10,
+    )
+
+    rows = build_fa_list_detail_rows([issue])
+
+    assert "净值=37479.03" in rows[0][3]
+    assert "计算值=57401.55" in rows[0][3]
+    assert "差异=19922.52" in rows[0][3]
+    assert "允差=11.8704" in rows[0][3]
 
 
 def test_export_two_comment_sheets(tmp_path: Path):
