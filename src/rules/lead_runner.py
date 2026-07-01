@@ -19,6 +19,10 @@ from rules.lead_fluctuation_notes_refs import check_lead_fluctuation_notes_refs
 from rules.lead_movement_consistency import check_lead_movement_consistency
 from rules.lead_movement_notes_required import check_lead_movement_notes_required
 from rules.lead_movement_rows_complete import check_lead_movement_rows_complete
+from rules.lead_observations import (
+    build_lead_ingest_readability_observation,
+    build_lead_required_fields_observation,
+)
 from rules.lead_required_fields import check_lead_required_fields
 from rules.lead_rollforward_tb_reconciliation import (
     build_lead_rollforward_tb_reconciliation_observation,
@@ -80,9 +84,19 @@ def run_lead_rules(
 ) -> list[QcIssue]:
     recorder = recorder or RuleExecutionRecorder()
     issues: list[QcIssue] = []
-    issues.extend(recorder.execute_rule("lead_required_fields", check_lead_required_fields, lead))
+    required_issues = recorder.execute_rule("lead_required_fields", check_lead_required_fields, lead)
+    recorder.record_observation(
+        "lead_required_fields",
+        build_lead_required_fields_observation(lead, required_issues),
+    )
+    issues.extend(required_issues)
     if not lead.usable_for_rules:
-        issues.extend(recorder.execute_rule("lead_ingest_readability", _lead_ingest_readability_issue, lead))
+        readability_issues = recorder.execute_rule("lead_ingest_readability", _lead_ingest_readability_issue, lead)
+        recorder.record_observation(
+            "lead_ingest_readability",
+            build_lead_ingest_readability_observation(lead, readability_issues),
+        )
+        issues.extend(readability_issues)
         for rule_id in LEAD_RULE_IDS:
             if rule_id != "lead_required_fields":
                 recorder.record_data_insufficient(rule_id, "Lead movement table 读取不稳定，依赖 Lead 明细的检查未执行")

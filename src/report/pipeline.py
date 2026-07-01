@@ -28,6 +28,7 @@ from rules.k03_runner import K03_RULE_IDS, run_k03_rules
 from rules.lead_runner import LEAD_RULE_IDS, run_lead_rules
 from rules.execution_recorder import RuleExecutionRecorder, validate_execution_ledger
 from rules.models import ColumnContext
+from rules.psp_observations import build_psp_completion_observation
 from rules.psp_completion import check_psp_completion
 from rules.registry import attach_rule_metadata
 from rules.rollforward_runner import ROLLFORWARD_RULE_IDS, run_rollforward_rules
@@ -154,6 +155,14 @@ def run_workbook_qc(
             workbook_path=wb_for_psp,
             waiver_reason_reviewer=waiver_reason_reviewer,
             enforce_template_completeness=True,
+        )
+        recorder.record_observation(
+            "psp_completion",
+            build_psp_completion_observation(
+                ctx.summary,
+                psp_raw_issues,
+                workbook_sheet_titles=sheet_titles,
+            ),
         )
         if config.enabled and wb_for_psp and sheet_titles:
             llm_t0 = perf_counter()

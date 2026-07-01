@@ -17,6 +17,7 @@ from rules.lead_rollforward_tb_reconciliation import (
     check_lead_rollforward_tb_reconciliation,
 )
 from rules.lead_runner import run_lead_rules
+from rules.execution_recorder import RuleExecutionRecorder
 from rules.lead_tt_gam_range import check_lead_tt_gam_range
 from rules.lead_tt_overall_min import check_lead_tt_overall_min
 from rules.lead_volatility_threshold_link import check_lead_volatility_threshold_link
@@ -385,3 +386,39 @@ def test_run_lead_rules_attaches_metadata(swp_lead_xlsx: Path):
     issues = attach_rule_metadata(run_lead_rules(lead))
     codes = {i.dict_rule_code for i in issues if i.dict_rule_code}
     assert "LEAD-003" in codes or "AE-001" in codes
+
+
+def test_run_lead_rules_records_required_fields_evidence_how(swp_lead_xlsx: Path):
+    lead = load_lead_from_workbook(swp_lead_xlsx)
+    recorder = RuleExecutionRecorder()
+    run_lead_rules(lead, recorder=recorder)
+    item = {
+        ledger_item["rule_id"]: ledger_item
+        for ledger_item in recorder.to_ledger()["items"]
+    }["lead_required_fields"]
+
+    observation = item["observation"]
+    assert set(observation) == {
+        "checked_data",
+        "check_logic",
+        "expected_result",
+        "actual_result",
+        "result_summary",
+    }
+    checked = observation["checked_data"][0]
+    assert checked["sheet"] == "K.00 Lead Sheet"
+    assert checked["section"] == "K.00 Lead Sheet 基础信息"
+    assert checked["values_read"][0]["label"] == "客户名称"
+    assert checked["values_read"][0]["cell"] == "C2"
+
+
+def test_run_lead_rules_records_ingest_readability_how_when_paused(swp_lead_xlsx: Path):
+    lead = load_lead_from_workbook(swp_lead_xlsx)
+    lead.usable_for_rules = False
+    recorder = RuleExecutionRecorder()
+    run_lead_rules(lead, recorder=recorder)
+    items = {item["rule_id"]: item for item in recorder.to_ledger()["items"]}
+
+    observation = items["lead_ingest_readability"]["observation"]
+    assert observation["checked_data"][0]["section"] == "K.00 Lead Sheet 资料识别质量"
+    assert items["lead_analysis_date_after_period_end"]["status"] == "DATA_INSUFFICIENT"

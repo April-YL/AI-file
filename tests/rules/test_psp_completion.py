@@ -2,6 +2,7 @@ from openpyxl import Workbook
 
 from ingest.summary_sheet import PspProgramRow, SummarySheetDataset
 from rules.models import Severity
+from rules.psp_observations import build_psp_completion_observation
 from rules.psp_completion import WaiverSemanticReview, check_psp_completion
 
 
@@ -70,6 +71,37 @@ def test_no_programs_sheet_level_need_review():
     )
     assert len(issues) == 1
     assert issues[0].severity == Severity.NEED_REVIEW
+
+
+def test_psp_completion_observation_records_evidence_level_how():
+    rows = [
+        PspProgramRow(
+            procedure_name="K.01 后推",
+            sheet_ref="K.01",
+            execution_status="",
+            waiver_reason=None,
+            notes=None,
+            source_row=2,
+            is_psp=True,
+        ),
+    ]
+    ds = _dataset(rows)
+    issues = check_psp_completion(ds)
+    observation = build_psp_completion_observation(ds, issues, workbook_sheet_titles=["K.01"])
+
+    assert set(observation) == {
+        "checked_data",
+        "check_logic",
+        "expected_result",
+        "actual_result",
+        "result_summary",
+    }
+    checked = observation["checked_data"][0]
+    assert checked["sheet"] == ds.source_sheet
+    assert checked["section"] == "汇总页 PSP / 程序执行清单"
+    assert checked["values_read"][0]["label"] == "程序名称"
+    assert checked["values_read"][0]["row"] == 2
+    assert "finding 1" in observation["result_summary"]
 
 
 def test_yes_without_workbook_skips_sheet_cross_check():
