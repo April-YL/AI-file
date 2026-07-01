@@ -1,4 +1,7 @@
-param()
+param(
+    [switch]$ListOnly,
+    [switch]$WarnOnly
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -21,7 +24,9 @@ if (Test-Path -LiteralPath $pytestCache) {
         Add-Violation "Pytest cache in repo root: $pytestCache"
     }
     catch [System.UnauthorizedAccessException] {
-        Write-Warning "Ignoring inaccessible legacy pytest cache: $pytestCache"
+        if (-not $ListOnly) {
+            Write-Warning "Ignoring inaccessible legacy pytest cache: $pytestCache"
+        }
     }
 }
 
@@ -40,9 +45,19 @@ if (Test-Path -LiteralPath $outputs) {
         ForEach-Object { Add-Violation "Runtime output in outputs/: $($_.FullName)" }
 }
 
+if ($ListOnly) {
+    $violations | Sort-Object -Unique
+    exit 0
+}
+
 if ($violations.Count -gt 0) {
+    if ($WarnOnly) {
+        Write-Warning "Workspace hygiene has existing issue(s):"
+        $violations | Sort-Object -Unique | ForEach-Object { Write-Warning "- $_" }
+        exit 0
+    }
     Write-Host "Workspace hygiene check failed:" -ForegroundColor Red
-    $violations | ForEach-Object { Write-Host "- $_" }
+    $violations | Sort-Object -Unique | ForEach-Object { Write-Host "- $_" }
     Write-Host "Run: powershell -ExecutionPolicy Bypass -File .\scripts\clean_workspace.ps1 -Apply"
     exit 1
 }

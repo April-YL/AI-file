@@ -38,6 +38,7 @@ __pycache__/
 .pytest_tmp/
 .pytest_tmp*/
 .tmp/
+artifacts/pytest-summary-temp/
 
 # 本地资料库/案例库（体积大，可能包含脱敏但不适合直接入库的底稿）
 固定资产质检agent/资料库/
