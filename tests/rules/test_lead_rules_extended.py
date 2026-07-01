@@ -468,3 +468,65 @@ def test_run_lead_rules_records_parameter_data_insufficient_how(swp_lead_xlsx: P
         assert observation["checked_data"][0]["section"] == "K.00 Lead Sheet 参数类规则执行前置条件"
         assert observation["checked_data"][0]["values_read"] == []
         assert observation["checked_data"][0]["missing_data"]
+
+
+def test_run_lead_rules_records_remaining_lead_rules_evidence_how(swp_lead_xlsx: Path):
+    lead = load_lead_from_workbook(swp_lead_xlsx)
+    recorder = RuleExecutionRecorder()
+    run_lead_rules(lead, recorder=recorder)
+    items = {item["rule_id"]: item for item in recorder.to_ledger()["items"]}
+
+    for rule_id in (
+        "lead_movement_rows_complete",
+        "lead_movement_consistency",
+        "lead_movement_notes_required",
+        "lead_check_with_a3_row",
+        "unexpected_movement_investigation",
+        "lead_fluctuation_notes_refs",
+        "lead_expectation_analysis",
+        "lead_expectation_basis_present",
+        "lead_expectation_vs_movement_review",
+        "lead_adjustment_internal_consistency",
+    ):
+        observation = items[rule_id]["observation"]
+        assert set(observation) == {
+            "checked_data",
+            "check_logic",
+            "expected_result",
+            "actual_result",
+            "result_summary",
+        }
+        assert observation["checked_data"][0]["sheet"] == "K.00 Lead Sheet"
+
+
+def test_run_lead_rules_records_remaining_lead_data_insufficient_how(swp_lead_xlsx: Path):
+    lead = load_lead_from_workbook(swp_lead_xlsx)
+    lead.usable_for_rules = False
+    recorder = RuleExecutionRecorder()
+    run_lead_rules(lead, recorder=recorder)
+    items = {item["rule_id"]: item for item in recorder.to_ledger()["items"]}
+
+    for rule_id in (
+        "lead_movement_rows_complete",
+        "lead_movement_consistency",
+        "lead_movement_notes_required",
+        "lead_check_with_a3_row",
+        "unexpected_movement_investigation",
+        "lead_fluctuation_notes_refs",
+        "lead_expectation_analysis",
+        "lead_expectation_basis_present",
+        "lead_expectation_vs_movement_review",
+        "lead_adjustment_internal_consistency",
+        "lead_rollforward_tb_reconciliation",
+    ):
+        observation = items[rule_id]["observation"]
+        assert items[rule_id]["status"] == "DATA_INSUFFICIENT"
+        assert set(observation) == {
+            "checked_data",
+            "check_logic",
+            "expected_result",
+            "actual_result",
+            "result_summary",
+        }
+        assert observation["checked_data"][0]["values_read"] == []
+        assert observation["checked_data"][0]["missing_data"]

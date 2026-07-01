@@ -8,6 +8,7 @@ from rules.lead_common import (
     cra_tier,
     effective_overall_threshold,
     field_values,
+    movement_amount_for_row,
     parse_threshold_amount,
     skip_cra_module,
 )
@@ -193,7 +194,7 @@ def build_lead_data_insufficient_observation(
         checked_data=[
             _checked_data(
                 sheet=lead.source_sheet,
-                section="K.00 Lead Sheet 参数类规则执行前置条件",
+                section=_section_for_data_insufficient_rule(rule_id),
                 location=None,
                 matched_keywords=[block.anchor_text for block in lead.blocks if block.anchor_text],
                 matched_rows=[],
@@ -203,10 +204,191 @@ def build_lead_data_insufficient_observation(
                 missing_data=[reason],
             )
         ],
-        check_logic="本规则依赖 Lead Sheet 的参数区或 CRA/TT 区；当 Lead 资料识别质量不足时，仅记录未执行原因，不读取或推断参数值。",
-        expected_result="Lead Sheet 应能稳定识别基础信息、CRA/TT 或波动阈值等参数资料后，才执行本规则。",
+        check_logic="本规则依赖 Lead Sheet 中已识别的资料区；当 Lead 资料识别质量不足时，仅记录未执行原因，不读取或推断底稿值。",
+        expected_result="Lead Sheet 应能稳定识别本规则所需资料后，才执行本规则。",
         actual_result=f"本次未执行该规则：{reason}",
         result_summary="资料不足，未执行本规则。",
+    )
+
+
+def build_lead_movement_rows_observation(
+    lead: LeadSheetDataset,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    missing = []
+    if not lead.movement_rows:
+        missing.append("Lead 两期引导主表账户行")
+    if not lead.movement_bindings:
+        missing.append("Lead 两期引导主表金额列")
+    return _observation(
+        checked_data=[_movement_checked_data(lead, missing_data=missing)],
+        check_logic="读取 Lead 两期引导主表，检查原值、累计折旧、减值准备、净值等核心账户行，以及索引号、期末审定数、上期审定数等核心列是否可识别并已填写。",
+        expected_result="Lead 两期引导主表应包含核心账户行和核心列；除净值行可由前三行勾稽外，核心账户行应能追溯到对应索引号和金额列。",
+        actual_result=f"本次识别到 {len(lead.movement_rows)} 行 movement 数据、{len(lead.movement_bindings)} 个金额列绑定。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_lead_movement_consistency_observation(
+    lead: LeadSheetDataset,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    return _observation(
+        checked_data=[_movement_checked_data(lead)],
+        check_logic="逐行读取 Lead 两期引导主表的上期审定数、本期审定数和变动金额，核对“本期审定数 - 上期审定数”是否与表内变动金额一致。",
+        expected_result="每个账户行的变动金额应与本期审定数减上期审定数一致，仅允许金额尾差。",
+        actual_result=f"本次对 {len(lead.movement_rows)} 行 movement 数据执行金额自洽检查。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_lead_movement_notes_observation(
+    lead: LeadSheetDataset,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    return _observation(
+        checked_data=[_movement_checked_data(lead, key_columns=[
+            "account_label",
+            "investigate_quantitative",
+            "investigate_qualitative",
+            "notes",
+        ])],
+        check_logic="读取 Lead 主表定量调查、定性调查和 Notes 列；当调查标记为“是”时，检查对应账户行是否填写 Notes。",
+        expected_result="凡被标记为需要调查的 Lead 主表行，均应填写 Notes 或可追溯的说明引用。",
+        actual_result=f"本次读取 {len(lead.movement_rows)} 行 movement 数据中的调查标记和 Notes 字段。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_lead_check_with_a3_observation(
+    lead: LeadSheetDataset,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    cw = lead.check_with_a3
+    missing = [] if cw else ["Check with A3 / Diff / Notes 区"]
+    return _observation(
+        checked_data=[
+            _checked_data(
+                sheet=lead.source_sheet,
+                section="K.00 Lead Check with A3 / Diff",
+                location=_rows_location([
+                    cw.check_source_row if cw else None,
+                    cw.diff_source_row if cw else None,
+                    cw.notes_source_row if cw else None,
+                ]),
+                matched_keywords=["Check with A3", "Diff", "Notes"],
+                matched_rows=[
+                    cw.check_source_row if cw else None,
+                    cw.diff_source_row if cw else None,
+                    cw.notes_source_row if cw else None,
+                ],
+                matched_columns=[],
+                key_columns=["account_label", "movement_value", "a3_value", "diff_value", "notes"],
+                values_read=_check_with_a3_values(cw),
+                missing_data=missing,
+            )
+        ],
+        check_logic="读取 Lead 主表末尾的 Check with A3、Diff 和 Notes 区，重点核对净值行 Lead 金额、A3 金额和 Diff 是否一致，重大差异是否有说明。",
+        expected_result="净值行 Diff 应为零或仅为允许尾差；重大非零 Diff 应在 Notes 中说明。",
+        actual_result=f"本次识别到 {len(cw.lines) if cw else 0} 条 Check with A3 对齐明细。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_unexpected_movement_observation(
+    lead: LeadSheetDataset,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    return _observation(
+        checked_data=[
+            _movement_checked_data(lead, key_columns=[
+                "account_label",
+                "movement_amount",
+                "movement_pct",
+                "investigate_quantitative",
+                "investigate_qualitative",
+                "notes",
+            ]),
+            _volatility_checked_data(lead),
+            _fluctuation_notes_checked_data(lead),
+        ],
+        check_logic="读取 Lead 波动金额、波动比例门槛，以及主表各账户行的变动金额、变动比例和调查标记；当超过门槛或被标记需调查时，检查波动说明是否为空或过于笼统。",
+        expected_result="超过波动门槛或被标记需调查的项目，应有具体波动说明，不能仅写无异常波动等空泛结论。",
+        actual_result=f"本次读取 {len(lead.movement_rows)} 行 movement 数据，并检查波动说明区是否支持异常波动调查。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_lead_fluctuation_notes_refs_observation(
+    lead: LeadSheetDataset,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    return _observation(
+        checked_data=[
+            _movement_checked_data(lead, key_columns=["account_label", "notes"]),
+            _fluctuation_notes_checked_data(lead),
+        ],
+        check_logic="读取 Lead 主表 Notes 引用和波动说明区正文，检查主表引用的 Notes 编号是否能在波动说明区找到对应说明，并关注说明区是否存在无法回连主表的编号。",
+        expected_result="Lead 主表 Notes 引用应与波动说明区编号互相对应，需要调查的主表行应能追溯到具体说明。",
+        actual_result=f"本次读取 {len(lead.movement_rows)} 行主表 Notes，并读取波动说明区文本长度 {len(lead.fluctuation_notes or '')}。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_lead_expectation_observation(
+    lead: LeadSheetDataset,
+    issues: Iterable[QcIssue],
+    *,
+    rule_id: str,
+) -> dict:
+    issues = list(issues)
+    logic = {
+        "lead_expectation_analysis": "读取 Lead 预期分析区和波动门槛，检查是否识别到账户变更预期，以及波动金额/比例门槛是否可读取。",
+        "lead_expectation_basis_present": "读取 Lead 预期分析行，检查预期说明是否包含形成依据，而不是仅有空白、无异常、合理等简短结论。",
+        "lead_expectation_vs_movement_review": "读取 Lead 预期分析、波动门槛和 movement 实际变动；当预期写明无重大变化但实际波动超过门槛时，提示人工复核。",
+    }.get(rule_id, "读取 Lead 预期分析相关资料，记录本规则实际检查依据。")
+    expected = {
+        "lead_expectation_analysis": "Lead 应能识别预期分析区、账户变更预期和波动门槛。",
+        "lead_expectation_basis_present": "预期分析应说明判断依据，不应只有笼统结论。",
+        "lead_expectation_vs_movement_review": "预期分析口径应与实际 movement 波动保持一致；若不一致，应由人工复核说明。",
+    }.get(rule_id, "Lead 预期分析资料应支持本规则检查。")
+    return _observation(
+        checked_data=[
+            _expectation_checked_data(lead),
+            _volatility_checked_data(lead),
+            _movement_checked_data(lead, key_columns=["account_label", "movement_amount", "movement_pct"]),
+        ],
+        check_logic=logic,
+        expected_result=expected,
+        actual_result=f"本次识别到 {len(lead.expectations)} 行预期分析、{len(lead.movement_rows)} 行 movement 数据。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_lead_adjustment_observation(
+    lead: LeadSheetDataset,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    return _observation(
+        checked_data=[
+            _movement_checked_data(lead, key_columns=[
+                "account_label",
+                "book_adjustment",
+                "audit_adjustment",
+            ]),
+            _adjustment_checked_data(lead),
+        ],
+        check_logic="读取 Lead 主表账表调整、审计调整列，以及 Lead 调整事项汇总表；检查主表调整金额与调整汇总记录是否能对应。",
+        expected_result="如 Lead 主表存在调整金额，应能在调整事项汇总表找到对应记录；如汇总表存在调整记录，也应能回连主表相关调整列。",
+        actual_result=f"本次识别到 {len(lead.adjustment_rows)} 行调整事项汇总记录，并读取 {len(lead.movement_rows)} 行主表调整列。",
+        result_summary=_result_summary(issues),
     )
 
 
@@ -480,6 +662,307 @@ def build_lead_volatility_threshold_observation(
     )
 
 
+def _movement_checked_data(
+    lead: LeadSheetDataset,
+    *,
+    key_columns: list[str] | None = None,
+    missing_data: list[str] | None = None,
+) -> dict:
+    rows = [row.source_row for row in lead.movement_rows]
+    columns = [binding.column_index for binding in lead.movement_bindings]
+    keys = key_columns or [
+        "account_label",
+        "sheet_ref",
+        "py_audited",
+        "audited_ending",
+        "movement_amount",
+        "movement_pct",
+        "book_balance",
+    ]
+    missing = list(missing_data or [])
+    if not lead.movement_rows:
+        missing.append("Lead 两期引导主表账户行")
+    if not lead.movement_bindings:
+        missing.append("Lead 两期引导主表金额列")
+    return _checked_data(
+        sheet=lead.source_sheet,
+        section="K.00 Lead 两期引导主表",
+        location=_rows_location(rows),
+        matched_keywords=[row.account_label for row in lead.movement_rows],
+        matched_rows=rows,
+        matched_columns=columns,
+        key_columns=keys,
+        values_read=_movement_values(lead, keys),
+        missing_data=missing,
+    )
+
+
+def _movement_values(lead: LeadSheetDataset, keys: list[str]) -> list[dict]:
+    values: list[dict] = []
+    for row in lead.movement_rows:
+        for key in keys:
+            if key == "account_label":
+                values.append(
+                    _value_read(
+                        label="账户行",
+                        value=row.account_label,
+                        row=row.source_row,
+                        column=None,
+                        amount_type="Lead movement",
+                    )
+                )
+                continue
+            if key == "sheet_ref":
+                values.append(
+                    _value_read(
+                        label=f"{row.account_label} 索引号",
+                        value=row.sheet_ref,
+                        row=row.source_row,
+                        column=None,
+                        amount_type="Lead movement",
+                    )
+                )
+                continue
+            if key == "computed_movement":
+                values.append(
+                    _value_read(
+                        label=f"{row.account_label} 计算变动额",
+                        value=movement_amount_for_row(row.values),
+                        row=row.source_row,
+                        column=None,
+                        amount_type="Lead movement",
+                    )
+                )
+                continue
+            if key in row.values:
+                values.append(
+                    _value_read(
+                        label=f"{row.account_label} {_movement_role_label(key)}",
+                        value=row.values.get(key),
+                        row=row.source_row,
+                        column=_column_for_role(lead, key),
+                        amount_type="Lead movement",
+                    )
+                )
+    return values[:20]
+
+
+def _check_with_a3_values(cw) -> list[dict]:
+    if cw is None:
+        return []
+    values: list[dict] = []
+    for line in cw.lines:
+        values.extend(
+            [
+                _value_read(
+                    label=f"{line.account_label} Lead金额",
+                    value=line.movement_value,
+                    row=cw.check_source_row,
+                    column=None,
+                    amount_type="Lead Check with A3",
+                ),
+                _value_read(
+                    label=f"{line.account_label} A3金额",
+                    value=line.a3_value,
+                    row=cw.check_source_row,
+                    column=None,
+                    amount_type="Lead Check with A3",
+                ),
+                _value_read(
+                    label=f"{line.account_label} Diff",
+                    value=line.diff_value,
+                    row=cw.diff_source_row,
+                    column=None,
+                    amount_type="Lead Check with A3",
+                ),
+            ]
+        )
+    if cw.notes_text:
+        values.append(
+            _value_read(
+                label="Check with A3 Notes",
+                value=cw.notes_text,
+                row=cw.notes_source_row,
+                column=None,
+                amount_type="Lead Check with A3",
+            )
+        )
+    return values[:20]
+
+
+def _volatility_checked_data(lead: LeadSheetDataset) -> dict:
+    vol = lead.volatility
+    return _checked_data(
+        sheet=lead.source_sheet,
+        section="K.00 Lead 波动门槛",
+        location=_rows_location([
+            vol.source_row_amount if vol else None,
+            vol.source_row_percent if vol else None,
+        ]),
+        matched_keywords=["波动幅度", "金额", "比例"],
+        matched_rows=[
+            vol.source_row_amount if vol else None,
+            vol.source_row_percent if vol else None,
+        ],
+        matched_columns=[],
+        key_columns=["volatility_amount", "volatility_percent"],
+        values_read=[
+            _value_read(
+                label="波动金额门槛",
+                value=vol.amount if vol else None,
+                row=vol.source_row_amount if vol else None,
+                column=None,
+                amount_type="Lead 波动门槛",
+            ),
+            _value_read(
+                label="波动比例门槛",
+                value=vol.percent if vol else None,
+                row=vol.source_row_percent if vol else None,
+                column=None,
+                amount_type="Lead 波动门槛",
+            ),
+        ] if vol else [],
+        missing_data=[] if vol else ["波动金额/比例门槛"],
+    )
+
+
+def _fluctuation_notes_checked_data(lead: LeadSheetDataset) -> dict:
+    block = _lead_block(lead, "fluctuation_notes")
+    rows = []
+    if block is not None:
+        rows = [block.start_row, block.end_row]
+    return _checked_data(
+        sheet=lead.source_sheet,
+        section="K.00 Lead 波动说明区",
+        location=_rows_location(rows),
+        matched_keywords=[block.anchor_text] if block and block.anchor_text else ["波动说明"],
+        matched_rows=rows,
+        matched_columns=[],
+        key_columns=["fluctuation_notes"],
+        values_read=[
+            _value_read(
+                label="波动说明",
+                value=lead.fluctuation_notes,
+                row=block.start_row if block else None,
+                column=None,
+                amount_type="Lead 波动说明",
+            )
+        ] if lead.fluctuation_notes else [],
+        missing_data=[] if lead.fluctuation_notes else ["波动说明区正文"],
+    )
+
+
+def _expectation_checked_data(lead: LeadSheetDataset) -> dict:
+    rows = [row.source_row for row in lead.expectations]
+    values: list[dict] = []
+    for row in lead.expectations:
+        values.extend(
+            [
+                _value_read(
+                    label="账户变更",
+                    value=row.account_change,
+                    row=row.source_row,
+                    column=None,
+                    amount_type="Lead 预期分析",
+                ),
+                _value_read(
+                    label=f"{row.account_change} 预期",
+                    value=row.expectation,
+                    row=row.source_row,
+                    column=None,
+                    amount_type="Lead 预期分析",
+                ),
+            ]
+        )
+    return _checked_data(
+        sheet=lead.source_sheet,
+        section="K.00 Lead 预期分析区",
+        location=_rows_location(rows),
+        matched_keywords=[row.account_change for row in lead.expectations],
+        matched_rows=rows,
+        matched_columns=[],
+        key_columns=["account_change", "expectation"],
+        values_read=values[:20],
+        missing_data=[] if lead.expectations else ["预期分析账户变更行"],
+    )
+
+
+def _adjustment_checked_data(lead: LeadSheetDataset) -> dict:
+    values: list[dict] = []
+    for row in lead.adjustment_rows:
+        values.append(
+            _value_read(
+                label=f"调整汇总第 {row.source_row} 行",
+                value=" | ".join(str(cell) for cell in row.raw_cells if cell),
+                row=row.source_row,
+                column=None,
+                amount_type="Lead 调整汇总",
+            )
+        )
+    return _checked_data(
+        sheet=lead.source_sheet,
+        section="K.00 Lead 调整事项汇总表",
+        location=_rows_location([row.source_row for row in lead.adjustment_rows]),
+        matched_keywords=[row.adjustment_type for row in lead.adjustment_rows if row.adjustment_type],
+        matched_rows=[row.source_row for row in lead.adjustment_rows],
+        matched_columns=[],
+        key_columns=["adjustment_type", "raw_cells"],
+        values_read=values[:20],
+        missing_data=[] if lead.adjustment_rows else ["调整事项汇总记录"],
+    )
+
+
+def _column_for_role(lead: LeadSheetDataset, role: str) -> int | None:
+    for binding in lead.movement_bindings:
+        if binding.role == role:
+            return binding.column_index
+    return None
+
+
+def _movement_role_label(role: str) -> str:
+    return {
+        "py_audited": "上期审定数",
+        "audited_ending": "本期审定数",
+        "movement_amount": "变动金额",
+        "movement_pct": "变动比例",
+        "book_balance": "账面价值",
+        "investigate_quantitative": "定量调查",
+        "investigate_qualitative": "定性调查",
+        "notes": "Notes",
+        "book_adjustment": "账表调整",
+        "audit_adjustment": "审计调整",
+    }.get(role, role)
+
+
+def _lead_block(lead: LeadSheetDataset, kind_value: str):
+    for block in lead.blocks:
+        if getattr(block.kind, "value", None) == kind_value:
+            return block
+    return None
+
+
+def _section_for_data_insufficient_rule(rule_id: str) -> str:
+    if rule_id in {
+        "lead_movement_rows_complete",
+        "lead_movement_consistency",
+        "lead_movement_notes_required",
+        "lead_check_with_a3_row",
+        "unexpected_movement_investigation",
+        "lead_fluctuation_notes_refs",
+        "lead_rollforward_tb_reconciliation",
+    }:
+        return "K.00 Lead movement / 勾稽规则执行前置条件"
+    if rule_id in {
+        "lead_expectation_analysis",
+        "lead_expectation_basis_present",
+        "lead_expectation_vs_movement_review",
+    }:
+        return "K.00 Lead 预期分析规则执行前置条件"
+    if rule_id == "lead_adjustment_internal_consistency":
+        return "K.00 Lead 调整事项规则执行前置条件"
+    return "K.00 Lead Sheet 参数类规则执行前置条件"
+
+
 def _required_keys_for_rule(rule_id: str) -> list[str]:
     return {
         "lead_analysis_date_after_period_end": ["period_end", "analysis_date"],
@@ -488,6 +971,17 @@ def _required_keys_for_rule(rule_id: str) -> list[str]:
         "lead_tt_overall_min": ["tt", "tt_overall"],
         "lead_tt_gam_range": ["te", "cra", "tt"],
         "lead_volatility_threshold_link": ["volatility_amount", "te", "tt_overall"],
+        "lead_movement_rows_complete": ["account_label", "sheet_ref", "py_audited", "audited_ending"],
+        "lead_movement_consistency": ["py_audited", "audited_ending", "movement_amount"],
+        "lead_movement_notes_required": ["investigate_quantitative", "investigate_qualitative", "notes"],
+        "lead_check_with_a3_row": ["check_with_a3", "diff", "notes"],
+        "unexpected_movement_investigation": ["volatility_amount", "volatility_percent", "movement_amount", "movement_pct", "notes"],
+        "lead_fluctuation_notes_refs": ["movement_notes", "fluctuation_notes"],
+        "lead_expectation_analysis": ["expectation", "volatility_amount", "volatility_percent"],
+        "lead_expectation_basis_present": ["expectation"],
+        "lead_expectation_vs_movement_review": ["expectation", "movement_amount", "movement_pct"],
+        "lead_adjustment_internal_consistency": ["book_adjustment", "audit_adjustment", "adjustment_summary"],
+        "lead_rollforward_tb_reconciliation": ["lead_movement", "k01_rollforward_totals"],
     }.get(rule_id, [])
 
 

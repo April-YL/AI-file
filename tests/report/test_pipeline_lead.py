@@ -44,3 +44,29 @@ def test_workbook_with_lead_records_parameter_data_insufficient_how():
         assert items[rule_id]["status"] == "DATA_INSUFFICIENT"
         assert observation["checked_data"][0]["section"] == "K.00 Lead Sheet 参数类规则执行前置条件"
         assert observation["checked_data"][0]["values_read"] == []
+
+
+def test_workbook_with_lead_records_remaining_lead_data_insufficient_how():
+    path = FIXTURES / "workbook_with_lead.xlsx"
+    if not path.is_file():
+        pytest.skip("fixture missing")
+    report = run_workbook_qc_from_path(str(path))
+    items = {item["rule_id"]: item for item in report.execution_ledger["items"]}
+
+    for rule_id in (
+        "lead_movement_rows_complete",
+        "lead_movement_consistency",
+        "lead_movement_notes_required",
+        "lead_check_with_a3_row",
+        "unexpected_movement_investigation",
+        "lead_fluctuation_notes_refs",
+        "lead_expectation_analysis",
+        "lead_expectation_basis_present",
+        "lead_expectation_vs_movement_review",
+        "lead_adjustment_internal_consistency",
+        "lead_rollforward_tb_reconciliation",
+    ):
+        observation = items[rule_id]["observation"]
+        assert items[rule_id]["status"] == "DATA_INSUFFICIENT"
+        assert observation["checked_data"][0]["values_read"] == []
+        assert observation["checked_data"][0]["missing_data"]

@@ -20,15 +20,23 @@ from rules.lead_movement_consistency import check_lead_movement_consistency
 from rules.lead_movement_notes_required import check_lead_movement_notes_required
 from rules.lead_movement_rows_complete import check_lead_movement_rows_complete
 from rules.lead_observations import (
+    build_lead_adjustment_observation,
     build_lead_analysis_date_observation,
+    build_lead_check_with_a3_observation,
     build_lead_data_insufficient_observation,
+    build_lead_expectation_observation,
+    build_lead_fluctuation_notes_refs_observation,
     build_lead_ingest_readability_observation,
+    build_lead_movement_consistency_observation,
+    build_lead_movement_notes_observation,
+    build_lead_movement_rows_observation,
     build_lead_required_fields_observation,
     build_lead_tt_gam_range_observation,
     build_lead_tt_overall_min_observation,
     build_lead_volatility_threshold_observation,
     build_materiality_observation,
     build_risk_threshold_observation,
+    build_unexpected_movement_observation,
 )
 from rules.lead_required_fields import check_lead_required_fields
 from rules.lead_rollforward_tb_reconciliation import (
@@ -115,16 +123,16 @@ def run_lead_rules(
         issues.extend(readability_issues)
         for rule_id in LEAD_RULE_IDS:
             if rule_id != "lead_required_fields":
-                recorder.record_data_insufficient(rule_id, "Lead movement table 读取不稳定，依赖 Lead 明细的检查未执行")
-        for rule_id in _LEAD_PARAMETER_RULE_IDS:
-            recorder.record_observation(
-                rule_id,
-                build_lead_data_insufficient_observation(
-                    lead,
-                    rule_id=rule_id,
-                    reason="Lead movement table 读取不稳定，依赖 Lead 明细的检查未执行",
-                ),
-            )
+                reason = "Lead movement table 读取不稳定，依赖 Lead 明细的检查未执行"
+                recorder.record_data_insufficient(rule_id, reason)
+                recorder.record_observation(
+                    rule_id,
+                    build_lead_data_insufficient_observation(
+                        lead,
+                        rule_id=rule_id,
+                        reason=reason,
+                    ),
+                )
         return issues
 
     analysis_date_issues = recorder.execute_rule("lead_analysis_date_after_period_end", check_lead_analysis_date_after_period_end, lead)
@@ -157,31 +165,79 @@ def run_lead_rules(
         build_lead_tt_gam_range_observation(lead, tt_gam_issues),
     )
     issues.extend(tt_gam_issues)
-    issues.extend(recorder.execute_rule("lead_expectation_analysis", check_lead_expectation_analysis, lead))
-    issues.extend(recorder.execute_rule("lead_expectation_basis_present", check_lead_expectation_basis_present, lead))
-    issues.extend(recorder.execute_rule("lead_expectation_vs_movement_review", check_lead_expectation_vs_movement_review, lead))
+    expectation_analysis_issues = recorder.execute_rule("lead_expectation_analysis", check_lead_expectation_analysis, lead)
+    recorder.record_observation(
+        "lead_expectation_analysis",
+        build_lead_expectation_observation(lead, expectation_analysis_issues, rule_id="lead_expectation_analysis"),
+    )
+    issues.extend(expectation_analysis_issues)
+    expectation_basis_issues = recorder.execute_rule("lead_expectation_basis_present", check_lead_expectation_basis_present, lead)
+    recorder.record_observation(
+        "lead_expectation_basis_present",
+        build_lead_expectation_observation(lead, expectation_basis_issues, rule_id="lead_expectation_basis_present"),
+    )
+    issues.extend(expectation_basis_issues)
+    expectation_vs_movement_issues = recorder.execute_rule("lead_expectation_vs_movement_review", check_lead_expectation_vs_movement_review, lead)
+    recorder.record_observation(
+        "lead_expectation_vs_movement_review",
+        build_lead_expectation_observation(lead, expectation_vs_movement_issues, rule_id="lead_expectation_vs_movement_review"),
+    )
+    issues.extend(expectation_vs_movement_issues)
     volatility_issues = recorder.execute_rule("lead_volatility_threshold_link", check_lead_volatility_threshold_link, lead)
     recorder.record_observation(
         "lead_volatility_threshold_link",
         build_lead_volatility_threshold_observation(lead, volatility_issues),
     )
     issues.extend(volatility_issues)
-    issues.extend(recorder.execute_rule("lead_movement_rows_complete", check_lead_movement_rows_complete, lead))
-    issues.extend(recorder.execute_rule("lead_movement_consistency", check_lead_movement_consistency, lead))
-    issues.extend(recorder.execute_rule("lead_movement_notes_required", check_lead_movement_notes_required, lead))
-    issues.extend(recorder.execute_rule("lead_check_with_a3_row", check_lead_check_with_a3_row, lead))
-    issues.extend(recorder.execute_rule("unexpected_movement_investigation", check_unexpected_movement_investigation, lead))
-    issues.extend(recorder.execute_rule("lead_fluctuation_notes_refs", check_lead_fluctuation_notes_refs, lead))
-    issues.extend(
-        recorder.execute_rule(
-            "lead_adjustment_internal_consistency",
-            check_lead_adjustment_internal_consistency,
-            lead,
-            strict_total=strict_adjustment_total,
-            layout_result=adjustment_layout_result,
-            extracted_rows=adjustment_extracted_rows,
-        )
+    movement_rows_issues = recorder.execute_rule("lead_movement_rows_complete", check_lead_movement_rows_complete, lead)
+    recorder.record_observation(
+        "lead_movement_rows_complete",
+        build_lead_movement_rows_observation(lead, movement_rows_issues),
     )
+    issues.extend(movement_rows_issues)
+    movement_consistency_issues = recorder.execute_rule("lead_movement_consistency", check_lead_movement_consistency, lead)
+    recorder.record_observation(
+        "lead_movement_consistency",
+        build_lead_movement_consistency_observation(lead, movement_consistency_issues),
+    )
+    issues.extend(movement_consistency_issues)
+    movement_notes_issues = recorder.execute_rule("lead_movement_notes_required", check_lead_movement_notes_required, lead)
+    recorder.record_observation(
+        "lead_movement_notes_required",
+        build_lead_movement_notes_observation(lead, movement_notes_issues),
+    )
+    issues.extend(movement_notes_issues)
+    check_with_a3_issues = recorder.execute_rule("lead_check_with_a3_row", check_lead_check_with_a3_row, lead)
+    recorder.record_observation(
+        "lead_check_with_a3_row",
+        build_lead_check_with_a3_observation(lead, check_with_a3_issues),
+    )
+    issues.extend(check_with_a3_issues)
+    unexpected_movement_issues = recorder.execute_rule("unexpected_movement_investigation", check_unexpected_movement_investigation, lead)
+    recorder.record_observation(
+        "unexpected_movement_investigation",
+        build_unexpected_movement_observation(lead, unexpected_movement_issues),
+    )
+    issues.extend(unexpected_movement_issues)
+    fluctuation_notes_issues = recorder.execute_rule("lead_fluctuation_notes_refs", check_lead_fluctuation_notes_refs, lead)
+    recorder.record_observation(
+        "lead_fluctuation_notes_refs",
+        build_lead_fluctuation_notes_refs_observation(lead, fluctuation_notes_issues),
+    )
+    issues.extend(fluctuation_notes_issues)
+    adjustment_issues = recorder.execute_rule(
+        "lead_adjustment_internal_consistency",
+        check_lead_adjustment_internal_consistency,
+        lead,
+        strict_total=strict_adjustment_total,
+        layout_result=adjustment_layout_result,
+        extracted_rows=adjustment_extracted_rows,
+    )
+    recorder.record_observation(
+        "lead_adjustment_internal_consistency",
+        build_lead_adjustment_observation(lead, adjustment_issues),
+    )
+    issues.extend(adjustment_issues)
     issues.extend(
         recorder.execute_rule(
             "lead_rollforward_tb_reconciliation",
