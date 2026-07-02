@@ -22,6 +22,7 @@ from rules.rollforward_fa_list_reconciliation import (
 )
 from rules.rollforward_runner import run_rollforward_rules
 from rules.models import Severity
+from rules.execution_recorder import RuleExecutionRecorder
 
 
 def _minimal_rf(**kwargs) -> RollforwardSheetDataset:
@@ -783,6 +784,53 @@ def test_rollforward_runner_includes_depreciation_pl_reconciliation():
     assert any(
         i.rule_id == "rollforward_depreciation_pl_reconciliation" for i in issues
     )
+
+
+def test_rollforward_runner_records_evidence_how_for_k01_rules():
+    rf = _minimal_rf(
+        section_presence={
+            "b1_bkd_main_table": True,
+            "b2_movement_tb_reconciliation": True,
+            "b4_table3_check_with_table1": True,
+            "b5_table4_depreciation_pl": True,
+        },
+        amount_column_bindings=[],
+        ending_totals={"net_value": Decimal("90")},
+        table3_check_values=[Decimal("0")],
+        table3_check_row=30,
+        tb_reconciliation_detected=True,
+        tb_difference_values=[Decimal("0")],
+        tb_difference_row=40,
+        table4_difference=Decimal("0"),
+        table4_difference_row=80,
+        total_row=10,
+    )
+    recorder = RuleExecutionRecorder()
+    run_rollforward_rules(
+        rf,
+        lead=_lead_with_sad("5"),
+        reconciliations=[_reconciliation_check(status=ReconciliationStatus.MATCH)],
+        recorder=recorder,
+    )
+    items = {item["rule_id"]: item for item in recorder.to_ledger()["items"]}
+
+    for rule_id in (
+        "rollforward_exists",
+        "rollforward_columns_complete",
+        "rollforward_abnormal_amounts",
+        "rollforward_fa_list_reconciliation",
+        "rollforward_difference_over_sad",
+        "rollforward_depreciation_pl_reconciliation",
+    ):
+        observation = items[rule_id]["observation"]
+        assert set(observation) == {
+            "checked_data",
+            "check_logic",
+            "expected_result",
+            "actual_result",
+            "result_summary",
+        }
+        assert observation["checked_data"]
 
 
 def test_registry_gl005_implemented():
