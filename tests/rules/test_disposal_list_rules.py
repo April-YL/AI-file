@@ -1,7 +1,18 @@
+from decimal import Decimal
+
 from ingest.models import AssetRecord, FieldMapping
 from ingest.lead_sheet import CraAssertionRow, LeadSheetDataset
-from ingest.disposal_test_sheet import DisposalExecutionPathDataset
+from ingest.disposal_test_sheet import (
+    DisposalAmountItem,
+    DisposalExecutionPathDataset,
+    DisposalSampleOutputDataset,
+    DisposalSampleRow,
+    DisposalTestSheetDataset,
+    DisposalTestedSampleRow,
+)
 from ingest.records import DisposalListSummary, DisposalMethodBucket, FaListDataset
+from ingest.rollforward_sheet import MovementTransactionAmount, RollforwardSheetDataset
+from rules.execution_recorder import RuleExecutionRecorder
 from rules.disposal_list_rules import (
     check_disposal_list_net_values,
     check_disposal_method_classification,
@@ -11,6 +22,7 @@ from rules.disposal_list_rules import (
 from rules.models import Severity
 from rules.disposal_runner import run_disposal_rules
 from rules.lead_common import lead_thresholds, lead_tt
+from tests.rules.test_disposal_reconciliation import _matrix
 
 
 def _dataset(record: AssetRecord, fields: tuple[str, ...]) -> FaListDataset:
@@ -174,3 +186,146 @@ def test_summary_waived_does_not_run_disposal_list_rules():
         ),
     )
     assert issues == []
+
+
+def test_disposal_runner_records_evidence_how_for_low_risk_k022_rules():
+    fields = (
+        "asset_category",
+        "asset_id",
+        "asset_name",
+        "original_value",
+        "accumulated_depreciation",
+        "impairment_provision",
+        "disposal_date",
+        "disposal_method",
+        "net_value",
+    )
+    disposal_list = _dataset(
+        AssetRecord(
+            source_row=2,
+            asset_category="设备",
+            asset_id="FA-D-001",
+            asset_name="设备A",
+            original_value="1000",
+            accumulated_depreciation="700",
+            impairment_provision="0",
+            net_value="300",
+            disposal_date="2025-01-01",
+            disposal_method="出售",
+        ),
+        fields,
+    )
+    disposal_test = DisposalTestSheetDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.2 处置测试",
+        reconciliation_matrix=_matrix(),
+        tested_samples=[
+            DisposalTestedSampleRow(
+                source_row=34,
+                sample_type="代表性样本",
+                asset_id="FA-D-001",
+                asset_name="设备A",
+                original_value="1000",
+                accumulated_depreciation="700",
+                impairment_provision="0",
+                net_value="300",
+                sale_price="300",
+                disposal_gain_loss="0",
+                support_sale_price="300",
+                sale_price_difference="0",
+                disposal_method="出售",
+                evidence_description="合同与收款单一致",
+                attribute_results=["Y", "Y", "Y"],
+            )
+        ],
+        usable_for_rules=True,
+    )
+    sample_output = DisposalSampleOutputDataset(
+        source_file="case.xlsx",
+        source_sheet="K.02.2a 处置选样输出",
+        amounts={"sample_pool_amount": DisposalAmountItem("样本池总体金额", "300", 41, 6)},
+        selected_samples=[
+            DisposalSampleRow(
+                source_row=30,
+                sample_type="代表性样本",
+                asset_id="FA-D-001",
+                asset_name="设备A",
+                net_value="300",
+            )
+        ],
+        usable_for_rules=True,
+    )
+    execution_path = DisposalExecutionPathDataset(
+        path_kind="executed",
+        recognition_confidence=0.95,
+        disposal_list_sheet="处置清单",
+        disposal_test_sheet="K.02.2 处置测试",
+        disposal_sample_output_sheet="K.02.2a 处置选样输出",
+    )
+    rollforward = RollforwardSheetDataset(
+        source_file="case.xlsx",
+        source_sheet="K.01 Agree SL to GL",
+        header_row=1,
+        mapped_fields=[],
+        movement_transactions=[
+            MovementTransactionAmount(
+                transaction_key="disposal",
+                transaction_label="处置",
+                measure="original_value",
+                amount=Decimal("1000"),
+                source_row=12,
+            ),
+            MovementTransactionAmount(
+                transaction_key="disposal",
+                transaction_label="处置",
+                measure="accumulated_depreciation",
+                amount=Decimal("700"),
+                source_row=12,
+            ),
+            MovementTransactionAmount(
+                transaction_key="disposal",
+                transaction_label="处置",
+                measure="impairment_provision",
+                amount=Decimal("0"),
+                source_row=12,
+            ),
+        ],
+    )
+    recorder = RuleExecutionRecorder()
+
+    run_disposal_rules(
+        disposal_test=disposal_test,
+        disposal_sample_output=sample_output,
+        disposal_execution_path=execution_path,
+        disposal_list=disposal_list,
+        disposal_list_summary=DisposalListSummary(
+            source_file="case.xlsx",
+            source_sheet="处置清单",
+            record_count=1,
+            sale_scrap_net_value="300",
+        ),
+        rollforward=rollforward,
+        lead=LeadSheetDataset(source_file="case.xlsx", source_sheet="K.00 Lead Sheet"),
+        recorder=recorder,
+    )
+
+    items = {item["rule_id"]: item for item in recorder.to_ledger()["items"]}
+    for rule_id in (
+        "disposal_reconciliation_readability",
+        "disposal_reconciliation_formula_source",
+        "disposal_net_value_recalculation",
+        "disposal_rollforward_reconciliation",
+        "disposal_required_fields",
+        "disposal_list_net_value_recalculation",
+        "disposal_sample_pool_amount_match",
+        "disposal_sample_match",
+    ):
+        observation = items[rule_id]["observation"]
+        assert set(observation) == {
+            "checked_data",
+            "check_logic",
+            "expected_result",
+            "actual_result",
+            "result_summary",
+        }
+        assert observation["checked_data"]
