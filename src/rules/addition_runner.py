@@ -8,9 +8,17 @@ from ingest.addition_test_sheet import (
 from ingest.lead_sheet import LeadSheetDataset
 from ingest.records import FaListDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset
-from rules.addition_consistency import (
-    build_addition_sample_match_observation,
-    check_addition_sample_match,
+from rules.addition_consistency import check_addition_sample_match
+from rules.addition_observations import (
+    build_addition_assertions_observation,
+    build_addition_data_insufficient_observation,
+    build_addition_population_homogeneity_observation,
+    build_addition_replacement_reason_observation,
+    build_addition_required_fields_observation,
+    build_addition_rollforward_reconciliation_observation,
+    build_addition_sample_match_evidence_observation,
+    build_addition_sample_pool_observation,
+    build_addition_te_cra_observation,
 )
 from rules.addition_population_homogeneity import check_addition_population_homogeneity
 from rules.addition_required_fields import check_addition_required_fields
@@ -49,44 +57,83 @@ def run_addition_rules(
     recorder = recorder or RuleExecutionRecorder()
     issues: list[QcIssue] = []
     if addition_list is None:
+        reason = "未识别新增清单，无法执行新增清单相关检查"
         for rule_id in (
             "addition_required_fields",
             "addition_population_homogeneity",
             "addition_rollforward_reconciliation",
         ):
-            recorder.record_data_insufficient(rule_id, "未识别新增清单，无法执行新增清单相关检查")
+            recorder.record_data_insufficient(rule_id, reason)
+            recorder.record_observation(
+                rule_id,
+                build_addition_data_insufficient_observation(rule_id, reason),
+            )
     if addition_list is not None:
         ctx = ColumnContext(
             mapped_fields={m.standard_field for m in addition_list.mapped_fields},
+            mapped_headers={m.standard_field: m.source_header for m in addition_list.mapped_fields},
+            mapped_columns={m.standard_field: m.column_index for m in addition_list.mapped_fields},
             source_sheet=addition_list.source_sheet,
             procedure_code="K.02.1",
         )
-        issues.extend(recorder.execute_rule("addition_required_fields", check_addition_required_fields, addition_list.records, ctx))
-        issues.extend(recorder.execute_rule("addition_population_homogeneity", check_addition_population_homogeneity, addition_list.records, ctx))
-        issues.extend(
-            recorder.execute_rule(
-                "addition_rollforward_reconciliation",
-                check_addition_rollforward_reconciliation,
-                addition_list,
-                rollforward=rollforward,
-                lead=lead,
-                addition_test=addition_test,
-            )
+        required_issues = recorder.execute_rule(
+            "addition_required_fields",
+            check_addition_required_fields,
+            addition_list.records,
+            ctx,
         )
-    issues.extend(
-        recorder.execute_rule(
-            "addition_sample_match",
-            check_addition_sample_match,
-            addition_test,
-            addition_sample_output,
-            execution_path=addition_execution_path,
-            observation=build_addition_sample_match_observation(
+        recorder.record_observation(
+            "addition_required_fields",
+            build_addition_required_fields_observation(addition_list, ctx, required_issues),
+        )
+        issues.extend(required_issues)
+        homogeneity_issues = recorder.execute_rule(
+            "addition_population_homogeneity",
+            check_addition_population_homogeneity,
+            addition_list.records,
+            ctx,
+        )
+        recorder.record_observation(
+            "addition_population_homogeneity",
+            build_addition_population_homogeneity_observation(addition_list, ctx, homogeneity_issues),
+        )
+        issues.extend(homogeneity_issues)
+        reconciliation_issues = recorder.execute_rule(
+            "addition_rollforward_reconciliation",
+            check_addition_rollforward_reconciliation,
+            addition_list,
+            rollforward=rollforward,
+            lead=lead,
+            addition_test=addition_test,
+        )
+        recorder.record_observation(
+            "addition_rollforward_reconciliation",
+            build_addition_rollforward_reconciliation_observation(
+                addition_list,
+                rollforward,
+                lead,
                 addition_test,
-                addition_sample_output,
-                execution_path=addition_execution_path,
+                reconciliation_issues,
             ),
         )
+        issues.extend(reconciliation_issues)
+    sample_match_issues = recorder.execute_rule(
+        "addition_sample_match",
+        check_addition_sample_match,
+        addition_test,
+        addition_sample_output,
+        execution_path=addition_execution_path,
     )
+    recorder.record_observation(
+        "addition_sample_match",
+        build_addition_sample_match_evidence_observation(
+            addition_test,
+            addition_sample_output,
+            addition_execution_path,
+            sample_match_issues,
+        ),
+    )
+    issues.extend(sample_match_issues)
     if _is_addition_sampling_skipped(addition_execution_path):
         for rule_id in (
             "addition_sample_pool_purchase_amount_match",
@@ -96,19 +143,56 @@ def run_addition_rules(
         ):
             recorder.record_not_applicable(rule_id, "新增测试已豁免或测试表注明不执行")
         return issues
-    issues.extend(
-        recorder.execute_rule(
-            "addition_sample_pool_purchase_amount_match",
-            check_addition_sample_pool_purchase_amount_match,
+    sample_pool_issues = recorder.execute_rule(
+        "addition_sample_pool_purchase_amount_match",
+        check_addition_sample_pool_purchase_amount_match,
+        addition_list,
+        addition_sample_output,
+        rollforward=rollforward,
+        addition_test=addition_test,
+    )
+    recorder.record_observation(
+        "addition_sample_pool_purchase_amount_match",
+        build_addition_sample_pool_observation(
             addition_list,
             addition_sample_output,
-            rollforward=rollforward,
-            addition_test=addition_test,
-        )
+            rollforward,
+            addition_test,
+            sample_pool_issues,
+        ),
     )
-    issues.extend(recorder.execute_rule("addition_sampling_te_cra_consistency", check_addition_sampling_te_cra_consistency, addition_sample_output, lead))
-    issues.extend(recorder.execute_rule("addition_sampling_assertions_scope", check_addition_sampling_assertions_scope, addition_sample_output))
-    issues.extend(recorder.execute_rule("addition_sample_replacement_reason", check_addition_sample_replacement_reason, addition_test))
+    issues.extend(sample_pool_issues)
+    te_cra_issues = recorder.execute_rule(
+        "addition_sampling_te_cra_consistency",
+        check_addition_sampling_te_cra_consistency,
+        addition_sample_output,
+        lead,
+    )
+    recorder.record_observation(
+        "addition_sampling_te_cra_consistency",
+        build_addition_te_cra_observation(addition_sample_output, lead, te_cra_issues),
+    )
+    issues.extend(te_cra_issues)
+    assertions_issues = recorder.execute_rule(
+        "addition_sampling_assertions_scope",
+        check_addition_sampling_assertions_scope,
+        addition_sample_output,
+    )
+    recorder.record_observation(
+        "addition_sampling_assertions_scope",
+        build_addition_assertions_observation(addition_sample_output, assertions_issues),
+    )
+    issues.extend(assertions_issues)
+    replacement_issues = recorder.execute_rule(
+        "addition_sample_replacement_reason",
+        check_addition_sample_replacement_reason,
+        addition_test,
+    )
+    recorder.record_observation(
+        "addition_sample_replacement_reason",
+        build_addition_replacement_reason_observation(addition_test, replacement_issues),
+    )
+    issues.extend(replacement_issues)
     return issues
 
 
