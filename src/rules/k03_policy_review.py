@@ -80,7 +80,13 @@ def run_k03_policy_review_rules(
                 source_sheet="K.03.3 折旧政策复核",
             )
         ]
-        _record_k03_policy_execution(recorder, issues, ("k03_policy_sheet_missing",), dataset=None)
+        _record_k03_policy_execution(
+            recorder,
+            issues,
+            ("k03_policy_sheet_missing",),
+            dataset=None,
+            fa_list=fa_list,
+        )
         return issues
     if dataset.execution_path != EXECUTION_PATH_POLICY_REVIEW:
         note = "当前 K.03 工作表不是折旧政策复核执行路径"
@@ -107,13 +113,19 @@ def run_k03_policy_review_rules(
                 source_row=table.header_row if table else None,
             )
         ]
-        _record_k03_policy_execution(recorder, issues, ("k03_policy_table_unreadable",), dataset=dataset)
+        _record_k03_policy_execution(
+            recorder,
+            issues,
+            ("k03_policy_table_unreadable",),
+            dataset=dataset,
+            fa_list=fa_list,
+        )
         return issues
 
     issues.extend(_check_structure(dataset))
     issues.extend(_check_policy_rows(dataset))
     issues.extend(_check_fa_list_consistency(dataset, fa_list))
-    _record_k03_policy_execution(recorder, issues, RULE_IDS, dataset=dataset)
+    _record_k03_policy_execution(recorder, issues, RULE_IDS, dataset=dataset, fa_list=fa_list)
     return issues
 
 
@@ -123,6 +135,7 @@ def _record_k03_policy_execution(
     rule_ids: tuple[str, ...],
     *,
     dataset: K03SheetDataset | None,
+    fa_list: FaListDataset | None,
 ) -> None:
     counts: dict[str, int] = {}
     for issue in issues:
@@ -130,7 +143,12 @@ def _record_k03_policy_execution(
     for rule_id in rule_ids:
         observation = None
         if rule_id in K03_LOW_RISK_HOW_RULE_IDS:
-            observation = build_k03_policy_low_risk_observation(rule_id, dataset, issues)
+            observation = build_k03_policy_low_risk_observation(
+                rule_id,
+                dataset,
+                issues,
+                fa_list=fa_list,
+            )
         recorder.record_executed(rule_id, counts.get(rule_id, 0), observation=observation)
 
 

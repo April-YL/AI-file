@@ -20,6 +20,13 @@ K03_LOW_RISK_RULE_IDS = {
     "k03_tod_by_item_detail_unreadable",
     "k03_tod_by_item_required_fields",
     "k03_tod_by_item_sad_unavailable",
+    "k03_tod_by_item_difference_column",
+    "k03_tod_by_item_difference_over_sad",
+    "k03_tod_by_item_total_difference_over_sad",
+    "k03_tod_by_item_rollforward_depreciation",
+    "k03_policy_fa_life_out_of_range",
+    "k03_policy_fa_salvage_mismatch",
+    "k03_policy_fa_unit_or_category_review",
 }
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"

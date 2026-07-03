@@ -110,6 +110,7 @@ def run_k03_tod_by_item_rules(
             ("k03_tod_by_item_detail_unreadable",),
             dataset=dataset,
             lead=lead,
+            rollforward=rollforward,
         )
         return issues
 
@@ -132,6 +133,7 @@ def run_k03_tod_by_item_rules(
             ("k03_tod_by_item_required_fields", "k03_tod_by_item_detail_unreadable"),
             dataset=dataset,
             lead=lead,
+            rollforward=rollforward,
         )
         return issues
 
@@ -226,7 +228,14 @@ def run_k03_tod_by_item_rules(
             )
         )
 
-    _record_k03_execution(recorder, issues, RULE_IDS, dataset=dataset, lead=lead)
+    _record_k03_execution(
+        recorder,
+        issues,
+        RULE_IDS,
+        dataset=dataset,
+        lead=lead,
+        rollforward=rollforward,
+    )
     return issues
 
 
@@ -237,6 +246,7 @@ def _record_k03_execution(
     *,
     dataset: K03SheetDataset,
     lead: LeadSheetDataset | None,
+    rollforward: RollforwardSheetDataset | None,
 ) -> None:
     counts: dict[str, int] = {}
     for issue in issues:
@@ -249,6 +259,7 @@ def _record_k03_execution(
                 dataset,
                 issues,
                 lead=lead,
+                rollforward=rollforward,
             )
         recorder.record_executed(rule_id, counts.get(rule_id, 0), observation=observation)
 

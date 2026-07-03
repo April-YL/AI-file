@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from decimal import Decimal
 from typing import Any
 
-from ingest.k03_sheet import K03SheetDataset
+from ingest.k03_sheet import K03DetailRow, K03SheetDataset, load_k03_detail_table
 from ingest.lead_sheet import LeadSheetDataset
+from ingest.records import FaListDataset
+from ingest.rollforward_sheet import RollforwardSheetDataset, get_movement_transaction_amount
 from rules.lead_common import field_values
 from rules.models import QcIssue, Severity
 
@@ -17,6 +18,13 @@ K03_LOW_RISK_HOW_RULE_IDS: tuple[str, ...] = (
     "k03_tod_by_item_detail_unreadable",
     "k03_tod_by_item_required_fields",
     "k03_tod_by_item_sad_unavailable",
+    "k03_tod_by_item_difference_column",
+    "k03_tod_by_item_difference_over_sad",
+    "k03_tod_by_item_total_difference_over_sad",
+    "k03_tod_by_item_rollforward_depreciation",
+    "k03_policy_fa_life_out_of_range",
+    "k03_policy_fa_salvage_mismatch",
+    "k03_policy_fa_unit_or_category_review",
 )
 
 
@@ -79,6 +87,7 @@ def build_k03_tod_low_risk_observation(
     issues: Iterable[QcIssue],
     *,
     lead: LeadSheetDataset | None = None,
+    rollforward: RollforwardSheetDataset | None = None,
 ) -> dict:
     issues = list(issues)
     missing_data: list[str] = []
@@ -121,6 +130,40 @@ def build_k03_tod_low_risk_observation(
                 _value_read("K.00 Lead SAD", sad, row=None, column=None, amount_type="重要性金额")
             )
 
+    elif rule_id in {
+        "k03_tod_by_item_difference_column",
+        "k03_tod_by_item_difference_over_sad",
+        "k03_tod_by_item_total_difference_over_sad",
+    }:
+        values_read.extend(_tod_amount_values(dataset, issues, rule_id))
+        if rule_id in {
+            "k03_tod_by_item_difference_over_sad",
+            "k03_tod_by_item_total_difference_over_sad",
+        }:
+            sad = _lead_value(lead, "sad")
+            if sad in (None, ""):
+                missing_data.append("K.00 Lead SAD")
+            else:
+                values_read.append(
+                    _value_read("K.00 Lead SAD", sad, row=None, column=None, amount_type="materiality_amount")
+                )
+    elif rule_id == "k03_tod_by_item_rollforward_depreciation":
+        values_read.extend(_tod_amount_values(dataset, issues, rule_id))
+        rf_amount, rf_row = get_movement_transaction_amount(
+            rollforward,
+            transaction_key="depreciation",
+            measure="accumulated_depreciation",
+        )
+        if rf_amount is None and rollforward is not None:
+            rf_amount = rollforward.table4_rollforward_depreciation
+            rf_row = rollforward.table4_rollforward_depreciation_row
+        if rf_amount is None:
+            missing_data.append("K.01 current period depreciation amount")
+        else:
+            values_read.append(
+                _value_read("K.01 current period depreciation amount", rf_amount, row=rf_row, column=None, amount_type="depreciation_amount")
+            )
+
     return _observation(
         checked_data=[
             _dataset_item(
@@ -142,6 +185,8 @@ def build_k03_policy_low_risk_observation(
     rule_id: str,
     dataset: K03SheetDataset | None,
     issues: Iterable[QcIssue],
+    *,
+    fa_list: FaListDataset | None = None,
 ) -> dict:
     issues = list(issues)
     if dataset is None:
@@ -168,6 +213,16 @@ def build_k03_policy_low_risk_observation(
         values_read.append(
             _value_read("识别到的政策复核工作表", dataset.sheet_name, row=None, column=None, amount_type="资料识别")
         )
+
+    elif rule_id in {
+        "k03_policy_fa_life_out_of_range",
+        "k03_policy_fa_salvage_mismatch",
+        "k03_policy_fa_unit_or_category_review",
+    }:
+        values_read.extend(_policy_values(dataset, rule_id))
+        values_read.extend(_fa_list_values(fa_list, issues, rule_id))
+        if fa_list is None or not fa_list.records:
+            missing_data.append("FA list")
 
     return _observation(
         checked_data=[
@@ -308,6 +363,64 @@ def _mapped_column_values(dataset: K03SheetDataset) -> list[dict]:
     return values
 
 
+
+def _tod_amount_values(
+    dataset: K03SheetDataset,
+    issues: list[QcIssue],
+    rule_id: str,
+) -> list[dict]:
+    rows = _tod_rows(dataset, issues, rule_id)
+    if rule_id == "k03_tod_by_item_rollforward_depreciation":
+        fields = ["current_depreciation", "management_depreciation"]
+    else:
+        fields = [
+            "management_depreciation",
+            "audit_recalculated_depreciation",
+            "depreciation_difference",
+        ]
+    values: list[dict] = []
+    for row in rows:
+        for field in fields:
+            if field not in row.normalized_values:
+                continue
+            values.append(_detail_row_value(dataset, row, field, amount_type="depreciation_amount"))
+    return values
+
+
+def _tod_rows(
+    dataset: K03SheetDataset,
+    issues: list[QcIssue],
+    rule_id: str,
+) -> list[K03DetailRow]:
+    table = load_k03_detail_table(dataset)
+    candidates = (
+        table.total_rows
+        if rule_id == "k03_tod_by_item_total_difference_over_sad"
+        else table.detail_rows
+    )
+    issue_rows = {issue.source_row for issue in _issues_for(issues, rule_id) if issue.source_row is not None}
+    selected = [row for row in candidates if row.source_row in issue_rows]
+    if not selected:
+        selected = candidates[:3]
+    return selected[:3]
+
+
+def _detail_row_value(
+    dataset: K03SheetDataset,
+    row: K03DetailRow,
+    field: str,
+    *,
+    amount_type: str,
+) -> dict:
+    column = dataset.normalized_column_map.get(field)
+    return _value_read(
+        field,
+        row.normalized_values.get(field),
+        row=row.source_row,
+        column=column.column_index if column else None,
+        amount_type=amount_type,
+    )
+
 def _policy_column_values(dataset: K03SheetDataset) -> list[dict]:
     table = dataset.policy_table
     if table is None:
@@ -325,6 +438,69 @@ def _policy_column_values(dataset: K03SheetDataset) -> list[dict]:
         )
     return values
 
+
+
+def _policy_values(dataset: K03SheetDataset, rule_id: str) -> list[dict]:
+    table = dataset.policy_table
+    if table is None:
+        return []
+    fields = ["asset_category"]
+    if rule_id in {"k03_policy_fa_life_out_of_range", "k03_policy_fa_unit_or_category_review"}:
+        fields.append("current_useful_life")
+    if rule_id in {"k03_policy_fa_salvage_mismatch", "k03_policy_fa_unit_or_category_review"}:
+        fields.append("current_salvage_rate")
+    values: list[dict] = []
+    for row in table.rows[:3]:
+        for field in fields:
+            column = table.column_map.get(field)
+            values.append(
+                _value_read(
+                    f"K.03.3 {field}",
+                    getattr(row, field, None),
+                    row=row.source_row,
+                    column=column.column_index if column else None,
+                    amount_type="depreciation_policy",
+                )
+            )
+    return values
+
+
+def _fa_list_values(
+    fa_list: FaListDataset | None,
+    issues: list[QcIssue],
+    rule_id: str,
+) -> list[dict]:
+    if fa_list is None:
+        return []
+    issue_rows = {issue.source_row for issue in _issues_for(issues, rule_id) if issue.source_row is not None}
+    records = [record for record in fa_list.records if record.source_row in issue_rows]
+    if not records:
+        records = fa_list.records[:3]
+    fields = ["asset_category"]
+    if rule_id in {"k03_policy_fa_life_out_of_range", "k03_policy_fa_unit_or_category_review"}:
+        fields.append("useful_life_months")
+    if rule_id in {"k03_policy_fa_salvage_mismatch", "k03_policy_fa_unit_or_category_review"}:
+        fields.append("salvage_rate")
+    values: list[dict] = []
+    for record in records[:3]:
+        for field in fields:
+            values.append(
+                _value_read(
+                    f"FA list {field}",
+                    getattr(record, field, None),
+                    row=record.source_row,
+                    column=_fa_list_column(fa_list, field),
+                    amount_type="fa_list_field",
+                )
+            )
+    return values
+
+
+def _fa_list_column(fa_list: FaListDataset, field: str) -> int | None:
+    for mapping in fa_list.mapped_fields:
+        if mapping.standard_field == field:
+            return getattr(mapping, "column_index", None) or getattr(mapping, "source_col", None)
+    return None
 
 def _missing_required_tod_fields(dataset: K03SheetDataset) -> list[str]:
     required = ["management_depreciation", "audit_recalculated_depreciation"]
