@@ -14,7 +14,7 @@ from ingest.models import AssetRecord
 from ingest.records import DisposalListSummary, FaListDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset, get_movement_transaction_amount
 from rules.disposal_consistency import build_disposal_consistency_preview
-from rules.lead_common import field_values
+from rules.lead_common import field_values, lead_tt
 from rules.models import QcIssue
 from rules.parsing import parse_amount
 
@@ -201,6 +201,98 @@ def build_disposal_sample_match_observation(
     )
 
 
+def build_disposal_difference_investigation_observation(
+    disposal_test: DisposalTestSheetDataset | None,
+    lead: LeadSheetDataset | None,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    matrix = disposal_test.reconciliation_matrix if disposal_test else None
+    return _observation(
+        checked_data=[
+            _matrix_item(disposal_test, matrix, include_values=True),
+            _lead_item(lead, "SAD", field_values(lead).get("sad") if lead else None),
+        ],
+        check_logic="读取 K.02.2 总体核对矩阵中的差异行、是否调查行和 Lead SAD，检查超过 SAD 的差异是否标记为需要进一步调查。",
+        expected_result="当处置总体差异超过 SAD 时，应在调查行标记需要调查，并保留后续复核入口。",
+        actual_result=f"本次读取差异调查矩阵，差异调查 finding {len(issues)} 条。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_disposal_method_classification_observation(
+    disposal_list_summary: DisposalListSummary | None,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    return _observation(
+        checked_data=[_summary_bucket_item(disposal_list_summary)],
+        check_logic="读取处置清单按减少方式形成的汇总分类，检查是否存在未能归入出售、报废或其他减少的记录。",
+        expected_result="处置清单减少方式应能稳定分类；未分类项目应提示人工确认处置性质。",
+        actual_result=f"本次读取处置方式分类汇总，分类提示 finding {len(issues)} 条。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_disposal_other_reduction_tt_observation(
+    disposal_list_summary: DisposalListSummary | None,
+    lead: LeadSheetDataset | None,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    return _observation(
+        checked_data=[
+            _summary_item(disposal_list_summary),
+            _lead_item(lead, "TT", lead_tt(lead)),
+        ],
+        check_logic="读取处置清单中其他减少净值，并与 Lead TT 比较，用于提示其他减少是否可能需要单独测试总体或进一步复核。",
+        expected_result="其他减少项目性质不同于出售/报废；如金额超过 TT 或无法读取 TT，应提示人工复核。",
+        actual_result=(
+            f"其他减少净值={_text(disposal_list_summary.other_reduction_net_value if disposal_list_summary else None)}，"
+            f"Lead TT={_text(lead_tt(lead))}，finding {len(issues)} 条。"
+        ),
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_disposal_sampling_te_cra_observation(
+    disposal_sample_output: DisposalSampleOutputDataset | None,
+    lead: LeadSheetDataset | None,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    return _observation(
+        checked_data=[
+            _sample_output_parameters_item(disposal_sample_output, keys=["te", "cra", "covered_assertions"]),
+            _lead_item(lead, "TE", field_values(lead).get("te") if lead else None),
+            _lead_cra_item(lead),
+        ],
+        check_logic="读取 K.02.2a 抽样输出中的 TE、综合风险评估和覆盖认定，并与 Lead Sheet 的 TE 和对应 CRA 进行核对。",
+        expected_result="K.02.2a 使用的 TE 和 CRA 应与 Lead Sheet 相关参数一致；覆盖认定应能对应到 Lead 的 CRA 评估。",
+        actual_result=f"本次读取 K.02.2a 抽样参数和 Lead 参数，TE/CRA finding {len(issues)} 条。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_disposal_replacement_reason_observation(
+    disposal_test: DisposalTestSheetDataset | None,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    rows = [
+        row.source_row
+        for row in (disposal_test.tested_samples if disposal_test else [])
+        if _contains_replacement(row.sample_type)
+    ]
+    return _observation(
+        checked_data=[_tested_rows_item(disposal_test, rows=rows)],
+        check_logic="读取 K.02.2 测试页中的样本类型和证据说明，检查替换样本是否记录原样本无法使用的原因。",
+        expected_result="如启用替换样本，应说明原样本无法测试的原因和替换依据；未启用替换样本时不应触发 finding。",
+        actual_result=f"本次读取测试样本 {len(disposal_test.tested_samples) if disposal_test else 0} 条，替换样本 {len(rows)} 条。",
+        result_summary=_result_summary(issues),
+    )
+
+
 def build_disposal_data_insufficient_observation(rule_id: str, reason: str) -> dict:
     return _observation(
         checked_data=[
@@ -293,6 +385,32 @@ def _summary_item(summary: DisposalListSummary | None) -> dict:
     }
 
 
+def _summary_bucket_item(summary: DisposalListSummary | None) -> dict:
+    rows = [
+        row
+        for bucket in (summary.buckets if summary else [])
+        for row in bucket.source_rows[:3]
+    ]
+    return {
+        "sheet": summary.source_sheet if summary else None,
+        "section": "处置清单减少方式分类",
+        "location": _location(rows),
+        "identified_by": {
+            "sheet_name": summary.source_sheet if summary else None,
+            "section": "disposal_method_buckets",
+            "matched_keywords": [bucket.bucket_label for bucket in (summary.buckets if summary else []) if bucket.bucket_label],
+            "matched_rows": _clean_ints(rows),
+            "matched_columns": [],
+        },
+        "key_columns": ["bucket_key", "record_count", "net_value_total"],
+        "values_read": [
+            _value_read(bucket.bucket_label or bucket.bucket_key, bucket.net_value_total, row=bucket.source_rows[0] if bucket.source_rows else None, amount_type="处置方式分类")
+            for bucket in (summary.buckets if summary else [])[:10]
+        ],
+        "missing_data": [] if summary else ["处置清单汇总"],
+    }
+
+
 def _rollforward_item(rollforward: RollforwardSheetDataset | None) -> dict:
     values = []
     rows = []
@@ -343,6 +461,28 @@ def _lead_item(lead: LeadSheetDataset | None, label: str, value: object | None) 
             _value_read(label, value, row=fields[0].source_row if fields else None, column=fields[0].source_col if fields else None, amount_type="Lead参数")
         ] if value is not None else [],
         "missing_data": [] if value is not None else [f"Lead {label}"],
+    }
+
+
+def _lead_cra_item(lead: LeadSheetDataset | None) -> dict:
+    rows = [row.source_row for row in (lead.cra_rows if lead else []) if row.source_row is not None]
+    return {
+        "sheet": lead.source_sheet if lead else None,
+        "section": "K.00 Lead CRA",
+        "location": _location(rows),
+        "identified_by": {
+            "sheet_name": lead.source_sheet if lead else None,
+            "section": "cra_rows",
+            "matched_keywords": [row.assertion for row in (lead.cra_rows if lead else []) if row.assertion],
+            "matched_rows": rows,
+            "matched_columns": [],
+        },
+        "key_columns": ["assertion", "cra"],
+        "values_read": [
+            _value_read(row.assertion or "CRA", row.cra, row=row.source_row, amount_type="Lead CRA")
+            for row in (lead.cra_rows if lead else [])[:10]
+        ],
+        "missing_data": [] if lead and lead.cra_rows else ["Lead CRA"],
     }
 
 
@@ -402,6 +542,35 @@ def _sample_output_amount_item(
     }
 
 
+def _sample_output_parameters_item(
+    sample_output: DisposalSampleOutputDataset | None,
+    *,
+    keys: list[str],
+) -> dict:
+    parameters = sample_output.parameters if sample_output else {}
+    rows = [parameters[key].source_row for key in keys if key in parameters]
+    columns = [parameters[key].source_column for key in keys if key in parameters and parameters[key].source_column]
+    return {
+        "sheet": sample_output.source_sheet if sample_output else None,
+        "section": "K.02.2a 抽样参数",
+        "location": _location(rows),
+        "identified_by": {
+            "sheet_name": sample_output.source_sheet if sample_output else None,
+            "section": "parameters",
+            "matched_keywords": [parameters[key].label for key in keys if key in parameters],
+            "matched_rows": _clean_ints(rows),
+            "matched_columns": columns,
+        },
+        "key_columns": keys,
+        "values_read": [
+            _value_read(parameters[key].label, parameters[key].value, row=parameters[key].source_row, column=parameters[key].source_column, amount_type="K.02.2a抽样参数")
+            for key in keys
+            if key in parameters
+        ],
+        "missing_data": [key for key in keys if key not in parameters],
+    }
+
+
 def _execution_path_item(path: DisposalExecutionPathDataset | None) -> dict:
     return {
         "sheet": None,
@@ -442,8 +611,12 @@ def _sample_rows_item(sample_output: DisposalSampleOutputDataset | None) -> dict
     }
 
 
-def _tested_rows_item(disposal_test: DisposalTestSheetDataset | None) -> dict:
-    rows = [row.source_row for row in (disposal_test.tested_samples if disposal_test else [])[:5]]
+def _tested_rows_item(
+    disposal_test: DisposalTestSheetDataset | None,
+    *,
+    rows: list[int | None] | None = None,
+) -> dict:
+    rows = rows or [row.source_row for row in (disposal_test.tested_samples if disposal_test else [])[:5]]
     return {
         "sheet": disposal_test.source_sheet if disposal_test else None,
         "section": "K.02.2 实际测试样本",
@@ -456,7 +629,7 @@ def _tested_rows_item(disposal_test: DisposalTestSheetDataset | None) -> dict:
             "matched_columns": [],
         },
         "key_columns": ["sample_type", "asset_id", "asset_name", "net_value", "disposal_method"],
-        "values_read": _tested_values(disposal_test),
+        "values_read": _tested_values(disposal_test, rows=rows),
         "missing_data": [] if disposal_test else ["K.02.2 处置测试"],
     }
 
@@ -522,9 +695,16 @@ def _sample_values(sample_output: DisposalSampleOutputDataset | None) -> list[di
     return values[:20]
 
 
-def _tested_values(disposal_test: DisposalTestSheetDataset | None) -> list[dict]:
+def _tested_values(
+    disposal_test: DisposalTestSheetDataset | None,
+    *,
+    rows: list[int | None] | None = None,
+) -> list[dict]:
+    wanted = set(_clean_ints(rows or []))
     values = []
-    for row in (disposal_test.tested_samples if disposal_test else [])[:5]:
+    for row in (disposal_test.tested_samples if disposal_test else []):
+        if wanted and row.source_row not in wanted:
+            continue
         values.extend(
             [
                 _value_read("样本类型", row.sample_type, row=row.source_row, amount_type="K.02.2测试样本"),
@@ -542,6 +722,11 @@ def _issue_rows(issues: list[QcIssue]) -> list[int | None]:
 
 def _sample_rows(disposal_list: FaListDataset | None) -> list[int | None]:
     return [record.source_row for record in (disposal_list.records if disposal_list else [])[:3]]
+
+
+def _contains_replacement(value: str | None) -> bool:
+    text = str(value or "").lower()
+    return "替换" in text or "replacement" in text
 
 
 def _result_summary(issues: list[QcIssue]) -> str:

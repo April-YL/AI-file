@@ -14,14 +14,19 @@ from rules.disposal_detailed_test import run_disposal_detailed_test_rules
 from rules.disposal_list_rules import RULE_IDS as DISPOSAL_LIST_RULE_IDS
 from rules.disposal_list_rules import run_disposal_list_rules
 from rules.disposal_observations import (
+    build_disposal_difference_investigation_observation,
     build_disposal_list_net_value_observation,
+    build_disposal_method_classification_observation,
     build_disposal_net_value_recalculation_observation,
+    build_disposal_other_reduction_tt_observation,
     build_disposal_reconciliation_formula_source_observation,
     build_disposal_reconciliation_readability_observation,
+    build_disposal_replacement_reason_observation,
     build_disposal_required_fields_observation,
     build_disposal_rollforward_reconciliation_observation,
     build_disposal_sample_match_observation,
     build_disposal_sample_pool_observation,
+    build_disposal_sampling_te_cra_observation,
 )
 from rules.disposal_reconciliation import RULE_IDS as DISPOSAL_RECONCILIATION_RULE_IDS
 from rules.disposal_reconciliation import run_disposal_reconciliation_rules
@@ -79,6 +84,8 @@ def run_disposal_rules(
         _record_disposal_list_observations(
             recorder,
             disposal_list=disposal_list,
+            disposal_list_summary=disposal_list_summary,
+            lead=lead,
             issues=list_issues,
         )
         issues.extend(list_issues)
@@ -99,7 +106,9 @@ def run_disposal_rules(
         _record_disposal_sampling_observations(
             recorder,
             disposal_list_summary=disposal_list_summary,
+            disposal_test=disposal_test,
             disposal_sample_output=disposal_sample_output,
+            lead=lead,
             issues=sampling_issues,
         )
         issues.extend(sampling_issues)
@@ -171,12 +180,23 @@ def _record_disposal_reconciliation_observations(
             _issues_for(issues, "disposal_rollforward_reconciliation"),
         ),
     )
+    _record_if_present(
+        recorder,
+        "disposal_difference_investigation",
+        build_disposal_difference_investigation_observation(
+            disposal_test,
+            lead,
+            _issues_for(issues, "disposal_difference_investigation"),
+        ),
+    )
 
 
 def _record_disposal_list_observations(
     recorder: RuleExecutionRecorder,
     *,
     disposal_list: FaListDataset | None,
+    disposal_list_summary: DisposalListSummary | None,
+    lead: LeadSheetDataset | None,
     issues: list[QcIssue],
 ) -> None:
     _record_if_present(
@@ -195,13 +215,32 @@ def _record_disposal_list_observations(
             _issues_for(issues, "disposal_list_net_value_recalculation"),
         ),
     )
+    _record_if_present(
+        recorder,
+        "disposal_method_classification",
+        build_disposal_method_classification_observation(
+            disposal_list_summary,
+            issues=_issues_for(issues, "disposal_method_classification"),
+        ),
+    )
+    _record_if_present(
+        recorder,
+        "disposal_other_reduction_over_tt",
+        build_disposal_other_reduction_tt_observation(
+            disposal_list_summary,
+            lead,
+            _issues_for(issues, "disposal_other_reduction_over_tt"),
+        ),
+    )
 
 
 def _record_disposal_sampling_observations(
     recorder: RuleExecutionRecorder,
     *,
     disposal_list_summary: DisposalListSummary | None,
+    disposal_test: DisposalTestSheetDataset | None,
     disposal_sample_output: DisposalSampleOutputDataset | None,
+    lead: LeadSheetDataset | None,
     issues: list[QcIssue],
 ) -> None:
     _record_if_present(
@@ -211,6 +250,23 @@ def _record_disposal_sampling_observations(
             disposal_list_summary,
             disposal_sample_output,
             _issues_for(issues, "disposal_sample_pool_amount_match"),
+        ),
+    )
+    _record_if_present(
+        recorder,
+        "disposal_sampling_te_cra_consistency",
+        build_disposal_sampling_te_cra_observation(
+            disposal_sample_output,
+            lead,
+            _issues_for(issues, "disposal_sampling_te_cra_consistency"),
+        ),
+    )
+    _record_if_present(
+        recorder,
+        "disposal_sample_replacement_reason",
+        build_disposal_replacement_reason_observation(
+            disposal_test,
+            _issues_for(issues, "disposal_sample_replacement_reason"),
         ),
     )
 

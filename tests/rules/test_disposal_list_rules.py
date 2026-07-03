@@ -1,10 +1,11 @@
 from decimal import Decimal
 
 from ingest.models import AssetRecord, FieldMapping
-from ingest.lead_sheet import CraAssertionRow, LeadSheetDataset
+from ingest.lead_sheet import CraAssertionRow, LeadBasicInfoField, LeadSheetDataset
 from ingest.disposal_test_sheet import (
     DisposalAmountItem,
     DisposalExecutionPathDataset,
+    DisposalParameterItem,
     DisposalSampleOutputDataset,
     DisposalSampleRow,
     DisposalTestSheetDataset,
@@ -244,6 +245,11 @@ def test_disposal_runner_records_evidence_how_for_low_risk_k022_rules():
         source_file="case.xlsx",
         source_sheet="K.02.2a 处置选样输出",
         amounts={"sample_pool_amount": DisposalAmountItem("样本池总体金额", "300", 41, 6)},
+        parameters={
+            "te": DisposalParameterItem("TE", "100", 15, 6),
+            "covered_assertions": DisposalParameterItem("测试覆盖认定", "存在/发生", 16, 6),
+            "cra": DisposalParameterItem("综合风险评估", "最低", 18, 6),
+        },
         selected_samples=[
             DisposalSampleRow(
                 source_row=30,
@@ -305,7 +311,15 @@ def test_disposal_runner_records_evidence_how_for_low_risk_k022_rules():
             sale_scrap_net_value="300",
         ),
         rollforward=rollforward,
-        lead=LeadSheetDataset(source_file="case.xlsx", source_sheet="K.00 Lead Sheet"),
+        lead=LeadSheetDataset(
+            source_file="case.xlsx",
+            source_sheet="K.00 Lead Sheet",
+            basic_info_fields=[
+                LeadBasicInfoField(field_key="te", label="TE", value="100", source_row=8, source_col=4),
+                LeadBasicInfoField(field_key="sad", label="SAD", value="5", source_row=9, source_col=4),
+            ],
+            cra_rows=[CraAssertionRow(assertion="存在/发生", cra="Minimal", tt="200", source_row=16)],
+        ),
         recorder=recorder,
     )
 
@@ -319,6 +333,11 @@ def test_disposal_runner_records_evidence_how_for_low_risk_k022_rules():
         "disposal_list_net_value_recalculation",
         "disposal_sample_pool_amount_match",
         "disposal_sample_match",
+        "disposal_difference_investigation",
+        "disposal_method_classification",
+        "disposal_other_reduction_over_tt",
+        "disposal_sampling_te_cra_consistency",
+        "disposal_sample_replacement_reason",
     ):
         observation = items[rule_id]["observation"]
         assert set(observation) == {
