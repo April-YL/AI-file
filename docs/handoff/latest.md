@@ -1048,3 +1048,31 @@ Next recommended work:
 2. Confirm summary-page waiver LLM output no longer asks for TE/TT when the reason already satisfies the SAD layer.
 3. Extend the shared Lead threshold helper pattern to future rules before adding new local threshold parsing.
 4. Add a small K.03 output-language regression later if the project wants to lock Chinese cmts wording at the test level.
+
+## 2026-07-03 HOW governance closure snapshot
+
+This is a HOW governance closure snapshot, not a final product release.
+
+Snapshot base HEAD before this handoff note: `8b47394`
+
+Coverage summary under the current ledger / HOW diagnostics scope:
+
+- FA list: 6/6 evidence-level HOW.
+- Lead / PSP: complete under the current ledger diagnostics scope.
+- K.01: current deterministic ledger 6/6 evidence-level HOW, with 2 known issues tracked separately.
+- K.02.1: 8/8 evidence-level HOW under the established batch scope.
+- K.02.2: 17/17 evidence-level HOW under the established batch scope.
+- K.03: 17/17 evidence-level HOW.
+- Global diagnostics on `tests/fixtures/workbook_with_lead.xlsx`: legacy=0, missing=0, evidence-level HOW=62.
+
+Scope note:
+
+- The completion above is based on the current ledger / HOW diagnostics scope.
+- It does not mean every registry rule is covered under every possible fixture or workbook variant.
+- `execution_ledger` remains the runtime fact record, and `observation` records evidence-level HOW only. UI / JSON should display structured results and should not infer missing explanations.
+
+Remaining known issues:
+
+1. K.01 table4 notes classification / extraction known issue.
+2. K.01 table3 material difference with note pass/fail rule-position known issue.
+3. Packaging demo files are still not governed or committed: `fixed_asset_qc_agent.spec` and `scripts/package_launcher.py`.
