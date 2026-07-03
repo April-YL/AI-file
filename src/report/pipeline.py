@@ -28,6 +28,7 @@ from rules.k03_runner import K03_RULE_IDS, run_k03_rules
 from rules.lead_runner import LEAD_RULE_IDS, run_lead_rules
 from rules.execution_recorder import RuleExecutionRecorder, validate_execution_ledger
 from rules.models import ColumnContext
+from rules.package_observations import build_k02_package_complete_observation
 from rules.psp_observations import build_psp_completion_observation
 from rules.psp_completion import check_psp_completion
 from rules.registry import attach_rule_metadata
@@ -186,27 +187,53 @@ def run_workbook_qc(
         psp_issues = attach_rule_metadata(psp_raw_issues)
         issues.extend(psp_issues)
         summary_sheet_section = build_summary_sheet_section(ctx.summary, psp_issues)
-        addition_package_issues = attach_rule_metadata(
-            recorder.execute_rule("addition_test_package_complete", check_addition_test_package,
+        addition_package_raw_issues = recorder.execute_rule(
+            "addition_test_package_complete",
+            check_addition_test_package,
                 ctx.summary,
                 workbook_sheet_titles=sheet_titles,
                 workbook_path=ctx.source_file,
                 test_sheet_note=ctx.addition_test.waiver_note_text
                 if ctx.addition_test
                 else None,
-            )
         )
+        recorder.record_observation(
+            "addition_test_package_complete",
+            build_k02_package_complete_observation(
+                ctx.summary,
+                addition_package_raw_issues,
+                workbook_sheet_titles=sheet_titles,
+                test_sheet_note=ctx.addition_test.waiver_note_text
+                if ctx.addition_test
+                else None,
+                kind="addition",
+            ),
+        )
+        addition_package_issues = attach_rule_metadata(addition_package_raw_issues)
         issues.extend(addition_package_issues)
-        disposal_package_issues = attach_rule_metadata(
-            recorder.execute_rule("disposal_test_package_complete", check_disposal_test_package,
+        disposal_package_raw_issues = recorder.execute_rule(
+            "disposal_test_package_complete",
+            check_disposal_test_package,
                 ctx.summary,
                 workbook_sheet_titles=sheet_titles,
                 workbook_path=ctx.source_file,
                 test_sheet_note=ctx.disposal_test.waiver_note_text
                 if ctx.disposal_test
                 else None,
-            )
         )
+        recorder.record_observation(
+            "disposal_test_package_complete",
+            build_k02_package_complete_observation(
+                ctx.summary,
+                disposal_package_raw_issues,
+                workbook_sheet_titles=sheet_titles,
+                test_sheet_note=ctx.disposal_test.waiver_note_text
+                if ctx.disposal_test
+                else None,
+                kind="disposal",
+            ),
+        )
+        disposal_package_issues = attach_rule_metadata(disposal_package_raw_issues)
         issues.extend(disposal_package_issues)
         if not source_sheet:
             source_sheet = ctx.summary.source_sheet

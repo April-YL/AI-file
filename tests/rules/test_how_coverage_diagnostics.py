@@ -164,3 +164,21 @@ def test_k03_current_fixture_reaches_first_batch_how_coverage():
 
     assert len(k03_rows) == 17
     assert {row["rule_id"] for row in evidence_rows} == K03_LOW_RISK_RULE_IDS
+
+
+def test_current_fixture_has_no_missing_or_legacy_how():
+    report = run_workbook_qc_from_path(str(FIXTURES / "workbook_with_lead.xlsx"), llm=False)
+
+    diagnostics = build_how_coverage_diagnostics(report.execution_ledger)
+    rows = {row["rule_id"]: row for row in diagnostics["rules"]}
+
+    assert diagnostics["summary"]["missing_observation_count"] == 0
+    assert diagnostics["summary"]["legacy_observation_count"] == 0
+    assert (
+        rows["addition_test_package_complete"]["observation_type"]
+        == OBSERVATION_EVIDENCE_LEVEL
+    )
+    assert (
+        rows["disposal_test_package_complete"]["observation_type"]
+        == OBSERVATION_EVIDENCE_LEVEL
+    )
