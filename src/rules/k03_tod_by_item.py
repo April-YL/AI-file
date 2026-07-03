@@ -15,6 +15,11 @@ from ingest.rollforward_sheet import (
     get_movement_transaction_amount,
 )
 from rules.execution_recorder import RuleExecutionRecorder
+from rules.k03_observations import (
+    K03_LOW_RISK_HOW_RULE_IDS,
+    build_k03_not_applicable_observation,
+    build_k03_tod_low_risk_observation,
+)
 from rules.lead_common import field_values
 from rules.models import QcIssue, Severity
 from rules.parsing import amount_tolerance, is_blank, parse_amount
@@ -76,9 +81,15 @@ def run_k03_tod_by_item_rules(
     recorder: RuleExecutionRecorder | None = None,
 ) -> list[QcIssue]:
     recorder = recorder or RuleExecutionRecorder()
+    note = "当前 K.03 工作表不是 by-item 折旧测试执行路径"
     if dataset.execution_path != EXECUTION_PATH_TOD_BY_ITEM:
         for rule_id in RULE_IDS:
-            recorder.record_not_applicable(rule_id, "当前 K.03 工作表不是 by-item 折旧测试执行路径")
+            recorder.record_not_applicable(rule_id, note)
+            if rule_id in K03_LOW_RISK_HOW_RULE_IDS:
+                recorder.record_observation(
+                    rule_id,
+                    build_k03_not_applicable_observation(rule_id, dataset, reason=note),
+                )
         return []
 
     issues: list[QcIssue] = []
@@ -93,7 +104,13 @@ def run_k03_tod_by_item_rules(
                 "请打开 K.03.2 工作表，确认 by-item 折旧测试明细区、表头和合计行是否完整。",
             )
         ]
-        _record_k03_execution(recorder, issues, ("k03_tod_by_item_detail_unreadable",))
+        _record_k03_execution(
+            recorder,
+            issues,
+            ("k03_tod_by_item_detail_unreadable",),
+            dataset=dataset,
+            lead=lead,
+        )
         return issues
 
     issues.extend(_check_required_fields(dataset))
@@ -109,7 +126,13 @@ def run_k03_tod_by_item_rules(
                 "请检查工作簿路径、工作表名称和明细表范围是否仍然有效。",
             )
         )
-        _record_k03_execution(recorder, issues, ("k03_tod_by_item_required_fields", "k03_tod_by_item_detail_unreadable"))
+        _record_k03_execution(
+            recorder,
+            issues,
+            ("k03_tod_by_item_required_fields", "k03_tod_by_item_detail_unreadable"),
+            dataset=dataset,
+            lead=lead,
+        )
         return issues
 
     issues.extend(_check_difference_column(dataset, table.detail_rows + table.total_rows))
@@ -203,7 +226,7 @@ def run_k03_tod_by_item_rules(
             )
         )
 
-    _record_k03_execution(recorder, issues, RULE_IDS)
+    _record_k03_execution(recorder, issues, RULE_IDS, dataset=dataset, lead=lead)
     return issues
 
 
@@ -211,12 +234,23 @@ def _record_k03_execution(
     recorder: RuleExecutionRecorder,
     issues: list[QcIssue],
     rule_ids: tuple[str, ...],
+    *,
+    dataset: K03SheetDataset,
+    lead: LeadSheetDataset | None,
 ) -> None:
     counts: dict[str, int] = {}
     for issue in issues:
         counts[issue.rule_id] = counts.get(issue.rule_id, 0) + 1
     for rule_id in rule_ids:
-        recorder.record(rule_id, counts.get(rule_id, 0))
+        observation = None
+        if rule_id in K03_LOW_RISK_HOW_RULE_IDS:
+            observation = build_k03_tod_low_risk_observation(
+                rule_id,
+                dataset,
+                issues,
+                lead=lead,
+            )
+        recorder.record_executed(rule_id, counts.get(rule_id, 0), observation=observation)
 
 
 def _sad_from_lead(lead: LeadSheetDataset | None) -> Decimal | None:

@@ -6,6 +6,23 @@ from rules.how_coverage_diagnostics import (
     classify_observation_type,
     default_runner_ledger_rule_ids,
 )
+from pathlib import Path
+
+from report.pipeline import run_workbook_qc_from_path
+from rules.execution_recorder import RuleExecutionRecorder
+from rules.k03_runner import run_k03_rules
+
+
+K03_LOW_RISK_RULE_IDS = {
+    "k03_policy_sheet_missing",
+    "k03_policy_table_unreadable",
+    "k03_policy_sections_incomplete",
+    "k03_tod_by_item_detail_unreadable",
+    "k03_tod_by_item_required_fields",
+    "k03_tod_by_item_sad_unavailable",
+}
+
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
 
 def _evidence_observation() -> dict:
@@ -109,3 +126,30 @@ def test_default_runner_ledger_rule_ids_include_existing_runner_and_pipeline_rul
     assert "lead_required_fields" in rule_ids
     assert "lead_ingest_readability" in rule_ids
     assert "rollforward_fa_list_reconciliation" in rule_ids
+
+
+def test_k03_missing_dataset_records_low_risk_evidence_how():
+    recorder = RuleExecutionRecorder()
+
+    run_k03_rules(None, recorder=recorder)
+
+    diagnostics = build_how_coverage_diagnostics(recorder.to_ledger())
+    rows = {row["rule_id"]: row for row in diagnostics["rules"]}
+    for rule_id in K03_LOW_RISK_RULE_IDS:
+        assert rows[rule_id]["observation_type"] == OBSERVATION_EVIDENCE_LEVEL
+        assert rows[rule_id]["next_action"] == "DATA_INSUFFICIENT"
+
+
+def test_k03_current_fixture_reaches_first_batch_how_coverage():
+    report = run_workbook_qc_from_path(str(FIXTURES / "workbook_with_lead.xlsx"), llm=False)
+
+    diagnostics = build_how_coverage_diagnostics(report.execution_ledger)
+    k03_rows = [row for row in diagnostics["rules"] if row["module"] == "K.03"]
+    evidence_rows = [
+        row
+        for row in k03_rows
+        if row["observation_type"] == OBSERVATION_EVIDENCE_LEVEL
+    ]
+
+    assert len(k03_rows) == 17
+    assert {row["rule_id"] for row in evidence_rows} == K03_LOW_RISK_RULE_IDS

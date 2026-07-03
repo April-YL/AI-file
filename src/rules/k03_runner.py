@@ -5,6 +5,10 @@ from ingest.lead_sheet import LeadSheetDataset
 from ingest.records import FaListDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset
 from rules.execution_recorder import RuleExecutionRecorder
+from rules.k03_observations import (
+    K03_LOW_RISK_HOW_RULE_IDS,
+    build_k03_missing_dataset_observation,
+)
 from rules.k03_policy_review import RULE_IDS as K03_POLICY_REVIEW_RULE_IDS
 from rules.k03_policy_review import run_k03_policy_review_rules
 from rules.k03_tod_by_item import RULE_IDS as K03_TOD_BY_ITEM_RULE_IDS
@@ -26,8 +30,10 @@ def run_k03_rules(
     issues: list[QcIssue] = []
     datasets = k03_sheets or []
     if not datasets:
+        note = "未识别 K.03 折旧测试或折旧政策复核工作表"
         for rule_id in K03_RULE_IDS:
-            recorder.record_data_insufficient(rule_id, "未识别 K.03 折旧测试或折旧政策复核工作表")
+            recorder.record_data_insufficient(rule_id, note)
+            _attach_missing_observation(recorder, rule_id, note)
         return issues
     for dataset in datasets:
         issues.extend(
@@ -46,6 +52,21 @@ def run_k03_rules(
     if policy_dataset is not None:
         issues.extend(run_k03_policy_review_rules(policy_dataset, fa_list=fa_list, recorder=recorder))
     else:
+        note = "未识别 K.03.3 折旧政策复核执行路径"
         for rule_id in K03_POLICY_REVIEW_RULE_IDS:
-            recorder.record_data_insufficient(rule_id, "未识别 K.03.3 折旧政策复核执行路径")
+            recorder.record_data_insufficient(rule_id, note)
+            _attach_missing_observation(recorder, rule_id, note)
     return issues
+
+
+def _attach_missing_observation(
+    recorder: RuleExecutionRecorder,
+    rule_id: str,
+    note: str,
+) -> None:
+    if rule_id not in K03_LOW_RISK_HOW_RULE_IDS:
+        return
+    recorder.record_observation(
+        rule_id,
+        build_k03_missing_dataset_observation(rule_id, reason=note),
+    )
