@@ -15,6 +15,7 @@ from rules.disposal_list_rules import RULE_IDS as DISPOSAL_LIST_RULE_IDS
 from rules.disposal_list_rules import run_disposal_list_rules
 from rules.disposal_observations import (
     build_disposal_difference_investigation_observation,
+    build_disposal_exception_followup_observation,
     build_disposal_list_net_value_observation,
     build_disposal_method_classification_observation,
     build_disposal_net_value_recalculation_observation,
@@ -27,6 +28,9 @@ from rules.disposal_observations import (
     build_disposal_sample_match_observation,
     build_disposal_sample_pool_observation,
     build_disposal_sampling_te_cra_observation,
+    build_disposal_sale_evidence_observation,
+    build_disposal_test_amount_recalculation_observation,
+    build_disposal_test_attributes_observation,
 )
 from rules.disposal_reconciliation import RULE_IDS as DISPOSAL_RECONCILIATION_RULE_IDS
 from rules.disposal_reconciliation import run_disposal_reconciliation_rules
@@ -112,7 +116,13 @@ def run_disposal_rules(
             issues=sampling_issues,
         )
         issues.extend(sampling_issues)
-        issues.extend(run_disposal_detailed_test_rules(disposal_test, recorder=recorder))
+        detailed_issues = run_disposal_detailed_test_rules(disposal_test, recorder=recorder)
+        _record_disposal_detailed_observations(
+            recorder,
+            disposal_test=disposal_test,
+            issues=detailed_issues,
+        )
+        issues.extend(detailed_issues)
     else:
         for rule_id in (*DISPOSAL_SAMPLING_RULE_IDS, *DISPOSAL_DETAILED_RULE_IDS):
             recorder.record_not_applicable(rule_id, "处置测试已豁免或测试表注明不执行")
@@ -267,6 +277,46 @@ def _record_disposal_sampling_observations(
         build_disposal_replacement_reason_observation(
             disposal_test,
             _issues_for(issues, "disposal_sample_replacement_reason"),
+        ),
+    )
+
+
+def _record_disposal_detailed_observations(
+    recorder: RuleExecutionRecorder,
+    *,
+    disposal_test: DisposalTestSheetDataset | None,
+    issues: list[QcIssue],
+) -> None:
+    _record_if_present(
+        recorder,
+        "disposal_test_attributes_complete",
+        build_disposal_test_attributes_observation(
+            disposal_test,
+            _issues_for(issues, "disposal_test_attributes_complete"),
+        ),
+    )
+    _record_if_present(
+        recorder,
+        "disposal_test_amount_recalculation",
+        build_disposal_test_amount_recalculation_observation(
+            disposal_test,
+            _issues_for(issues, "disposal_test_amount_recalculation"),
+        ),
+    )
+    _record_if_present(
+        recorder,
+        "disposal_sale_evidence_complete",
+        build_disposal_sale_evidence_observation(
+            disposal_test,
+            _issues_for(issues, "disposal_sale_evidence_complete"),
+        ),
+    )
+    _record_if_present(
+        recorder,
+        "disposal_exception_followup",
+        build_disposal_exception_followup_observation(
+            disposal_test,
+            _issues_for(issues, "disposal_exception_followup"),
         ),
     )
 

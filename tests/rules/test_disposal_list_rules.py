@@ -338,6 +338,10 @@ def test_disposal_runner_records_evidence_how_for_low_risk_k022_rules():
         "disposal_other_reduction_over_tt",
         "disposal_sampling_te_cra_consistency",
         "disposal_sample_replacement_reason",
+        "disposal_test_attributes_complete",
+        "disposal_test_amount_recalculation",
+        "disposal_sale_evidence_complete",
+        "disposal_exception_followup",
     ):
         observation = items[rule_id]["observation"]
         assert set(observation) == {

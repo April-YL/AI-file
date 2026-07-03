@@ -293,6 +293,132 @@ def build_disposal_replacement_reason_observation(
     )
 
 
+def build_disposal_test_attributes_observation(
+    disposal_test: DisposalTestSheetDataset | None,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    rows = _issue_rows(issues) or _tested_sample_rows(disposal_test)
+    return _observation(
+        checked_data=[
+            _detailed_test_item(
+                disposal_test,
+                section="K.02.2 样本属性测试",
+                key_columns=["sample_type", "asset_id", "attribute_results"],
+                rows=rows,
+                fields=["sample_type", "asset_id", "asset_name", "attribute_results"],
+            )
+        ],
+        check_logic="读取 K.02.2 实际测试样本的属性测试结果，检查每个处置样本是否完成固定测试属性。",
+        expected_result="每个处置样本应完整填写资产正确转出、处置损益重算及适用时处置收入核对等属性测试结果。",
+        actual_result=f"本次读取测试样本 {len(disposal_test.tested_samples) if disposal_test else 0} 条，属性完整性 finding {len(issues)} 条。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_disposal_test_amount_recalculation_observation(
+    disposal_test: DisposalTestSheetDataset | None,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    rows = _issue_rows(issues) or _tested_sample_rows(disposal_test)
+    return _observation(
+        checked_data=[
+            _detailed_test_item(
+                disposal_test,
+                section="K.02.2 样本金额重算",
+                key_columns=[
+                    "original_value",
+                    "accumulated_depreciation",
+                    "impairment_provision",
+                    "net_value",
+                    "sale_price",
+                    "disposal_gain_loss",
+                    "support_sale_price",
+                    "sale_price_difference",
+                ],
+                rows=rows,
+                fields=[
+                    "asset_id",
+                    "original_value",
+                    "accumulated_depreciation",
+                    "impairment_provision",
+                    "net_value",
+                    "sale_price",
+                    "disposal_gain_loss",
+                    "support_sale_price",
+                    "sale_price_difference",
+                    "evidence_amount",
+                    "amount_difference",
+                ],
+            )
+        ],
+        check_logic="读取 K.02.2 样本的原值、累计折旧、减值准备、净值、出售价格、处置损益和证据金额，重算净值、处置损益及售价差异。",
+        expected_result="样本净值、处置损益和售价差异应能按底稿记录金额重新计算一致。",
+        actual_result=f"本次读取测试样本 {len(disposal_test.tested_samples) if disposal_test else 0} 条，金额重算 finding {len(issues)} 条。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_disposal_sale_evidence_observation(
+    disposal_test: DisposalTestSheetDataset | None,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    rows = _issue_rows(issues) or _tested_sample_rows(disposal_test)
+    return _observation(
+        checked_data=[
+            _detailed_test_item(
+                disposal_test,
+                section="K.02.2 出售样本支持证据",
+                key_columns=["sale_price", "support_sale_price", "evidence_amount", "evidence_description"],
+                rows=rows,
+                fields=[
+                    "asset_id",
+                    "disposal_method",
+                    "sale_price",
+                    "support_sale_price",
+                    "evidence_amount",
+                    "evidence_description",
+                ],
+            )
+        ],
+        check_logic="读取 K.02.2 出售样本的账面出售价格、支持性证据金额和证据说明，检查出售样本是否具备可追溯支持。",
+        expected_result="出售样本应记录支持性证据说明，并能读取合同、发票、收款证明等证据对应金额。",
+        actual_result=f"本次读取测试样本 {len(disposal_test.tested_samples) if disposal_test else 0} 条，销售证据 finding {len(issues)} 条。",
+        result_summary=_result_summary(issues),
+    )
+
+
+def build_disposal_exception_followup_observation(
+    disposal_test: DisposalTestSheetDataset | None,
+    issues: Iterable[QcIssue],
+) -> dict:
+    issues = list(issues)
+    rows = _issue_rows(issues) or _tested_sample_rows(disposal_test)
+    return _observation(
+        checked_data=[
+            _detailed_test_item(
+                disposal_test,
+                section="K.02.2 样本异常跟进",
+                key_columns=["attribute_results", "sale_price_difference", "amount_difference", "evidence_description"],
+                rows=rows,
+                fields=[
+                    "asset_id",
+                    "attribute_results",
+                    "sale_price_difference",
+                    "amount_difference",
+                    "evidence_description",
+                ],
+            )
+        ],
+        check_logic="读取 K.02.2 样本的属性测试结果、金额差异和证据说明，检查出现否定结果或金额差异时是否记录异常跟进。",
+        expected_result="如样本存在属性否定结果或金额差异，应记录差异原因、追加程序、处理结果或最终结论。",
+        actual_result=f"本次读取测试样本 {len(disposal_test.tested_samples) if disposal_test else 0} 条，异常跟进 finding {len(issues)} 条。",
+        result_summary=_result_summary(issues),
+    )
+
+
 def build_disposal_data_insufficient_observation(rule_id: str, reason: str) -> dict:
     return _observation(
         checked_data=[
@@ -634,6 +760,32 @@ def _tested_rows_item(
     }
 
 
+def _detailed_test_item(
+    disposal_test: DisposalTestSheetDataset | None,
+    *,
+    section: str,
+    key_columns: list[str],
+    rows: list[int | None],
+    fields: list[str],
+) -> dict:
+    rows = rows or _tested_sample_rows(disposal_test)
+    return {
+        "sheet": disposal_test.source_sheet if disposal_test else None,
+        "section": section,
+        "location": _location(rows),
+        "identified_by": {
+            "sheet_name": disposal_test.source_sheet if disposal_test else None,
+            "section": "tested_samples",
+            "matched_keywords": key_columns[:8],
+            "matched_rows": _clean_ints(rows),
+            "matched_columns": [],
+        },
+        "key_columns": key_columns,
+        "values_read": _detailed_test_values(disposal_test, rows=rows, fields=fields),
+        "missing_data": [] if disposal_test and disposal_test.tested_samples else ["K.02.2 测试样本"],
+    }
+
+
 def _matrix_values(matrix: DisposalReconciliationMatrix | None) -> list[dict]:
     values = []
     if matrix is None:
@@ -716,8 +868,42 @@ def _tested_values(
     return values[:20]
 
 
+def _detailed_test_values(
+    disposal_test: DisposalTestSheetDataset | None,
+    *,
+    rows: list[int | None],
+    fields: list[str],
+) -> list[dict]:
+    wanted = set(_clean_ints(rows))
+    values = []
+    for sample in disposal_test.tested_samples if disposal_test else []:
+        if wanted and sample.source_row not in wanted:
+            continue
+        for field in fields:
+            values.append(
+                _value_read(
+                    field,
+                    _sample_field_value(sample, field),
+                    row=sample.source_row,
+                    amount_type="K.02.2测试样本",
+                )
+            )
+    return values[:20]
+
+
+def _sample_field_value(sample: object, field: str) -> object | None:
+    value = getattr(sample, field, None)
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value if item not in (None, ""))
+    return value
+
+
 def _issue_rows(issues: list[QcIssue]) -> list[int | None]:
     return sorted({issue.source_row for issue in issues if issue.source_row is not None})
+
+
+def _tested_sample_rows(disposal_test: DisposalTestSheetDataset | None) -> list[int | None]:
+    return [sample.source_row for sample in (disposal_test.tested_samples if disposal_test else [])[:5]]
 
 
 def _sample_rows(disposal_list: FaListDataset | None) -> list[int | None]:
