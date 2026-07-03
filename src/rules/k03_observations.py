@@ -22,9 +22,13 @@ K03_LOW_RISK_HOW_RULE_IDS: tuple[str, ...] = (
     "k03_tod_by_item_difference_over_sad",
     "k03_tod_by_item_total_difference_over_sad",
     "k03_tod_by_item_rollforward_depreciation",
+    "k03_tod_by_item_conclusion_missing",
     "k03_policy_fa_life_out_of_range",
     "k03_policy_fa_salvage_mismatch",
     "k03_policy_fa_unit_or_category_review",
+    "k03_policy_difference_marker",
+    "k03_policy_change_without_explanation",
+    "k03_policy_obvious_anomaly",
 )
 
 
@@ -163,6 +167,10 @@ def build_k03_tod_low_risk_observation(
             values_read.append(
                 _value_read("K.01 current period depreciation amount", rf_amount, row=rf_row, column=None, amount_type="depreciation_amount")
             )
+    elif rule_id == "k03_tod_by_item_conclusion_missing":
+        values_read.extend(_tod_explanation_values(dataset))
+        if not values_read:
+            missing_data.append("K.03.2 conclusion or explanation text")
 
     return _observation(
         checked_data=[
@@ -223,6 +231,17 @@ def build_k03_policy_low_risk_observation(
         values_read.extend(_fa_list_values(fa_list, issues, rule_id))
         if fa_list is None or not fa_list.records:
             missing_data.append("FA list")
+    elif rule_id in {
+        "k03_policy_difference_marker",
+        "k03_policy_change_without_explanation",
+        "k03_policy_obvious_anomaly",
+    }:
+        values_read.extend(_policy_values(dataset, rule_id))
+        values_read.extend(_policy_note_values(dataset))
+        if rule_id == "k03_policy_obvious_anomaly":
+            values_read.extend(_fa_list_values(fa_list, issues, rule_id))
+        if rule_id == "k03_policy_change_without_explanation" and not _policy_note_values(dataset):
+            missing_data.append("K.03.3 difference explanation or Notes")
 
     return _observation(
         checked_data=[
@@ -321,13 +340,22 @@ def _value_read(
 ) -> dict:
     return {
         "label": label,
-        "value": "" if value is None else str(value),
+        "value": _short_value(value),
         "row": row,
         "column": column,
         "cell": _cell(row, column),
         "unit": None,
         "amount_type": amount_type,
     }
+
+
+def _short_value(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    if len(text) <= 120:
+        return text
+    return text[:117] + "..."
 
 
 def _tod_key_columns(dataset: K03SheetDataset) -> list[str]:
@@ -421,6 +449,26 @@ def _detail_row_value(
         amount_type=amount_type,
     )
 
+
+def _tod_explanation_values(dataset: K03SheetDataset) -> list[dict]:
+    values: list[dict] = []
+    for label, area in (
+        ("K.03.2 conclusion area", dataset.conclusion_area),
+        ("K.03.2 note area", dataset.note_area),
+    ):
+        if area is None or not area.text:
+            continue
+        values.append(
+            _value_read(
+                label,
+                area.text,
+                row=area.start_row,
+                column=area.start_col,
+                amount_type="explanation_text",
+            )
+        )
+    return values
+
 def _policy_column_values(dataset: K03SheetDataset) -> list[dict]:
     table = dataset.policy_table
     if table is None:
@@ -449,6 +497,21 @@ def _policy_values(dataset: K03SheetDataset, rule_id: str) -> list[dict]:
         fields.append("current_useful_life")
     if rule_id in {"k03_policy_fa_salvage_mismatch", "k03_policy_fa_unit_or_category_review"}:
         fields.append("current_salvage_rate")
+    if rule_id in {"k03_policy_difference_marker", "k03_policy_change_without_explanation"}:
+        fields.extend(
+            [
+                "current_useful_life",
+                "prior_useful_life",
+                "current_salvage_rate",
+                "prior_salvage_rate",
+                "useful_life_same_marker",
+                "salvage_rate_same_marker",
+                "difference_explanation",
+            ]
+        )
+    if rule_id == "k03_policy_obvious_anomaly":
+        fields.extend(["current_useful_life", "current_salvage_rate"])
+    fields = _dedupe_text(fields)
     values: list[dict] = []
     for row in table.rows[:3]:
         for field in fields:
@@ -463,6 +526,21 @@ def _policy_values(dataset: K03SheetDataset, rule_id: str) -> list[dict]:
                 )
             )
     return values
+
+
+def _policy_note_values(dataset: K03SheetDataset) -> list[dict]:
+    area = dataset.note_area
+    if area is None or not area.text:
+        return []
+    return [
+        _value_read(
+            "K.03.3 Notes",
+            area.text,
+            row=area.start_row,
+            column=area.start_col,
+            amount_type="explanation_text",
+        )
+    ]
 
 
 def _fa_list_values(
