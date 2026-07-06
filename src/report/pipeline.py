@@ -32,6 +32,7 @@ from rules.package_observations import build_k02_package_complete_observation
 from rules.psp_observations import build_psp_completion_observation
 from rules.psp_completion import check_psp_completion
 from rules.registry import attach_rule_metadata
+from rules.rule_execution_coverage import build_rule_execution_coverage_matrix
 from rules.rollforward_runner import ROLLFORWARD_RULE_IDS, run_rollforward_rules
 from rules.runner import FA_LIST_RULE_IDS, run_fa_list_rules
 
@@ -575,6 +576,20 @@ def run_workbook_qc(
 
     execution_ledger = recorder.to_ledger()
     validate_execution_ledger(execution_ledger, issues)
+    rule_execution_summary = None
+    rule_execution_matrix = None
+    governance_diagnostics_error = None
+    try:
+        governance = build_rule_execution_coverage_matrix(
+            execution_ledger,
+            workbook_context=ctx,
+            llm_enabled=bool(config.enabled),
+            delivery_context=delivery_context,
+        )
+        rule_execution_summary = governance.get("summary")
+        rule_execution_matrix = governance.get("rules")
+    except Exception as exc:  # pragma: no cover - defensive fallback for report stability
+        governance_diagnostics_error = str(exc)
 
     report = build_report(
         source_file=ctx.source_file,
@@ -588,6 +603,9 @@ def run_workbook_qc(
         rollforward_sheet_section=rollforward_sheet_section,
         addition_sheet_section=addition_sheet_section,
         execution_ledger=execution_ledger,
+        rule_execution_summary=rule_execution_summary,
+        rule_execution_matrix=rule_execution_matrix,
+        governance_diagnostics_error=governance_diagnostics_error,
         ingest_review_section=(
             {
                 "description": "读取结果复核提示（LLM 辅助，不等同于业务规则 finding）。",

@@ -1600,7 +1600,7 @@ def _ledger_row(item: dict) -> dict:
         "关键检查摘要": _display_observation_checks(item),
         "规则输出记录数": finding_count_int,
         "finding 数": finding_count_int,
-        "HOW 状态": _display_how_status(item),
+        "取数与判断说明": _display_how_status(item),
         "_item": item,
         "_status": status,
         "_finding_count": finding_count_int,
@@ -1753,7 +1753,7 @@ def _render_execution_ledger_table(data: dict) -> None:
         return
     rows = sorted((_ledger_row(item) for item in items), key=_ledger_sort_key)
     grouped = _group_ledger_rows(rows)
-    visible_columns = ["质检点", "执行状态", "finding 数", "HOW 状态"]
+    visible_columns = ["质检点", "执行状态", "finding 数", "取数与判断说明"]
     for program, group_rows in grouped.items():
         executed = sum(1 for row in group_rows if row["_status"] == "EXECUTED")
         data_insufficient = sum(1 for row in group_rows if row["_status"] == "DATA_INSUFFICIENT")
@@ -1773,11 +1773,171 @@ def _render_execution_ledger_table(data: dict) -> None:
             )
             for row in group_rows:
                 title = (
-                    f"HOW 明细 · {row.get('质检点') or ''} · "
+                    f"取数与判断说明 · {row.get('质检点') or ''} · "
                     f"{row.get('执行状态') or ''} · finding {row.get('finding 数') or 0}"
                 )
                 with st.expander(title, expanded=False):
                     _render_how_details(row)
+
+def _rule_execution_matrix(data: dict) -> list[dict]:
+    matrix = data.get("rule_execution_matrix")
+    return matrix if isinstance(matrix, list) else []
+
+
+def _rule_execution_summary(data: dict) -> dict:
+    summary = data.get("rule_execution_summary")
+    return summary if isinstance(summary, dict) else {}
+
+
+def _audit_text(value: object, fallback: str = "—") -> str:
+    text = str(value or "").strip()
+    return text if text else fallback
+
+
+def _audit_count(value: object) -> str:
+    if value is None:
+        return "—"
+    try:
+        return str(int(value))
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _audit_detail_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item or "").strip()]
+
+
+def _audit_values_read(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    rows: list[dict] = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            continue
+        rows.append(
+            {
+                "标签": _audit_text(raw.get("label")),
+                "读取值": _audit_text(raw.get("value")),
+                "行": _audit_text(raw.get("row")),
+                "列": _audit_text(raw.get("column")),
+                "单元格": _audit_text(raw.get("cell")),
+                "单位": _audit_text(raw.get("unit")),
+                "金额类型": _audit_text(raw.get("amount_type")),
+            }
+        )
+    return rows
+
+
+def _audit_matrix_row(row: dict) -> dict:
+    return {
+        "程序": _audit_text(row.get("module")),
+        "规则编号": _audit_text(row.get("rule_code") or row.get("rule_id")),
+        "规则名称": _audit_text(row.get("rule_name")),
+        "执行状态": _audit_text(row.get("execution_status_label")),
+        "未执行原因": _audit_text(row.get("non_execution_reason")),
+        "异常数量": _audit_count(row.get("finding_count")),
+        "取数来源摘要": _audit_text(row.get("source_summary")),
+        "取数与判断说明": _audit_text(row.get("trace_label")),
+        "_row": row,
+    }
+
+
+def _audit_matrix_sort_key(row: dict) -> tuple[int, str, str]:
+    program = str(row.get("程序") or "")
+    program_index = (
+        _PROCEDURE_ORDER.index(program)
+        if program in _PROCEDURE_ORDER
+        else len(_PROCEDURE_ORDER)
+    )
+    return program_index, str(row.get("规则编号") or ""), str(row.get("规则名称") or "")
+
+
+def _render_audit_detail(label: str, value: object) -> None:
+    st.markdown(f"**{label}**")
+    values = _audit_detail_list(value)
+    if values:
+        for item in values:
+            st.write(item)
+        return
+    st.write(_audit_text(value))
+
+
+def _render_trace_detail(row: dict) -> None:
+    source = row.get("_row") if isinstance(row.get("_row"), dict) else {}
+    detail = source.get("trace_detail")
+    if not isinstance(detail, dict):
+        detail = {}
+    _render_audit_detail("检查资料", detail.get("checked_materials"))
+    _render_audit_detail("取数位置", detail.get("source_locations"))
+    values_read = _audit_values_read(detail.get("values_read"))
+    st.markdown("**读取内容**")
+    if values_read:
+        st.dataframe(values_read, use_container_width=True, hide_index=True)
+    else:
+        st.write("—")
+    _render_audit_detail("检查方法", detail.get("check_method"))
+    _render_audit_detail("判断标准", detail.get("expected_result"))
+    _render_audit_detail("本次检查结果", detail.get("actual_result"))
+    _render_audit_detail("缺失资料", detail.get("missing_data"))
+    _render_audit_detail("说明", detail.get("notes"))
+
+
+def _render_execution_ledger_table(data: dict) -> None:
+    matrix = _rule_execution_matrix(data)
+    summary = _rule_execution_summary(data)
+    _render_section_title("质检点执行台账", "展示规则是否执行、取数来源和本次判断过程。")
+    st.markdown(
+        '<div class="qc-ledger-note">执行状态仅表示系统本次是否运行该规则；未执行不代表通过，异常结论仍以 Findings 明细为准。</div>',
+        unsafe_allow_html=True,
+    )
+    if not matrix:
+        st.info("本次报告未包含规则执行矩阵，无法展示质检点执行台账。")
+        return
+    rows = sorted((_audit_matrix_row(row) for row in matrix), key=_audit_matrix_sort_key)
+    visible_columns = [
+        "程序",
+        "规则编号",
+        "规则名称",
+        "执行状态",
+        "未执行原因",
+        "异常数量",
+        "取数来源摘要",
+        "取数与判断说明",
+    ]
+    status_counts = summary.get("execution_status_counts") or {}
+    st.caption(
+        "全部规则 {total}；已执行 {executed}；资料不足 {insufficient}；本次不适用 {na}；未进入执行 {not_triggered}".format(
+            total=summary.get("matrix_rule_count", len(rows)),
+            executed=status_counts.get("EXECUTED", 0),
+            insufficient=status_counts.get("DATA_INSUFFICIENT", 0),
+            na=status_counts.get("NOT_APPLICABLE", 0),
+            not_triggered=status_counts.get("NOT_TRIGGERED_BY_CONTEXT", 0),
+        )
+    )
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.get("程序") or "其他"), []).append(row)
+    for program, group_rows in grouped.items():
+        expanded = any(row.get("异常数量") not in {"—", "0"} for row in group_rows)
+        with st.expander(f"{program} · 规则 {len(group_rows)}", expanded=expanded):
+            st.dataframe(
+                [
+                    {column: row.get(column, "") for column in visible_columns}
+                    for row in group_rows
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            for row in group_rows:
+                title = (
+                    f"取数与判断说明 · {row.get('规则编号') or ''} · "
+                    f"{row.get('执行状态') or ''} · 异常 {row.get('异常数量') or '—'}"
+                )
+                with st.expander(title, expanded=False):
+                    _render_trace_detail(row)
+
 
 @st.cache_data(show_spinner=False)
 def _run_qc_cached(

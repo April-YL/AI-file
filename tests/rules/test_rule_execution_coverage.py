@@ -79,6 +79,68 @@ def test_matrix_classifies_ledger_rows_and_missing_how():
     }
 
 
+def test_matrix_rows_include_audit_readable_fields_and_dynamic_summary():
+    ledger = {
+        "items": [
+            {
+                "rule_id": "fa_list_required_fields",
+                "status": "EXECUTED",
+                "finding_count": 1,
+                "observation": {
+                    "checked_data": [
+                        {
+                            "sheet": "FA list",
+                            "section": "资产清单",
+                            "location": "A1:D20",
+                            "values_read": [
+                                {
+                                    "label": "资产编号",
+                                    "value": "FA-TEST-001",
+                                    "cell": "A2",
+                                }
+                            ],
+                        }
+                    ],
+                    "check_logic": "检查资产编号是否为空。",
+                    "expected_result": "资产编号应完整。",
+                    "actual_result": "发现 1 条为空。",
+                    "result_summary": "触发 finding。",
+                },
+            },
+            {
+                "rule_id": "unique_asset_id",
+                "status": "DATA_INSUFFICIENT",
+                "finding_count": 0,
+                "status_note": "缺少 FA list。",
+            },
+        ]
+    }
+
+    matrix = build_rule_execution_coverage_matrix(
+        ledger,
+        runner_rule_ids=["fa_list_required_fields", "unique_asset_id"],
+    )
+    rows = {row["rule_id"]: row for row in matrix["rules"]}
+    row = rows["fa_list_required_fields"]
+
+    assert row["rule_code"]
+    assert row["execution_status_label"] == "已执行"
+    assert row["finding_count"] == 1
+    assert row["source_summary"] == "FA list / 资产清单"
+    assert row["trace_label"] == "可查看取数与判断说明"
+    assert row["trace_detail"]["checked_materials"] == ["FA list / 资产清单"]
+    assert row["trace_detail"]["source_locations"] == ["FA list!A1:D20"]
+    assert row["trace_detail"]["values_read"][0]["cell"] == "A2"
+    assert rows["unique_asset_id"]["execution_status_label"] == "资料不足，未能完整执行"
+    assert rows["unique_asset_id"]["non_execution_reason"] == "缺少 FA list。"
+
+    actual_counts = {}
+    for matrix_row in matrix["rules"]:
+        status = matrix_row["execution_status"]
+        actual_counts[status] = actual_counts.get(status, 0) + 1
+    assert matrix["summary"]["execution_status_counts"] == actual_counts
+
+
 def test_matrix_explains_llm_disabled_delivery_missing_not_wired_and_unknown():
     ctx = SimpleNamespace(fa_list=object())
 

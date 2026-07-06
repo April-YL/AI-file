@@ -87,6 +87,9 @@ class QcReport:
     ingest_review_section: dict[str, Any] | None = None
     runtime_timings: dict[str, Any] = field(default_factory=dict)
     execution_ledger: dict[str, Any] | None = None
+    rule_execution_summary: dict[str, Any] | None = None
+    rule_execution_matrix: list[dict[str, Any]] | None = None
+    governance_diagnostics_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -117,6 +120,12 @@ class QcReport:
             ]
         if self.execution_ledger is not None:
             data["execution_ledger"] = self.execution_ledger
+        if self.rule_execution_summary is not None:
+            data["rule_execution_summary"] = self.rule_execution_summary
+        if self.rule_execution_matrix is not None:
+            data["rule_execution_matrix"] = self.rule_execution_matrix
+        if self.governance_diagnostics_error:
+            data["governance_diagnostics_error"] = self.governance_diagnostics_error
         if self.runtime_timings:
             data["runtime_timings"] = self.runtime_timings
         return data
@@ -136,6 +145,9 @@ def build_report(
     addition_sheet_section: dict[str, Any] | None = None,
     ingest_review_section: dict[str, Any] | None = None,
     execution_ledger: dict[str, Any] | None = None,
+    rule_execution_summary: dict[str, Any] | None = None,
+    rule_execution_matrix: list[dict[str, Any]] | None = None,
+    governance_diagnostics_error: str | None = None,
 ) -> QcReport:
     issues_by_asset: dict[str, list[QcIssue]] = {}
     sheet_level: list[QcIssue] = []
@@ -213,4 +225,7 @@ def build_report(
         addition_sheet_section=addition_sheet_section,
         ingest_review_section=ingest_review_section,
         execution_ledger=execution_ledger,
+        rule_execution_summary=rule_execution_summary,
+        rule_execution_matrix=rule_execution_matrix,
+        governance_diagnostics_error=governance_diagnostics_error,
     )

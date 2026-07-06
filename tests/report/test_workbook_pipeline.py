@@ -56,6 +56,7 @@ def workbook_demo(tmp_path: Path) -> Path:
 
 def test_workbook_qc_includes_psp_and_fa_list(workbook_demo: Path):
     report = run_workbook_qc_from_path(str(workbook_demo), llm=False)
+    issue_count = len(report.issues)
     rule_ids = {i.rule_id for i in report.issues}
     assert "psp_completion" in rule_ids or any(
         i.dict_rule_code == "AE-003" for i in report.issues
@@ -64,6 +65,23 @@ def test_workbook_qc_includes_psp_and_fa_list(workbook_demo: Path):
     assert report.procedure_code == "WORKBOOK"
     severities = {i.severity for i in report.issues}
     assert Severity.FAIL in severities
+    data = report.to_dict()
+    assert "rule_execution_summary" in data
+    assert "rule_execution_matrix" in data
+    assert len(report.issues) == issue_count
+    assert data["rule_execution_matrix"]
+    row = data["rule_execution_matrix"][0]
+    assert {
+        "execution_status_label",
+        "source_summary",
+        "trace_label",
+        "trace_detail",
+    }.issubset(row)
+    counts = {}
+    for matrix_row in data["rule_execution_matrix"]:
+        status = matrix_row["execution_status"]
+        counts[status] = counts.get(status, 0) + 1
+    assert data["rule_execution_summary"]["execution_status_counts"] == counts
 
 
 def test_workbook_qc_delivery_stage_selects_first_rule(workbook_demo: Path):

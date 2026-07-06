@@ -55,6 +55,24 @@ _LEAD_ONLY_RULE_IDS = set(LEAD_RULE_IDS) | {
     "lead_adjustment_semantic",
 }
 
+_EXECUTION_STATUS_LABELS = {
+    EXECUTION_EXECUTED: "已执行",
+    EXECUTION_DATA_INSUFFICIENT: "资料不足，未能完整执行",
+    EXECUTION_NOT_APPLICABLE: "本次不适用",
+    EXECUTION_NOT_TRIGGERED_BY_CONTEXT: "未识别到对应底稿，未进入执行",
+    EXECUTION_LLM_DISABLED: "LLM 未开启，语义复核未执行",
+    EXECUTION_DELIVERY_CONTEXT_MISSING: "未传入交付阶段信息，交付检查未执行",
+    EXECUTION_NOT_WIRED: "规则已登记但未接入执行",
+    EXECUTION_UNKNOWN: "原因待确认",
+}
+
+_TRACE_LABELS = {
+    HOW_EVIDENCE_LEVEL: "可查看取数与判断说明",
+    HOW_LEGACY: "可查看基础执行说明",
+    HOW_MISSING: "暂无取数与判断说明",
+    HOW_NOT_APPLICABLE: "不适用",
+}
+
 
 def build_rule_execution_coverage_matrix(
     execution_ledger: dict[str, Any] | None,
@@ -172,17 +190,202 @@ def _build_matrix_row(
         )
         how_status = HOW_NOT_APPLICABLE
 
+    observation = ledger_item.get("observation") if ledger_item else None
+    finding_count = _finding_count(ledger_item)
     return {
         "rule_id": rule_id,
+        "rule_code": spec.dict_code if spec else rule_id,
         "rule_name": spec.rule_name if spec else None,
         "module": _classify_module(rule_id, spec),
         "matrix_category": matrix_category,
         "execution_status": execution_status,
+        "execution_status_label": _execution_status_label(execution_status),
         "non_execution_reason": reason,
+        "finding_count": finding_count,
         "how_status": how_status,
+        "source_summary": _source_summary(observation),
+        "trace_label": _trace_label(how_status),
+        "trace_detail": _trace_detail(observation, note=reason),
         "evidence_basis": basis,
         "next_action": _next_action(execution_status, how_status),
     }
+
+
+def _execution_status_label(status: str) -> str:
+    return _EXECUTION_STATUS_LABELS.get(status, _EXECUTION_STATUS_LABELS[EXECUTION_UNKNOWN])
+
+
+def _trace_label(how_status: str) -> str:
+    return _TRACE_LABELS.get(how_status, "暂无取数与判断说明")
+
+
+def _finding_count(item: dict[str, Any] | None) -> int | None:
+    if item is None:
+        return None
+    try:
+        return int(item.get("finding_count") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _trace_detail(observation: Any, *, note: str | None = None) -> dict[str, Any]:
+    if not isinstance(observation, dict):
+        return {
+            "checked_materials": [],
+            "source_locations": [],
+            "values_read": [],
+            "check_method": "",
+            "expected_result": "",
+            "actual_result": "",
+            "missing_data": [],
+            "notes": note or "",
+        }
+    if _is_evidence_observation(observation):
+        checked_data = observation.get("checked_data") or []
+        materials: list[str] = []
+        locations: list[str] = []
+        values_read: list[dict[str, Any]] = []
+        missing: list[str] = []
+        if isinstance(checked_data, list):
+            for raw in checked_data:
+                if not isinstance(raw, dict):
+                    continue
+                material = _join_non_empty(raw.get("sheet"), raw.get("section"), sep=" / ")
+                if material:
+                    materials.append(material)
+                location = _join_non_empty(raw.get("sheet"), raw.get("location"), sep="!")
+                if location:
+                    locations.append(location)
+                raw_missing = raw.get("missing_data") or []
+                if isinstance(raw_missing, list):
+                    missing.extend(str(v) for v in raw_missing if str(v).strip())
+                raw_values = raw.get("values_read") or []
+                if isinstance(raw_values, list):
+                    for value in raw_values:
+                        if isinstance(value, dict):
+                            values_read.append(
+                                {
+                                    "label": value.get("label") or "",
+                                    "value": value.get("value") or "",
+                                    "row": value.get("row") or "",
+                                    "column": value.get("column") or "",
+                                    "cell": value.get("cell") or "",
+                                    "unit": value.get("unit") or "",
+                                    "amount_type": value.get("amount_type") or "",
+                                }
+                            )
+        return {
+            "checked_materials": _dedupe_text(materials),
+            "source_locations": _dedupe_text(locations),
+            "values_read": values_read,
+            "check_method": observation.get("check_logic") or "",
+            "expected_result": observation.get("expected_result") or "",
+            "actual_result": observation.get("actual_result")
+            or observation.get("result_summary")
+            or "",
+            "missing_data": _dedupe_text(missing),
+            "notes": note or observation.get("notes") or "",
+        }
+    return {
+        "checked_materials": _legacy_inputs(observation),
+        "source_locations": _legacy_locations(observation),
+        "values_read": [],
+        "check_method": _legacy_check_method(observation),
+        "expected_result": "",
+        "actual_result": "",
+        "missing_data": [],
+        "notes": note or str(observation.get("notes") or ""),
+    }
+
+
+def _source_summary(observation: Any) -> str:
+    detail = _trace_detail(observation)
+    materials = detail.get("checked_materials") or []
+    locations = detail.get("source_locations") or []
+    if materials:
+        return "；".join(str(v) for v in materials[:3])
+    if locations:
+        return "；".join(str(v) for v in locations[:3])
+    return "—"
+
+
+def _is_evidence_observation(observation: dict[str, Any]) -> bool:
+    return {
+        "checked_data",
+        "check_logic",
+        "expected_result",
+        "actual_result",
+        "result_summary",
+    }.issubset(set(observation))
+
+
+def _legacy_inputs(observation: dict[str, Any]) -> list[str]:
+    inputs = observation.get("inputs") or []
+    if not isinstance(inputs, list):
+        return []
+    result: list[str] = []
+    for raw in inputs:
+        if not isinstance(raw, dict):
+            continue
+        result.append(
+            _join_non_empty(
+                raw.get("source_sheet"),
+                raw.get("section"),
+                raw.get("field"),
+                sep=" / ",
+            )
+        )
+    return _dedupe_text(result)
+
+
+def _legacy_locations(observation: dict[str, Any]) -> list[str]:
+    inputs = observation.get("inputs") or []
+    if not isinstance(inputs, list):
+        return []
+    result: list[str] = []
+    for raw in inputs:
+        if not isinstance(raw, dict):
+            continue
+        row = raw.get("row")
+        column = raw.get("column")
+        cell_range = raw.get("range")
+        result.append(
+            _join_non_empty(
+                raw.get("source_sheet"),
+                f"row {row}" if row else "",
+                f"col {column}" if column else "",
+                cell_range,
+                sep=" / ",
+            )
+        )
+    return _dedupe_text(result)
+
+
+def _legacy_check_method(observation: dict[str, Any]) -> str:
+    checks = observation.get("checks") or []
+    if not isinstance(checks, list):
+        return ""
+    parts: list[str] = []
+    for raw in checks:
+        if isinstance(raw, dict):
+            parts.append(_join_non_empty(raw.get("name"), raw.get("operator"), raw.get("result"), sep=" "))
+    return "；".join(_dedupe_text(parts))
+
+
+def _join_non_empty(*values: Any, sep: str) -> str:
+    return sep.join(str(value).strip() for value in values if str(value or "").strip())
+
+
+def _dedupe_text(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
 
 
 def _classify_matrix_category(rule_id: str, implemented_ids: set[str]) -> str:
