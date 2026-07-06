@@ -21,6 +21,7 @@ from rules.runner import FA_LIST_RULE_IDS
 
 EXECUTION_EXECUTED = "EXECUTED"
 EXECUTION_DATA_INSUFFICIENT = "DATA_INSUFFICIENT"
+EXECUTION_NOT_APPLICABLE = "NOT_APPLICABLE"
 EXECUTION_NOT_TRIGGERED_BY_CONTEXT = "NOT_TRIGGERED_BY_CONTEXT"
 EXECUTION_LLM_DISABLED = "LLM_DISABLED"
 EXECUTION_DELIVERY_CONTEXT_MISSING = "DELIVERY_CONTEXT_MISSING"
@@ -83,6 +84,7 @@ def build_rule_execution_coverage_matrix(
         if item.get("rule_id") is not None
     }
     row_rule_ids = _dedupe((*implemented_ids, *runner_ids, *item_by_rule_id.keys()))
+    non_registry_ids = [rule_id for rule_id in row_rule_ids if rule_id not in implemented_ids]
     rows = [
         _build_matrix_row(
             rule_id,
@@ -96,20 +98,27 @@ def build_rule_execution_coverage_matrix(
     ]
     status_counts = Counter(row["execution_status"] for row in rows)
     how_counts = Counter(row["how_status"] for row in rows)
-    executed_rows = [
-        row
-        for row in rows
-        if row["execution_status"] in {EXECUTION_EXECUTED, EXECUTION_DATA_INSUFFICIENT}
-    ]
+    ledger_rows = [row for row in rows if row["rule_id"] in item_by_rule_id]
+    ledger_status_counts = Counter(row["execution_status"] for row in ledger_rows)
+    ledger_how_counts = Counter(row["how_status"] for row in ledger_rows)
     return {
         "summary": {
             "registry_implemented_rule_count": len(implemented_ids),
             "matrix_rule_count": len(rows),
+            "non_registry_rule_count": len(non_registry_ids),
+            "non_registry_rule_ids": sorted(non_registry_ids),
+            "ledger_recorded_rule_count": len(item_by_rule_id),
             "executed_or_recorded_rule_count": len(item_by_rule_id),
             "execution_status_counts": dict(status_counts),
+            "ledger_status_counts": dict(ledger_status_counts),
             "how_status_counts": dict(how_counts),
-            "executed_legacy_count": sum(1 for row in executed_rows if row["how_status"] == HOW_LEGACY),
-            "executed_missing_how_count": sum(1 for row in executed_rows if row["how_status"] == HOW_MISSING),
+            "ledger_how_status_counts": dict(ledger_how_counts),
+            "ledger_legacy_count": sum(1 for row in ledger_rows if row["how_status"] == HOW_LEGACY),
+            "ledger_missing_how_count": sum(1 for row in ledger_rows if row["how_status"] == HOW_MISSING),
+            # Backward-compatible names from v0. They mean ledger-recorded rules,
+            # not only EXECUTED rules.
+            "executed_legacy_count": sum(1 for row in ledger_rows if row["how_status"] == HOW_LEGACY),
+            "executed_missing_how_count": sum(1 for row in ledger_rows if row["how_status"] == HOW_MISSING),
         },
         "rules": rows,
     }
@@ -160,7 +169,7 @@ def _status_from_ledger(item: dict[str, Any]) -> tuple[str, str | None, str]:
         return EXECUTION_DATA_INSUFFICIENT, note or "ledger records data insufficient", "execution ledger status_note"
     if status == _LEDGER_NOT_APPLICABLE:
         return (
-            EXECUTION_NOT_TRIGGERED_BY_CONTEXT,
+            EXECUTION_NOT_APPLICABLE,
             note or "ledger records not applicable for this run",
             "execution ledger records NOT_APPLICABLE",
         )
@@ -263,7 +272,11 @@ def _how_status_for_ledger(item: dict[str, Any]) -> str:
 def _next_action(execution_status: str, how_status: str) -> str:
     if execution_status == EXECUTION_EXECUTED and how_status == HOW_EVIDENCE_LEVEL:
         return "DONE"
-    if execution_status in {EXECUTION_EXECUTED, EXECUTION_DATA_INSUFFICIENT} and how_status != HOW_EVIDENCE_LEVEL:
+    if execution_status in {
+        EXECUTION_EXECUTED,
+        EXECUTION_DATA_INSUFFICIENT,
+        EXECUTION_NOT_APPLICABLE,
+    } and how_status != HOW_EVIDENCE_LEVEL:
         return "NEED_HOW"
     if execution_status == EXECUTION_NOT_WIRED:
         return "CHECK_RUNNER_WIRING"

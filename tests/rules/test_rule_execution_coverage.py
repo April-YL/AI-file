@@ -11,6 +11,7 @@ from rules.rule_execution_coverage import (
     EXECUTION_DELIVERY_CONTEXT_MISSING,
     EXECUTION_EXECUTED,
     EXECUTION_LLM_DISABLED,
+    EXECUTION_NOT_APPLICABLE,
     EXECUTION_NOT_TRIGGERED_BY_CONTEXT,
     EXECUTION_NOT_WIRED,
     EXECUTION_UNKNOWN,
@@ -47,12 +48,23 @@ def test_matrix_classifies_ledger_rows_and_missing_how():
                 "status": "EXECUTED",
                 "finding_count": 0,
             },
+            {
+                "rule_id": "asset_value_consistency",
+                "status": "NOT_APPLICABLE",
+                "finding_count": 0,
+                "status_note": "not applicable in this test",
+                "observation": _evidence_observation(),
+            },
         ]
     }
 
     matrix = build_rule_execution_coverage_matrix(
         ledger,
-        runner_rule_ids=["fa_list_required_fields", "unique_asset_id"],
+        runner_rule_ids=[
+            "fa_list_required_fields",
+            "unique_asset_id",
+            "asset_value_consistency",
+        ],
     )
     rows = {row["rule_id"]: row for row in matrix["rules"]}
 
@@ -60,6 +72,11 @@ def test_matrix_classifies_ledger_rows_and_missing_how():
     assert rows["fa_list_required_fields"]["how_status"] == HOW_EVIDENCE_LEVEL
     assert rows["unique_asset_id"]["execution_status"] == EXECUTION_EXECUTED
     assert rows["unique_asset_id"]["how_status"] == HOW_MISSING
+    assert rows["asset_value_consistency"]["execution_status"] == EXECUTION_NOT_APPLICABLE
+    assert matrix["summary"]["ledger_status_counts"] == {
+        "EXECUTED": 2,
+        "NOT_APPLICABLE": 1,
+    }
 
 
 def test_matrix_explains_llm_disabled_delivery_missing_not_wired_and_unknown():
@@ -139,8 +156,22 @@ def test_current_fixture_matrix_contains_all_implemented_rules_and_no_executed_h
     implemented_ids = {spec.rule_id for spec in iter_implemented()}
 
     assert implemented_ids.issubset(rows)
-    assert matrix["summary"]["executed_legacy_count"] == 0
-    assert matrix["summary"]["executed_missing_how_count"] == 0
+    assert matrix["summary"]["non_registry_rule_ids"] == [
+        "final_delivery_standard",
+        "first_delivery_standard",
+        "lead_ingest_readability",
+    ]
+    assert matrix["summary"]["ledger_recorded_rule_count"] == 62
+    assert matrix["summary"]["ledger_status_counts"] == {
+        "EXECUTED": 13,
+        "DATA_INSUFFICIENT": 41,
+        "NOT_APPLICABLE": 8,
+    }
+    assert matrix["summary"]["ledger_how_status_counts"] == {
+        "EVIDENCE_LEVEL": 62,
+    }
+    assert matrix["summary"]["ledger_legacy_count"] == 0
+    assert matrix["summary"]["ledger_missing_how_count"] == 0
     assert rows["rollforward_exists"]["execution_status"] == EXECUTION_NOT_TRIGGERED_BY_CONTEXT
     assert rows["addition_semantic_review"]["execution_status"] == EXECUTION_LLM_DISABLED
     assert rows["first_delivery_standard"]["execution_status"] == EXECUTION_DELIVERY_CONTEXT_MISSING
