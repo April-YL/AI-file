@@ -223,10 +223,28 @@ def test_execution_observation_rejects_nested_arbitrary_input_fields():
         recorder.record_executed("bad_observation", 0, observation=obs)
 
 
-def test_execution_observation_rejects_free_form_long_notes():
+def test_execution_observation_truncates_free_form_long_notes():
     recorder = RuleExecutionRecorder()
     obs = _observation()
     obs["notes"] = ["x" * 121]
 
-    with pytest.raises(ValueError, match="note is too long"):
-        recorder.record_executed("bad_observation", 0, observation=obs)
+    recorder.record_executed("observed_rule", 0, observation=obs)
+
+    note = recorder.to_ledger()["items"][0]["observation"]["notes"][0]
+    assert len(note) == 120
+    assert note.endswith("...[truncated]")
+
+
+def test_execution_evidence_observation_truncates_long_values_read_value():
+    recorder = RuleExecutionRecorder()
+    obs = _evidence_observation()
+    obs["checked_data"][0]["values_read"][0]["value"] = "long-value-" + ("x" * 200)
+
+    recorder.record_executed("observed_rule", 0, observation=obs)
+
+    value = (
+        recorder.to_ledger()["items"][0]["observation"]["checked_data"][0]["values_read"][0]["value"]
+    )
+    assert len(value) == 120
+    assert value.startswith("long-value-")
+    assert value.endswith("...[truncated]")

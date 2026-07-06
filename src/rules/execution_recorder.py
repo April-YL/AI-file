@@ -89,6 +89,7 @@ _MAX_MISSING_DATA = 12
 _MAX_IDENTIFIED_TERMS = 12
 _MAX_TEXT_LEN = 120
 _MAX_HOW_TEXT_LEN = 500
+_TRUNCATION_SUFFIX = "...[truncated]"
 
 
 @dataclass
@@ -429,10 +430,7 @@ def _validate_check(item: Any) -> dict[str, str | None]:
 def _validate_note(item: Any) -> str:
     if not isinstance(item, str):
         raise ValueError("execution observation note must be text")
-    text = item.strip()
-    if len(text) > _MAX_TEXT_LEN:
-        raise ValueError("execution observation note is too long")
-    return text
+    return _bounded_text(item, _MAX_TEXT_LEN)
 
 
 def _validate_short_text_or_none(value: Any, field: str) -> str | None:
@@ -440,10 +438,7 @@ def _validate_short_text_or_none(value: Any, field: str) -> str | None:
         return None
     if not isinstance(value, str):
         value = str(value)
-    text = value.strip()
-    if len(text) > _MAX_TEXT_LEN:
-        raise ValueError(f"execution observation {field} is too long")
-    return text
+    return _bounded_text(value, _MAX_TEXT_LEN)
 
 
 def _validate_how_text_or_none(value: Any, field: str) -> str | None:
@@ -452,9 +447,16 @@ def _validate_how_text_or_none(value: Any, field: str) -> str | None:
     if not isinstance(value, str):
         value = str(value)
     text = value.strip()
-    if len(text) > _MAX_HOW_TEXT_LEN:
-        raise ValueError(f"execution observation {field} is too long")
-    return text
+    return _bounded_text(value, _MAX_HOW_TEXT_LEN)
+
+
+def _bounded_text(value: Any, max_len: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= max_len:
+        return text
+    if max_len <= len(_TRUNCATION_SUFFIX):
+        return text[:max_len]
+    return text[: max_len - len(_TRUNCATION_SUFFIX)].rstrip() + _TRUNCATION_SUFFIX
 
 
 def _validate_int_or_none(value: Any, field: str) -> int | None:
