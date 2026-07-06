@@ -1076,3 +1076,35 @@ Remaining known issues:
 1. K.01 table4 notes classification / extraction known issue.
 2. K.01 table3 material difference with note pass/fail rule-position known issue.
 3. Packaging demo files are still not governed or committed: `fixed_asset_qc_agent.spec` and `scripts/package_launcher.py`.
+
+## 2026-07-06 Rule Execution Matrix category clarification
+
+The Rule Execution Matrix is a governance diagnostic table. It explains where each observable check went in the current run. It is not an audit conclusion table and does not mean every rule has been executed in every workbook.
+
+Current matrix categories:
+
+- `implemented_rules`: 82 rules from `registry.py` with implementation status `implemented`.
+- `delivery_checks`: 2 delivery-stage checks, `first_delivery_standard` and `final_delivery_standard`.
+- `runtime_guardrails`: 1 runtime protection check, `lead_ingest_readability`.
+
+Delivery checks are important delivery-stage checks. They are separated because they run only when a delivery stage is supplied. They should not be described as low-value or incidental non-registry observations.
+
+Runtime guardrails are protection checks, not normal business QC rules. `lead_ingest_readability` exists to stop or explain downstream Lead checks when the Lead sheet is not reliable enough for deterministic rules.
+
+Current guardrail scope:
+
+- Lead currently has an explicit readability guardrail: `lead_ingest_readability`.
+- Other modules have some local readability or precondition checks, but not a unified module-level `ingest_readability` guardrail.
+
+Backlog, not implemented in this round:
+
+1. FA list ingest_readability guardrail.
+2. PSP / Summary ingest_readability guardrail.
+3. K.01 rollforward ingest_readability guardrail.
+4. K.02.1 addition ingest_readability guardrail.
+5. K.02.2 disposal ingest_readability guardrail.
+6. K.03 depreciation / policy ingest_readability guardrail.
+
+Boundary:
+
+- This clarification does not change rule conclusions, finding counts, severity, registry rule status, UI, LLM behavior, or execution_ledger structure.

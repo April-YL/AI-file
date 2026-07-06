@@ -156,11 +156,21 @@ def test_current_fixture_matrix_contains_all_implemented_rules_and_no_executed_h
     implemented_ids = {spec.rule_id for spec in iter_implemented()}
 
     assert implemented_ids.issubset(rows)
-    assert matrix["summary"]["non_registry_rule_ids"] == [
+    assert matrix["summary"]["matrix_category_counts"] == {
+        "implemented_rules": 82,
+        "delivery_checks": 2,
+        "runtime_guardrails": 1,
+    }
+    assert matrix["summary"]["implemented_rule_count"] == 82
+    assert matrix["summary"]["delivery_check_ids"] == [
         "final_delivery_standard",
         "first_delivery_standard",
-        "lead_ingest_readability",
     ]
+    assert matrix["summary"]["runtime_guardrail_ids"] == ["lead_ingest_readability"]
+    assert rows["first_delivery_standard"]["matrix_category"] == "delivery_checks"
+    assert rows["final_delivery_standard"]["matrix_category"] == "delivery_checks"
+    assert rows["lead_ingest_readability"]["matrix_category"] == "runtime_guardrails"
+    assert rows["fa_list_required_fields"]["matrix_category"] == "implemented_rules"
     assert matrix["summary"]["ledger_recorded_rule_count"] == 62
     assert matrix["summary"]["ledger_status_counts"] == {
         "EXECUTED": 13,

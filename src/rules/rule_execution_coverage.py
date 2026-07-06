@@ -46,6 +46,7 @@ _LLM_RULE_IDS = {
 }
 
 _DELIVERY_RULE_IDS = {"first_delivery_standard", "final_delivery_standard"}
+_RUNTIME_GUARDRAIL_RULE_IDS = {"lead_ingest_readability"}
 
 _LEAD_ONLY_RULE_IDS = set(LEAD_RULE_IDS) | {
     "lead_expectation_semantic",
@@ -84,11 +85,15 @@ def build_rule_execution_coverage_matrix(
         if item.get("rule_id") is not None
     }
     row_rule_ids = _dedupe((*implemented_ids, *runner_ids, *item_by_rule_id.keys()))
-    non_registry_ids = [rule_id for rule_id in row_rule_ids if rule_id not in implemented_ids]
+    category_by_rule_id = {
+        rule_id: _classify_matrix_category(rule_id, implemented_ids)
+        for rule_id in row_rule_ids
+    }
     rows = [
         _build_matrix_row(
             rule_id,
             item_by_rule_id.get(rule_id),
+            matrix_category=category_by_rule_id[rule_id],
             runner_ids=runner_ids,
             workbook_context=workbook_context,
             llm_enabled=llm_enabled,
@@ -105,8 +110,26 @@ def build_rule_execution_coverage_matrix(
         "summary": {
             "registry_implemented_rule_count": len(implemented_ids),
             "matrix_rule_count": len(rows),
-            "non_registry_rule_count": len(non_registry_ids),
-            "non_registry_rule_ids": sorted(non_registry_ids),
+            "matrix_category_counts": dict(Counter(category_by_rule_id.values())),
+            "implemented_rule_count": sum(
+                1 for category in category_by_rule_id.values() if category == "implemented_rules"
+            ),
+            "delivery_check_count": sum(
+                1 for category in category_by_rule_id.values() if category == "delivery_checks"
+            ),
+            "delivery_check_ids": sorted(
+                rule_id
+                for rule_id, category in category_by_rule_id.items()
+                if category == "delivery_checks"
+            ),
+            "runtime_guardrail_count": sum(
+                1 for category in category_by_rule_id.values() if category == "runtime_guardrails"
+            ),
+            "runtime_guardrail_ids": sorted(
+                rule_id
+                for rule_id, category in category_by_rule_id.items()
+                if category == "runtime_guardrails"
+            ),
             "ledger_recorded_rule_count": len(item_by_rule_id),
             "executed_or_recorded_rule_count": len(item_by_rule_id),
             "execution_status_counts": dict(status_counts),
@@ -128,6 +151,7 @@ def _build_matrix_row(
     rule_id: str,
     ledger_item: dict[str, Any] | None,
     *,
+    matrix_category: str,
     runner_ids: set[str],
     workbook_context: Any | None,
     llm_enabled: bool,
@@ -152,12 +176,23 @@ def _build_matrix_row(
         "rule_id": rule_id,
         "rule_name": spec.rule_name if spec else None,
         "module": _classify_module(rule_id, spec),
+        "matrix_category": matrix_category,
         "execution_status": execution_status,
         "non_execution_reason": reason,
         "how_status": how_status,
         "evidence_basis": basis,
         "next_action": _next_action(execution_status, how_status),
     }
+
+
+def _classify_matrix_category(rule_id: str, implemented_ids: set[str]) -> str:
+    if rule_id in implemented_ids:
+        return "implemented_rules"
+    if rule_id in _DELIVERY_RULE_IDS:
+        return "delivery_checks"
+    if rule_id in _RUNTIME_GUARDRAIL_RULE_IDS:
+        return "runtime_guardrails"
+    return "other_runtime_observations"
 
 
 def _status_from_ledger(item: dict[str, Any]) -> tuple[str, str | None, str]:
