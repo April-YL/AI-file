@@ -6,6 +6,7 @@ import pytest
 
 from report.export_annotated_workbook import (
     COMMENTS_SHEET_NAME,
+    EXECUTION_TRACE_SHEET_NAME,
     FA_LIST_COMMENTS_SHEET_NAME,
     LLM_INGEST_REVIEW_SHEET_NAME,
     LOCATOR_SHEET_NAME,
@@ -159,7 +160,8 @@ def test_export_two_comment_sheets(tmp_path: Path):
     assert wb.sheetnames[0] == COMMENTS_SHEET_NAME
     assert wb.sheetnames[1] == FA_LIST_COMMENTS_SHEET_NAME
     assert wb.sheetnames[2] == LOCATOR_SHEET_NAME
-    assert wb.sheetnames[3] == LLM_INGEST_REVIEW_SHEET_NAME
+    assert wb.sheetnames[3] == EXECUTION_TRACE_SHEET_NAME
+    assert wb.sheetnames[4] == LLM_INGEST_REVIEW_SHEET_NAME
     visible_sheetnames = [ws.title for ws in wb.worksheets if ws.sheet_state == "visible"]
     assert LOCATOR_SHEET_NAME not in visible_sheetnames
     assert wb[LOCATOR_SHEET_NAME].sheet_state == "hidden"

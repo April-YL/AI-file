@@ -89,6 +89,43 @@ _MAX_MISSING_DATA = 12
 _MAX_IDENTIFIED_TERMS = 12
 _MAX_TEXT_LEN = 120
 _MAX_HOW_TEXT_LEN = 500
+
+_LLM_RULE_IDS = {
+    "summary_sheet_semantic",
+    "lead_expectation_semantic",
+    "lead_fluctuation_notes_semantic",
+    "lead_adjustment_layout_review",
+    "lead_adjustment_semantic",
+    "addition_semantic_review",
+    "disposal_semantic_review",
+    "rollforward_notes_semantic",
+}
+
+
+def _expected_llm_rule_ids(ctx: object) -> set[str]:
+    """根据 workbook_context 判断本次应被调用的 LLM 规则集合。
+
+    只检查资料已识别、LLM 路径必然触发的规则。
+    """
+    if ctx is None:
+        return set()
+    expected: set[str] = set()
+    if getattr(ctx, "summary", None) is not None:
+        expected.add("summary_sheet_semantic")
+    if getattr(ctx, "lead", None) is not None:
+        expected.update({
+            "lead_expectation_semantic",
+            "lead_fluctuation_notes_semantic",
+            "lead_adjustment_layout_review",
+            "lead_adjustment_semantic",
+        })
+    if getattr(ctx, "addition_list", None) is not None or getattr(ctx, "addition_test", None) is not None:
+        expected.add("addition_semantic_review")
+    if getattr(ctx, "disposal_list", None) is not None or getattr(ctx, "disposal_list_summary", None) is not None:
+        expected.add("disposal_semantic_review")
+    if getattr(ctx, "rollforward", None) is not None:
+        expected.add("rollforward_notes_semantic")
+    return expected
 _TRUNCATION_SUFFIX = "...[truncated]"
 
 
@@ -466,7 +503,7 @@ def _validate_int_or_none(value: Any, field: str) -> int | None:
         raise ValueError(f"execution observation {field} must be an integer or null")
     return value
 
-def validate_execution_ledger(ledger: dict, issues: Iterable[QcIssue]) -> None:
+def validate_execution_ledger(ledger: dict, issues: Iterable[QcIssue], *, llm_enabled: bool = False, workbook_context: object = None) -> None:
     items = ledger.get("items", [])
     item_by_rule = {item.get("rule_id"): item for item in items}
     missing = sorted({issue.rule_id for issue in issues} - set(item_by_rule))
@@ -505,3 +542,14 @@ def validate_execution_ledger(ledger: dict, issues: Iterable[QcIssue]) -> None:
         raise ValueError("execution_ledger summary not_applicable is inconsistent")
     if executed + data_insufficient + not_applicable != len(items):
         raise ValueError("execution_ledger status buckets are inconsistent")
+
+    # LLM 规则覆盖检查：LLM enabled 时，当前上下文中应被调用的 LLM 规则必须在 ledger 中有记录
+    if llm_enabled:
+        ledger_ids = {item.get("rule_id") for item in items}
+        expected_llm = _expected_llm_rule_ids(workbook_context)
+        missing_llm = expected_llm - ledger_ids
+        if missing_llm:
+            raise ValueError(
+                "LLM rules missing from execution_ledger: "
+                + ", ".join(sorted(missing_llm))
+            )

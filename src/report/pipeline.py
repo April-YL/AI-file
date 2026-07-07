@@ -71,7 +71,13 @@ def run_workbook_qc(
         detail["seconds"] = float(detail["seconds"]) + max(seconds, 0.0)
         detail["calls"] = int(detail["calls"]) + max(calls, 0)
 
-    def record_observed_issues(rule_issues: list) -> None:
+    def record_observed_issues(rule_issues: list, *, expected_rule_ids: list[str] | None = None) -> None:
+        # 先登记所有预期调用的 LLM 规则（finding_count=0）
+        # recorder.record() 对已存在的 key 会保留 EXECUTED 状态并累加计数
+        if expected_rule_ids:
+            for rule_id in expected_rule_ids:
+                recorder.record(rule_id, 0)
+        # 再累加实际 finding
         counts: dict[str, int] = {}
         for issue in rule_issues:
             counts[issue.rule_id] = counts.get(issue.rule_id, 0) + 1
@@ -176,7 +182,7 @@ def run_workbook_qc(
                 workbook_path=wb_for_psp,
                 workbook_sheet_titles=sheet_titles,
             )
-            record_observed_issues(psp_semantic_issues)
+            record_observed_issues(psp_semantic_issues, expected_rule_ids=["summary_sheet_semantic"])
             psp_raw_issues.extend(psp_semantic_issues)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
@@ -314,8 +320,8 @@ def run_workbook_qc(
                 config,
                 semantic_context=lead_semantic_context or {},
             )
-            record_observed_issues(llm_lead_issues)
-            record_observed_issues(lead_adj_issues)
+            record_observed_issues(llm_lead_issues, expected_rule_ids=["lead_expectation_semantic", "lead_fluctuation_notes_semantic"])
+            record_observed_issues(lead_adj_issues, expected_rule_ids=["lead_adjustment_layout_review", "lead_adjustment_semantic"])
             lead_raw_issues.extend(llm_lead_issues)
             lead_raw_issues.extend(lead_adj_issues)
             elapsed = perf_counter() - llm_t0
@@ -361,7 +367,7 @@ def run_workbook_qc(
                     prior_issues=addition_issues,
                 )
             )
-            record_observed_issues(addition_llm_issues)
+            record_observed_issues(addition_llm_issues, expected_rule_ids=["addition_semantic_review"])
             addition_issues.extend(addition_llm_issues)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
@@ -400,7 +406,7 @@ def run_workbook_qc(
                     prior_issues=[],
                 )
             )
-            record_observed_issues(addition_llm_issues)
+            record_observed_issues(addition_llm_issues, expected_rule_ids=["addition_semantic_review"])
             addition_issues.extend(addition_llm_issues)
             issues.extend(addition_llm_issues)
             elapsed = perf_counter() - llm_t0
@@ -451,7 +457,7 @@ def run_workbook_qc(
                 prior_issues=disposal_issues,
             )
         )
-        record_observed_issues(disposal_llm_issues)
+        record_observed_issues(disposal_llm_issues, expected_rule_ids=["disposal_semantic_review"])
         disposal_issues.extend(disposal_llm_issues)
         elapsed = perf_counter() - llm_t0
         llm_seconds += elapsed
@@ -541,7 +547,7 @@ def run_workbook_qc(
                 prior_issues=rollforward_raw_issues,
                 workbook_context=rf_semantic_context,
             )
-            record_observed_issues(rf_note_issues)
+            record_observed_issues(rf_note_issues, expected_rule_ids=["rollforward_notes_semantic"])
             rollforward_raw_issues.extend(rf_note_issues)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
@@ -575,7 +581,7 @@ def run_workbook_qc(
         issues.extend(delivery_issues)
 
     execution_ledger = recorder.to_ledger()
-    validate_execution_ledger(execution_ledger, issues)
+    validate_execution_ledger(execution_ledger, issues, llm_enabled=bool(config.enabled), workbook_context=ctx)
     rule_execution_summary = None
     rule_execution_matrix = None
     governance_diagnostics_error = None
@@ -591,6 +597,12 @@ def run_workbook_qc(
     except Exception as exc:  # pragma: no cover - defensive fallback for report stability
         governance_diagnostics_error = str(exc)
 
+    # Step C: 增强 execution_ledger（注入 registry 元数据 + matrix 诊断）
+    execution_ledger = _enrich_ledger_items(execution_ledger, governance)
+
+    # Step D: 构建 ingest 摘要
+    ingest_summary = build_ingest_summary(ctx)
+
     report = build_report(
         source_file=ctx.source_file,
         source_sheet=source_sheet or "workbook",
@@ -602,6 +614,7 @@ def run_workbook_qc(
         lead_sheet_section=lead_sheet_section,
         rollforward_sheet_section=rollforward_sheet_section,
         addition_sheet_section=addition_sheet_section,
+        ingest_summary=ingest_summary,
         execution_ledger=execution_ledger,
         rule_execution_summary=rule_execution_summary,
         rule_execution_matrix=rule_execution_matrix,
@@ -804,3 +817,65 @@ def run_input_qc(
         llm_config=llm_config,
         delivery_context=delivery_context,
     )
+
+
+def _enrich_ledger_items(
+    execution_ledger: dict,
+    rule_execution_coverage: dict | None,
+) -> dict:
+    """为 execution_ledger 的每个 item 注入 registry 元数据和 matrix 诊断信息。
+
+    不改变已有字段，只新增 procedure_code / dict_code / rule_name / status_note。
+    """
+    from rules.registry import get_by_rule_id
+
+    matrix_items = (rule_execution_coverage or {}).get("rules", [])
+    matrix_by_id: dict[str, dict] = {r.get("rule_id", ""): r for r in matrix_items}
+
+    for item in execution_ledger.get("items", []):
+        rule_id = item.get("rule_id", "")
+        spec = get_by_rule_id(rule_id)
+        matrix_row = matrix_by_id.get(rule_id, {})
+
+        item["procedure_code"] = spec.procedure_code if spec else ""
+        item["dict_code"] = spec.dict_code if spec else ""
+        item["rule_name"] = spec.rule_name if spec else ""
+
+        if not item.get("status_note"):
+            item["status_note"] = matrix_row.get("non_execution_reason") or ""
+
+    return execution_ledger
+
+
+def build_ingest_summary(ctx) -> dict:
+    """从 WorkbookQcContext 提取底稿识别事实。只列事实，不推断。"""
+    if ctx is None:
+        return {"sheets_found": [], "recognized_modules": {}, "total_sheets_scanned": 0}
+
+    sheets_found: list[dict] = []
+    if ctx.structure and ctx.structure.sheets_by_kind:
+        for kind, sheet_list in ctx.structure.sheets_by_kind.items():
+            for sheet in sheet_list:
+                sheets_found.append({"kind": kind, "sheet_name": sheet.sheet_name})
+
+    recognized = {}
+    if ctx.summary:
+        recognized["summary"] = True
+    if ctx.lead:
+        recognized["lead"] = True
+    if ctx.rollforward:
+        recognized["rollforward"] = True
+    if ctx.fa_list:
+        recognized["fa_list"] = True
+    if ctx.addition_list:
+        recognized["addition_list"] = True
+    if ctx.disposal_list or ctx.disposal_list_summary:
+        recognized["disposal"] = True
+    if ctx.k03_sheets:
+        recognized["k03"] = True
+
+    return {
+        "sheets_found": sheets_found,
+        "recognized_modules": recognized,
+        "total_sheets_scanned": len(ctx.structure.sheets_by_kind) if ctx.structure else 0,
+    }

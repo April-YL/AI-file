@@ -89,6 +89,7 @@ class QcReport:
     execution_ledger: dict[str, Any] | None = None
     rule_execution_summary: dict[str, Any] | None = None
     rule_execution_matrix: list[dict[str, Any]] | None = None
+    ingest_summary: dict[str, Any] | None = None
     governance_diagnostics_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -124,6 +125,8 @@ class QcReport:
             data["rule_execution_summary"] = self.rule_execution_summary
         if self.rule_execution_matrix is not None:
             data["rule_execution_matrix"] = self.rule_execution_matrix
+        if self.ingest_summary is not None:
+            data["ingest_summary"] = self.ingest_summary
         if self.governance_diagnostics_error:
             data["governance_diagnostics_error"] = self.governance_diagnostics_error
         if self.runtime_timings:
@@ -147,6 +150,7 @@ def build_report(
     execution_ledger: dict[str, Any] | None = None,
     rule_execution_summary: dict[str, Any] | None = None,
     rule_execution_matrix: list[dict[str, Any]] | None = None,
+    ingest_summary: dict[str, Any] | None = None,
     governance_diagnostics_error: str | None = None,
 ) -> QcReport:
     issues_by_asset: dict[str, list[QcIssue]] = {}
@@ -227,5 +231,57 @@ def build_report(
         execution_ledger=execution_ledger,
         rule_execution_summary=rule_execution_summary,
         rule_execution_matrix=rule_execution_matrix,
+        ingest_summary=ingest_summary,
         governance_diagnostics_error=governance_diagnostics_error,
     )
+
+
+def summarize_source_location(observation: dict | None) -> str:
+    """从 observation 提取取数来源，压缩为单行文本。
+
+    优先级：
+    1. 证据级 observation → 从 checked_data 提取 cell/row/column
+    2. 旧版 observation → 从 inputs 提取 sheet 名
+    3. 无 observation → "未记录"
+
+    不推断、不补数据、不猜测。
+    """
+    if not observation:
+        return "未记录"
+
+    # 证据级 observation
+    checked = observation.get("checked_data") or []
+    if checked and isinstance(checked, list):
+        locations = []
+        for item in checked:
+            if not isinstance(item, dict):
+                continue
+            sheet = str(item.get("sheet") or "")
+            values = item.get("values_read") or []
+            if values and isinstance(values, list):
+                first = values[0]
+                if isinstance(first, dict):
+                    cell = first.get("cell")
+                    if not cell:
+                        r = first.get("row")
+                        c = first.get("column")
+                        if r is not None and c is not None:
+                            cell = f"R{r}C{c}"
+                        elif r is not None:
+                            cell = f"R{r}"
+                    if cell and sheet:
+                        locations.append(f"{sheet}!{cell}")
+            if not locations and item.get("location"):
+                locations.append(f"{sheet} · {item['location']}")
+        if locations:
+            return " ↔ ".join(locations[:2])
+
+    # 旧版 observation
+    inputs = observation.get("inputs") or []
+    if inputs and isinstance(inputs, list):
+        sheets = [str(i["source_sheet"]) for i in inputs
+                  if isinstance(i, dict) and i.get("source_sheet")]
+        if sheets:
+            return " · ".join(list(dict.fromkeys(sheets))[:2])
+
+    return "未记录"

@@ -1571,72 +1571,6 @@ def _display_observation_checks(item: dict) -> str:
     return "；".join(parts) if parts else "未记录"
 
 
-def _ledger_row(item: dict) -> dict:
-    rule_id = str(item.get("rule_id") or "")
-    status = _ledger_status(item)
-    finding_count = item.get("finding_count", 0)
-    try:
-        finding_count_int = int(finding_count or 0)
-    except (TypeError, ValueError):
-        finding_count_int = 0
-    spec = get_by_rule_id(rule_id)
-    if spec is not None:
-        procedure = _procedure_display_name(spec.procedure_code)
-        checkpoint = spec.rule_name or spec.qc_checkpoint or rule_id
-        rule_code = spec.dict_code
-    else:
-        procedure, checkpoint, _method = _rule_display(rule_id)
-        procedure = _procedure_display_name(procedure)
-        checkpoint = checkpoint or "未映射规则"
-        rule_code = "未映射规则"
-    return {
-        "程序": procedure,
-        "质检点": checkpoint,
-        "规则编号": rule_code,
-        "rule_ID": rule_id,
-        "执行状态": _display_ledger_status(status),
-        "检查方式": _display_observation_path(item),
-        "依赖资料": _display_observation_inputs(item),
-        "关键检查摘要": _display_observation_checks(item),
-        "规则输出记录数": finding_count_int,
-        "finding 数": finding_count_int,
-        "取数与判断说明": _display_how_status(item),
-        "_item": item,
-        "_status": status,
-        "_finding_count": finding_count_int,
-    }
-
-
-def _ledger_sort_key(row: dict) -> tuple[int, str, str, str]:
-    # ui_sorting_policy:
-    #   scope: presentation_only
-    #   sort by audit workpaper procedure before status or findings
-    #   must_not_affect:
-    #     - execution_ledger
-    #     - rule_engine
-    #     - finding_model
-    #     - control_plane
-    procedure = _procedure_display_name(row.get("程序"))
-    procedure_index = (
-        _PROCEDURE_ORDER.index(procedure)
-        if procedure in _PROCEDURE_ORDER
-        else len(_PROCEDURE_ORDER)
-    )
-    return (
-        procedure_index,
-        str(row.get("规则编号") or ""),
-        str(row.get("质检点") or ""),
-        str(row.get("rule_ID") or ""),
-    )
-
-
-def _group_ledger_rows(rows: list[dict]) -> dict[str, list[dict]]:
-    grouped: dict[str, list[dict]] = {procedure: [] for procedure in _PROCEDURE_ORDER}
-    for row in rows:
-        grouped.setdefault(row["程序"], []).append(row)
-    return {program: items for program, items in grouped.items() if items}
-
-
 def _render_evidence_how(item: dict) -> None:
     observation = _observation(item)
     checked_data = observation.get("checked_data") or []
@@ -1722,62 +1656,6 @@ def _render_legacy_how(item: dict) -> None:
         }
     )
 
-
-def _render_how_details(row: dict) -> None:
-    item = row.get("_item") if isinstance(row.get("_item"), dict) else {}
-    if _has_evidence_how(item):
-        _render_evidence_how(item)
-        return
-    if _has_legacy_how(item):
-        _render_legacy_how(item)
-        return
-    if _ledger_status(item) == "EXECUTED":
-        st.info("HOW 未记录：该规则已执行，但尚未补充证据级执行说明。")
-    else:
-        st.info("HOW 未记录：该规则本次未执行，具体原因请查看执行状态和状态说明。")
-
-
-def _render_execution_ledger_table(data: dict) -> None:
-    ledger = _execution_ledger(data)
-    _render_section_title("质检点执行台账", "展示系统实际记录到的规则级检查流程。")
-    st.markdown(
-        '<div class="qc-ledger-note">执行状态仅表示系统是否运行该项检查流程，不代表审计结论；异常记录请结合 Findings 区查看。</div>',
-        unsafe_allow_html=True,
-    )
-    if not ledger:
-        st.info("本次报告没有 execution_ledger。")
-        return
-    items = ledger.get("items") or []
-    if not items:
-        st.info("本次未记录到质检点执行台账。")
-        return
-    rows = sorted((_ledger_row(item) for item in items), key=_ledger_sort_key)
-    grouped = _group_ledger_rows(rows)
-    visible_columns = ["质检点", "执行状态", "finding 数", "取数与判断说明"]
-    for program, group_rows in grouped.items():
-        executed = sum(1 for row in group_rows if row["_status"] == "EXECUTED")
-        data_insufficient = sum(1 for row in group_rows if row["_status"] == "DATA_INSUFFICIENT")
-        not_applicable = sum(1 for row in group_rows if row["_status"] == "NOT_APPLICABLE")
-        expanded = data_insufficient > 0 or any(row["_finding_count"] > 0 for row in group_rows)
-        with st.expander(
-            f"{program} · 已执行 {executed} · 数据不足 {data_insufficient} · 暂不适用 {not_applicable}",
-            expanded=expanded,
-        ):
-            st.dataframe(
-                [
-                    {column: row.get(column, "") for column in visible_columns}
-                    for row in group_rows
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-            for row in group_rows:
-                title = (
-                    f"取数与判断说明 · {row.get('质检点') or ''} · "
-                    f"{row.get('执行状态') or ''} · finding {row.get('finding 数') or 0}"
-                )
-                with st.expander(title, expanded=False):
-                    _render_how_details(row)
 
 def _rule_execution_matrix(data: dict) -> list[dict]:
     matrix = data.get("rule_execution_matrix")
@@ -1883,8 +1761,86 @@ def _render_trace_detail(row: dict) -> None:
     _render_audit_detail("缺失资料", detail.get("missing_data"))
     _render_audit_detail("说明", detail.get("notes"))
 
+_PROCEDURE_CODE_LABELS: dict[str, str] = {
+    "K.00": "K.00 Lead",
+    "K.01": "K.01",
+    "K.02.1": "K.02.1",
+    "K.02.2": "K.02.2",
+    "K.03": "K.03",
+    "K.03.1": "K.03.1",
+    "K.03.2": "K.03.2",
+    "K.03.3": "K.03.3",
+    "FA_LIST": "FA list",
+    "SUMMARY": "汇总",
+    "GLOBAL": "全局",
+    "WORKBOOK": "工作簿",
+}
 
-def _render_execution_ledger_table(data: dict) -> None:
+
+def _render_execution_trace_table(data: dict) -> None:
+    """渲染 6 列执行台账，按 execution_ledger.items 原始执行顺序。"""
+    from report.summary import summarize_source_location
+
+    ledger = _execution_ledger(data)
+    _render_section_title("质检点执行台账", "展示系统实际执行顺序。执行状态仅表示流程是否运行，不代表审计结论。")
+    if not ledger:
+        st.info("本次报告未包含 execution_ledger。")
+        return
+    items = ledger.get("items") or []
+    if not items:
+        st.info("本次未记录到质检点执行台账。")
+        return
+
+    visible_columns = ["程序", "规则编号", "规则名称", "执行状态", "未执行原因", "取数来源"]
+    rows: list[dict] = []
+    for item in items:
+        rule_id = item.get("rule_id", "")
+        status = item.get("status", "")
+        status_label = {"EXECUTED": "已执行", "DATA_INSUFFICIENT": "数据不足", "NOT_APPLICABLE": "暂不适用"}.get(status, status)
+        proc_code = item.get("procedure_code", "")
+        proc_label = _PROCEDURE_CODE_LABELS.get(proc_code, proc_code or "—")
+        dict_code = item.get("dict_code", "") or rule_id
+        rule_name = item.get("rule_name", "") or ""
+        status_note = ""
+        if status != "EXECUTED":
+            status_note = item.get("status_note", "") or "—"
+        source_loc = summarize_source_location(item.get("observation"))
+
+        rows.append({
+            "程序": proc_label,
+            "规则编号": dict_code,
+            "规则名称": rule_name,
+            "执行状态": status_label,
+            "未执行原因": status_note,
+            "取数来源": source_loc,
+            "_item": item,
+            "_status": status,
+        })
+
+    st.dataframe(
+        [{c: row[c] for c in visible_columns} for row in rows],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    # 每行可点击展开"检查明细"
+    for row in rows:
+        item = row["_item"]
+        status = row["_status"]
+        obs = item.get("observation") if isinstance(item, dict) else None
+        if not obs:
+            continue
+        rule_name = row["规则名称"] or row["规则编号"]
+        with st.expander(f"检查明细 · {rule_name} · {row['执行状态']}", expanded=False):
+            if _has_evidence_how(item):
+                _render_evidence_how(item)
+            elif _has_legacy_how(item):
+                _render_legacy_how(item)
+            elif status == "EXECUTED":
+                st.info("执行明细未记录：该规则已执行，但尚未补充证据级执行说明。")
+
+
+def _render_coverage_diagnostics(data: dict) -> None:
     matrix = _rule_execution_matrix(data)
     summary = _rule_execution_summary(data)
     _render_section_title("质检点执行台账", "展示规则是否执行、取数来源和本次判断过程。")
@@ -2038,7 +1994,7 @@ def _render_result_view(results: dict, errors: dict) -> None:
     with findings_tab:
         _render_priority_findings(data)
     with ledger_tab:
-        _render_execution_ledger_table(data)
+        _render_execution_trace_table(data)
     with procedure_tab:
         _render_procedure_summary(data)
         _render_findings_grouped(data)
@@ -2050,6 +2006,8 @@ def _render_result_view(results: dict, errors: dict) -> None:
         _render_artifact_preview(bundle)
     with diagnostics_tab:
         _render_system_diagnostics(data, bundle)
+        st.divider()
+        _render_coverage_diagnostics(data)
 
 
 def _render_upload_panel(*, collapsed_after_results: bool) -> None:

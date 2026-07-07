@@ -27,6 +27,15 @@ COMMENTS_SHEET_NAME = "Comments【归档前删除】"
 FA_LIST_COMMENTS_SHEET_NAME = "Comments【FA list】"
 LOCATOR_SHEET_NAME = "QC_Locator"
 LLM_INGEST_REVIEW_SHEET_NAME = "LLM识别复核【归档前删除】"
+EXECUTION_TRACE_SHEET_NAME = "QC_执行追溯【归档前删除】"
+_EXECUTION_TRACE_HEADERS = (
+    "程序",
+    "规则编号",
+    "规则名称",
+    "执行状态",
+    "未执行原因",
+    "取数来源",
+)
 _AGENT_REF_HEADER = "Agent 参考（质检建议）"
 _REVIEW_SOURCE_HEADER = "判断来源"
 _COMMENT_HEADERS = (
@@ -696,6 +705,82 @@ def _ooxml_comments_by_sheet(
     return by_sheet
 
 
+def build_execution_trace_rows(report: QcReport) -> list[tuple]:
+    """构建 QC_执行追溯 sheet 的行数据，从 execution_ledger 提取执行事实。"""
+    from report.summary import summarize_source_location
+
+    rows: list[tuple] = []
+
+    # 区域 A：底稿识别（留空，可在后续版本补充 ingest_summary 数据）
+    ingest = getattr(report, "ingest_summary", None) or {}
+    sheets_found = ingest.get("sheets_found") or []
+    if sheets_found:
+        rows.append(("— 底稿识别 —", "", "", "", "", ""))
+        for s in sheets_found:
+            rows.append((
+                s.get("kind", ""),
+                s.get("sheet_name", ""),
+                "",
+                "已识别" if s.get("sheet_name") else "未找到",
+                "",
+                "",
+            ))
+
+    # 区域 B：规则执行
+    ledger = getattr(report, "execution_ledger", None) or {}
+    items = ledger.get("items") or []
+    if items:
+        rows.append(("— 规则执行 —", "", "", "", "", ""))
+        for item in items:
+            proc_code = item.get("procedure_code", "")
+            proc_label = _procedure_code_label(proc_code)
+            dict_code = item.get("dict_code", "") or item.get("rule_id", "")
+            rule_name = item.get("rule_name", "") or ""
+            status = item.get("status", "")
+            status_label = {"EXECUTED": "已执行", "DATA_INSUFFICIENT": "数据不足", "NOT_APPLICABLE": "暂不适用"}.get(status, status)
+            status_note = ""
+            if status != "EXECUTED":
+                status_note = item.get("status_note", "") or "—"
+            source_loc = summarize_source_location(item.get("observation"))
+
+            rows.append((
+                proc_label,
+                dict_code,
+                rule_name,
+                status_label,
+                status_note,
+                source_loc,
+            ))
+
+    # 区域 C：执行摘要
+    summary = ledger.get("summary") or {}
+    if summary:
+        rows.append(("— 执行摘要 —", "", "", "", "", ""))
+        rows.append(("本次记录规则", str(summary.get("total_observed_checkpoints", "—")) + " 条", "", "", "", ""))
+        rows.append(("已执行", str(summary.get("executed", "—")) + " 条", "", "", "", ""))
+        rows.append(("数据不足", str(summary.get("data_insufficient", "—")) + " 条", "", "", "", ""))
+        rows.append(("暂不适用", str(summary.get("not_applicable", "—")) + " 条", "", "", "", ""))
+
+    return rows
+
+
+def _procedure_code_label(proc_code: str) -> str:
+    mapping = {
+        "K.00": "K.00 Lead",
+        "K.01": "K.01",
+        "K.02.1": "K.02.1",
+        "K.02.2": "K.02.2",
+        "K.03": "K.03",
+        "K.03.1": "K.03.1",
+        "K.03.2": "K.03.2",
+        "K.03.3": "K.03.3",
+        "FA_LIST": "FA list",
+        "SUMMARY": "汇总",
+        "GLOBAL": "全局",
+    }
+    return mapping.get(proc_code, proc_code or "—")
+
+
 def export_annotated_workbook(
     report: QcReport,
     input_path: str | Path,
@@ -737,6 +822,7 @@ def export_annotated_workbook(
     locator_links = build_locator_hyperlinks(issues)
     llm_ingest_rows = build_llm_ingest_review_rows(report)
     llm_ingest_links = build_llm_ingest_review_hyperlinks(report)
+    trace_rows = build_execution_trace_rows(report)
     inject_worksheets_at_front(
         out,
         [
@@ -773,6 +859,14 @@ def export_annotated_workbook(
                 ),
             ),
             (
+                EXECUTION_TRACE_SHEET_NAME,
+                build_worksheet_xml(
+                    _EXECUTION_TRACE_HEADERS,
+                    trace_rows,
+                    footer=f"源文件: {input_path.name} | 执行追溯记录系统运行事实，不包含审计判断。归档前请删除本页。",
+                ),
+            ),
+            (
                 LLM_INGEST_REVIEW_SHEET_NAME,
                 build_worksheet_xml(
                     _LLM_INGEST_REVIEW_HEADERS,
@@ -789,6 +883,7 @@ def export_annotated_workbook(
             COMMENTS_SHEET_NAME,
             FA_LIST_COMMENTS_SHEET_NAME,
             LOCATOR_SHEET_NAME,
+            EXECUTION_TRACE_SHEET_NAME,
             LLM_INGEST_REVIEW_SHEET_NAME,
         ),
     )
