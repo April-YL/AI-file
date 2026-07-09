@@ -576,9 +576,9 @@ def _build_checkpoint_rows(data: dict, bundle: dict, delivery_stage: str) -> lis
     rows.append(
         _checkpoint_row(
             "全局",
-            "交付完成度",
+            "交付完整性",
             delivery_status,
-            "本轮未检查交付完成度"
+            "本轮未检查交付完整性"
             if delivery_status == _CHECKPOINT_STATUS_NA
             else _checkpoint_summary_text(delivery_issues),
             delivery_issues,
@@ -675,43 +675,6 @@ def _build_checkpoint_rows(data: dict, bundle: dict, delivery_stage: str) -> lis
     return rows
 
 
-def _render_checkpoint_summary(rows: list[dict]) -> None:
-    st.subheader("旧版执行摘要（未使用）")
-    counts = {
-        _CHECKPOINT_STATUS_DONE: 0,
-        _CHECKPOINT_STATUS_MISSING: 0,
-        _CHECKPOINT_STATUS_NA: 0,
-    }
-    for row in rows:
-        status = str(row.get("执行状态"))
-        counts[status] = counts.get(status, 0) + 1
-    metrics = [
-        ("质检点总数", len(rows), "当前系统已识别"),
-        ("已执行", counts.get(_CHECKPOINT_STATUS_DONE, 0), "只表示执行状态"),
-        ("数据不足，未执行", counts.get(_CHECKPOINT_STATUS_MISSING, 0), "资料不足或暂未识别"),
-        ("暂不适用", counts.get(_CHECKPOINT_STATUS_NA, 0), "本轮不适用"),
-    ]
-    cols = st.columns(4)
-    for col, (label, value, note) in zip(cols, metrics):
-        with col:
-            st.markdown(
-                f"""
-                <div class="qc-card">
-                  <div class="qc-card-label">{label}</div>
-                  <div class="qc-card-value">{value}</div>
-                  <div class="qc-card-note">{note}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-    st.caption("检查点层只表示是否执行；问题严重程度请看 Findings。")
-
-
-def _render_checkpoint_execution(rows: list[dict]) -> None:
-    st.subheader("旧版检查点执行情况（未使用）")
-    st.dataframe(rows, use_container_width=True, hide_index=True)
-
-
 def _render_system_diagnostics(data: dict, bundle: dict) -> None:
     with st.expander("系统诊断 / 输出质量", expanded=False):
         _render_output_quality(data)
@@ -745,7 +708,7 @@ def _render_overview(name: str, data: dict) -> None:
     overall = summary.get("overall_severity", "PASS")
     findings = _finding_count(data)
     cards = [
-        ("Overall", _severity_badge(overall), Path(name).name),
+        ("最高提示级别", _severity_badge(overall), Path(name).name),
         ("Findings", str(findings), "FAIL / WARN / NEED_REVIEW"),
         ("FAIL", str(summary.get("fail_count", 0)), "明确不符合规则"),
         ("WARN", str(summary.get("warn_count", 0)), "需关注的风险提示"),
@@ -1333,7 +1296,7 @@ def _render_overview(name: str, data: dict) -> None:
 
 
 def _render_findings_summary(data: dict) -> None:
-    _render_section_title("Findings 结果", "异常记录按处理优先级展示；不代表最终审计结论。")
+    _render_section_title("Findings 结果", "异常记录按处理优先级展示；不代表最终审计判断。")
     groups = _group_findings_v2(data)
     metrics = [("Findings 总数", _finding_count(data), "不含 PASS", "other")]
     metrics.extend(
@@ -1421,7 +1384,7 @@ def _rule_display(rule_id: str) -> tuple[str, str, str]:
 
 
 def _render_execution_ledger_summary(data: dict) -> None:
-    _render_section_title("质检点执行摘要", "执行状态只表示系统是否运行该检查流程，不表示审计结论。")
+    _render_section_title("质检点执行摘要", "执行状态只表示系统是否运行该检查流程，不表示审计判断。")
     ledger = _execution_ledger(data)
     if not ledger:
         st.warning("本次报告未包含 execution_ledger，无法展示质检点执行台账。")
@@ -1469,7 +1432,7 @@ _OBSERVATION_PATH_LABELS = {
 }
 
 _OBSERVATION_CHECK_RESULT_LABELS = {
-    "passed": "通过",
+    "passed": "未触发规则提示",
     "triggered": "触发异常",
     "not_applicable": "不适用",
     "data_insufficient": "数据不足",
@@ -1499,11 +1462,11 @@ def _has_legacy_how(item: dict) -> bool:
 
 def _display_how_status(item: dict) -> str:
     if _has_evidence_how(item):
-        return "证据级 HOW 已记录"
+        return "证据级取数与判断说明已记录"
     if _has_legacy_how(item):
-        return "旧版 HOW 已记录"
+        return "基础取数与判断说明已记录"
     if _ledger_status(item) == "EXECUTED":
-        return "HOW 未记录"
+        return "未记录取数与判断说明"
     return "未执行说明见状态"
 
 
@@ -1647,7 +1610,7 @@ def _render_evidence_how(item: dict) -> None:
 
 
 def _render_legacy_how(item: dict) -> None:
-    st.info("该规则已记录旧版 HOW，但尚未补充证据级执行说明。")
+    st.info("该规则已记录基础取数与判断说明，但尚未补充证据级执行说明。")
     st.write(
         {
             "检查方式": _display_observation_path(item),
@@ -1782,7 +1745,7 @@ def _render_execution_trace_table(data: dict) -> None:
     from report.summary import summarize_source_location
 
     ledger = _execution_ledger(data)
-    _render_section_title("质检点执行台账", "展示系统实际执行顺序。执行状态仅表示流程是否运行，不代表审计结论。")
+    _render_section_title("质检点执行台账", "展示系统实际执行顺序。执行状态仅表示流程是否运行，不代表审计判断。")
     if not ledger:
         st.info("本次报告未包含 execution_ledger。")
         return
@@ -1845,7 +1808,7 @@ def _render_coverage_diagnostics(data: dict) -> None:
     summary = _rule_execution_summary(data)
     _render_section_title("质检点执行台账", "展示规则是否执行、取数来源和本次判断过程。")
     st.markdown(
-        '<div class="qc-ledger-note">执行状态仅表示系统本次是否运行该规则；未执行不代表通过，异常结论仍以 Findings 明细为准。</div>',
+        '<div class="qc-ledger-note">执行状态仅表示系统本次是否运行该规则；未执行不等于无待处理 Findings，异常记录仍以 Findings 明细为准。</div>',
         unsafe_allow_html=True,
     )
     if not matrix:
@@ -2013,12 +1976,12 @@ def _render_result_view(results: dict, errors: dict) -> None:
 def _render_upload_panel(*, collapsed_after_results: bool) -> None:
     container = st.expander("重新上传 / 修改参数", expanded=False) if collapsed_after_results else st.container()
     with container:
-        st.subheader("交付完成度")
+        st.subheader("交付完整性")
         delivery_stage = st.radio(
             "交付阶段",
             options=["none", "first", "final"],
             format_func=lambda v: {
-                "none": "不检查交付完成度",
+                "none": "不检查交付完整性",
                 "first": "首次交付",
                 "final": "整体交付",
             }[v],
@@ -2079,32 +2042,137 @@ def _render_upload_panel(*, collapsed_after_results: bool) -> None:
             st.rerun()
 
 
-_inject_style()
-_render_topbar()
+# ---- v3 入口：使用新设计系统 + 侧边导航 ----
+from report.ui_components.styles import get_global_css
+st.markdown(get_global_css(), unsafe_allow_html=True)
+def main() -> None:
+    _render_topbar()
 
-with st.sidebar:
-    st.header("设置")
-    if st.button("清除质检缓存", help="规则更新后若结果未变，清缓存后重新运行。"):
-        st.cache_data.clear()
-        st.success("已清除缓存")
-    use_llm = st.checkbox("启用大模型规则语义复核", value=False)
-    if use_llm:
-        st.info("LLM 将参与汇总页/Lead 等语义类规则复核，并生成摘要；不覆盖确定性规则 severity。")
-    with st.expander("高级：指定工作表名称"):
-        fa_sheet = st.text_input("FA list 表名", "")
-        summary_sheet = st.text_input("汇总表名", "")
-        lead_sheet = st.text_input("Lead 表名", "")
-        st.caption("当前仅支持部分工作表名称指定；不填则自动识别。完整 K.01/K.02/K.03 表名指定后续单独扩展。")
+    # 页面路由
+    if "active_page" not in st.session_state:
+        st.session_state["active_page"] = "workbench"
 
-results = st.session_state.get("results", {})
-errors = st.session_state.get("errors", {})
+    with st.sidebar:
+        # 品牌区
+        st.markdown(
+            '<div class="sidebar-brand-text">审计底稿复核 Agent</div>'
+            '<div class="sidebar-subtitle">Audit Workpaper Review</div>'
+            '<div class="sidebar-subject-tag">固定资产 K1</div>',
+            unsafe_allow_html=True,
+        )
 
-if results:
-    _render_result_view(results, errors)
-    st.divider()
-    _render_upload_panel(collapsed_after_results=True)
-else:
-    if errors:
-        for file_name, err in errors.items():
-            st.error(f"**{file_name}**：{err}")
-    _render_upload_panel(collapsed_after_results=False)
+        # 工作台组
+        st.markdown('<div class="sidebar-section-label">工作台</div>', unsafe_allow_html=True)
+        for key, label in [("workbench", "复核工作台"), ("runner", "执行复核"), ("findings", "复核结果")]:
+            if st.button(label, key=f"nav_{key}",
+                         type="primary" if st.session_state["active_page"] == key else "secondary",
+                         use_container_width=True):
+                st.session_state["active_page"] = key
+                st.rerun()
+
+        st.divider()
+        # 记录组
+        st.markdown('<div class="sidebar-section-label">记录</div>', unsafe_allow_html=True)
+        for key, label in [("history", "运行历史"), ("compare", "运行对比")]:
+            if st.button(label, key=f"nav_{key}",
+                         type="primary" if st.session_state["active_page"] == key else "secondary",
+                         use_container_width=True):
+                st.session_state["active_page"] = key
+                st.rerun()
+
+        st.divider()
+        # 管理组
+        st.markdown('<div class="sidebar-section-label">管理</div>', unsafe_allow_html=True)
+        for key, label in [("projects", "项目管理")]:
+            if st.button(label, key=f"nav_{key}",
+                         type="primary" if st.session_state["active_page"] == key else "secondary",
+                         use_container_width=True):
+                st.session_state["active_page"] = key
+                st.rerun()
+
+        st.divider()
+        if st.button("清除缓存", use_container_width=True, key="cache_btn"):
+            st.cache_data.clear()
+            st.success("已清除")
+
+        st.markdown(
+            '<div class="sidebar-footer-text">v3.0 · SQLite 持久化</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ---- 页面渲染 ----
+    active = st.session_state["active_page"]
+
+    if active == "workbench":
+        from report.ui_pages.workbench import render_workbench
+        render_workbench()
+
+    elif active == "runner":
+        from report.ui_pages.qc_runner import render_qc_runner
+        render_qc_runner()
+
+    elif active == "findings":
+        from report.ui_pages.findings_viewer import render_findings_viewer
+        render_findings_viewer()
+
+    elif active == "coverage":
+        st.session_state["active_page"] = "findings"
+        st.info("检查范围已合并到复核结果页的质检点执行台账。")
+        from report.ui_pages.findings_viewer import render_findings_viewer
+        render_findings_viewer()
+
+    elif active == "history":
+        from report.ui_pages.run_history import render_run_history
+        render_run_history()
+
+    elif active == "projects":
+        from report.ui_pages.project_manager import render_project_manager
+        render_project_manager()
+
+    elif active == "compare":
+        from report.ui_pages.compare import render_compare
+        render_compare()
+
+    elif active == "legacy":
+        st.session_state["active_page"] = "runner"
+        st.info("旧版界面已停用，请使用当前执行复核页面。")
+        from report.ui_pages.qc_runner import render_qc_runner
+        render_qc_runner()
+        return
+        # 旧版完整界面（旁路访问，不做删除）
+        _inject_style()
+        with st.sidebar:
+            st.header("设置")
+            if st.button("清除质检缓存（旧版）", help="规则更新后若结果未变，清缓存后重新运行。"):
+                st.cache_data.clear()
+                st.success("已清除缓存")
+            use_llm = st.checkbox("启用大模型规则语义复核", value=False)
+            if use_llm:
+                st.info("LLM 将参与汇总页/Lead 等语义类规则复核，并生成摘要；不覆盖确定性规则 severity。")
+            with st.expander("高级：指定工作表名称"):
+                fa_sheet = st.text_input("FA list 表名", "")
+                summary_sheet = st.text_input("汇总表名", "")
+                lead_sheet = st.text_input("Lead 表名", "")
+                st.caption("当前仅支持部分工作表名称指定；不填则自动识别。完整 K.01/K.02/K.03 表名指定后续单独扩展。")
+
+        st.session_state.setdefault("use_llm_legacy", False)
+        use_llm = st.session_state["use_llm_legacy"]
+
+        results = st.session_state.get("results", {})
+        errors = st.session_state.get("errors", {})
+
+        if results:
+            _render_result_view(results, errors)
+            st.divider()
+            _render_upload_panel(collapsed_after_results=True)
+        else:
+            if errors:
+                for file_name, err in errors.items():
+                    st.error(f"**{file_name}**：{err}")
+            _render_upload_panel(collapsed_after_results=False)
+
+
+if __name__ == "__main__":
+    main()
+
+
