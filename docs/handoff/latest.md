@@ -2,6 +2,15 @@
 
 > 每次收工前更新本文。新成员接手先读 `docs/ONBOARDING.md`，再读 `AGENTS.md` 和本文。
 
+## 2026-07-09 K03 第一阶段与 checklist 口径同步
+
+- K.03 第一阶段已接入主流程：SAP 中精度、SAP 高精度、TOD 抽样、TOD by-item、折旧政策复核均可被识别，并进入对应规则或执行台账。
+- 本轮新增/接入的 K03 规则口径包括：`sap_precision_selection`、`sap_depreciation_difference`、`depreciation_tod_sampling`、`depreciation_tod_difference`，并保留既有 TOD by-item 与政策复核规则。
+- `K1 check list_rule_mapping.xlsx` 已新增最新口径 sheet：`规则映射v0.5_K03更新` 和 `当前规则能力目录_v2`；DP-003、DP-004、DP-006、DP-007 已从“计划/缺口”同步为当前主流程已纳入的部分自动覆盖。
+- 文档口径已同步到 `docs/checklist-rule-mapping.md`、`docs/rule-dictionary-mapping.md`、`docs/qc-checklist.md`、`docs/planning/program-qc-coverage-index.md`、`docs/planning/k02-k03-qc-matrix.md`、`docs/k03_mvp_plan.md` 和 `docs/workpaper-fields.md`。
+- 当前边界：K03 SAP/TOD 第一阶段规则主要做路径识别、关键字段/参数、差异处理和程序执行提示；证据充分性、SAP + TOD 组合结论、复杂政策合理性仍需人工复核或后续 LLM/规则增强。
+- 已验证：K03 focused tests 15 passed；registry / execution ledger / coverage tests 27 passed。历史 Excel sheet、`docs/history/**` 和 source dictionary fixture 未作为本轮同步对象修改。
+
 ## 2026-06-30 黑箱治理与 HOW 样板沉淀
 
 - 新增治理主文档 `docs/architecture/fa_qc_governance_plan.md`，明确 `registry.py` 是系统承认的可执行规则真源，`review_rules.md` / skill rules 仅作为 reference / backlog，未完成迁移闭环的规则不得在 UI/JSON 中展示为已检查或已执行。
@@ -11,7 +20,7 @@
 
 ## 2026-06-24 K1 mapping 编号补全复核
 
-- 正式映射工作簿 `固定资产质检agent/资料库/K1 check list_rule_mapping.xlsx` 的最新 sheet `规则映射v0.4编号补全版` 已由 102 行更新为 110 行，并经人工检查确认问题已解决。
+- 正式映射工作簿 `固定资产质检agent/资料库/K1 check list_rule_mapping.xlsx` 在 2026-06-24 使用的 sheet `规则映射v0.4编号补全版` 已由 102 行更新为 110 行，并经人工检查确认问题已解决；当前最新口径见上方 2026-07-09 的 v0.5 记录。
 - 本轮补入 registry 已登记但映射表缺失的 `DP-BI-PRE-001`～`DP-BI-PRE-004`、`DP-BI-004`、`DP-POL-PRE-001`～`DP-POL-PRE-002`、`DP-POL-007`。
 - 已修复 `MT-002 / special_movement_identification` 与 `GL-003 / lead_prior_year_reconciliation` 复核意见中的疑问口径；当前说明明确这些点的 runner 纳入状态、人工复核边界和与既有规则的重叠关系。
 - 本轮只更新 K1 mapping Excel 与说明文档，不改变 `src/rules/registry.py`、runner、execution_ledger、severity 或 finding 判断逻辑。
@@ -62,7 +71,7 @@
 
 - Git 仓库已初始化并关联 GitHub 远程。
 - 资料库与案例库诊断、SOP/checklist/字段映射文档已沉淀。
-- K1 checklist 与 Agent 实际 rules 的映射已沉淀：口径文档见 `docs/checklist-rule-mapping.md`，正式映射工作簿为 `固定资产质检agent/资料库/K1 check list_rule_mapping.xlsx`，当前最新 sheet 为 `规则映射v0.4编号补全版`。
+- K1 checklist 与 Agent 实际 rules 的映射已沉淀：口径文档见 `docs/checklist-rule-mapping.md`，正式映射工作簿为 `固定资产质检agent/资料库/K1 check list_rule_mapping.xlsx`，当前最新 sheet 为 `规则映射v0.5_K03更新`；当前规则能力目录最新 sheet 为 `当前规则能力目录_v2`。
 - `src/ingest/`：sheet 分类、字段映射、底稿诊断 CLI、FA list CSV/Excel 解析（`load_fa_list_from_workbook`）。
 - `src/rules/` + `src/report/`：首批 3 条 FA list 规则 + JSON 报告；**`fa-qc-run` CLI 已可用**。
 - 规则字典映射：`docs/rule-dictionary-mapping.md`、`src/rules/registry.py`、`tests/fixtures/rule_dictionary_*.csv`
@@ -74,7 +83,8 @@
 - 项目结构说明：`docs/PROJECT_STRUCTURE.md`
 - 领域词典、架构、任务与进度文档
 - 质检 checklist：`docs/qc-checklist.md`
-- K1 checklist 与 Agent rules 映射：`docs/checklist-rule-mapping.md`；正式 Excel 为 `固定资产质检agent/资料库/K1 check list_rule_mapping.xlsx`，最新 sheet `规则映射v0.4编号补全版`。本轮已补齐此前 14 条“未登记字典编号”，包括 `AT-LLM-001`、`DP-BI-001`～`DP-BI-003`、`DP-POL-001`～`DP-POL-006`；本轮只补规则元数据和映射口径，不改变 runner、pipeline、severity 或 finding 判断逻辑。后续开发新 rule 前，先查该映射表确认 checklist 行、现有覆盖、执行条件和缺口。
+- K1 checklist 与 Agent rules 映射：`docs/checklist-rule-mapping.md`；正式 Excel 为 `固定资产质检agent/资料库/K1 check list_rule_mapping.xlsx`，最新 sheet `规则映射v0.5_K03更新`，当前规则能力目录最新 sheet `当前规则能力目录_v2`。当前 v0.5 进一步同步 K03 SAP/TOD 抽样规则口径。后续开发新 rule 前，先查该映射表确认 checklist 行、现有覆盖、执行条件和缺口。
+- 历史 v0.4 曾补齐 14 条“未登记字典编号”，包括 `AT-LLM-001`、`DP-BI-001`～`DP-BI-003`、`DP-POL-001`～`DP-POL-006`。
 - 底稿字段映射：`docs/workpaper-fields.md`
 - 案例库底稿读取诊断（6 份小型底稿）
 - `src/ingest/`（含 `fa-qc-diagnose`）、`tests/ingest/`

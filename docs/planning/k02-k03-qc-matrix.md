@@ -1,6 +1,6 @@
-# K.02 / K.03 — 质检覆盖矩阵（规划）
+# K.02 / K.03 — 质检覆盖矩阵
 
-> **状态**：**M2b+ 起步**；K.02 程序包完整性、新增清单字段完整性与新增方式同质性提示已接入。  
+> **状态**：**M2b+ 起步**；K.02 程序包完整性、新增清单字段完整性与新增方式同质性提示已接入。K.03 第一阶段已接入 SAP 中/高精度、TOD 抽样、TOD by-item 和折旧政策复核的路径识别、部分确定性规则与执行台账。  
 > **Checklist 来源**：[qc-checklist.md](../qc-checklist.md) §五–§九  
 > **索引**：[program-qc-coverage-index.md](./program-qc-coverage-index.md)
 
@@ -53,28 +53,32 @@
 
 | sheet | 说明 |
 | --- | --- |
-| `K.03.1 SAP` | 实质性分析程序 |
-| `K.03.2 折旧测试TOD` / By item | 详细折旧测试 |
-| `K.03.3 折旧政策复核` | 政策合理性 |
+| `K.03.1 SAP-中精确度` / `K.03.1 SAP-高精确度` | 折旧实质性分析程序；当前可识别中/高精度路径并执行 SAP 精确度选择、差异处理提示 |
+| `K.03.2 折旧测试TOD-抽样` | 抽样方式折旧测试；当前可识别主测试页并结合 `K.03.2a` 选样输出做抽样过程与差异提示 |
+| `K.03.2a 折旧选样输出` | TOD 抽样/选样输出；作为 TOD 抽样规则的辅助输入 |
+| `K.03.2 折旧测试TOD-by item测试` | by-item 方式折旧测试；当前已纳入明细读取、重算差异和与 K.01 折旧勾稽 |
+| `K.03.3 折旧政策复核` | 政策合理性；当前已纳入轻量读取和基础完整性/明显异常提示 |
 
 ### 逻辑模块（建议）
 
 | 模块 | 内容 | 状态 |
 | --- | --- | --- |
-| **K3-A SAP** | CRA 与 Lead 一致、精确度选择 | ❌ REVIEW |
-| **K3-B TOD 清单** | 字段完整、重算差异 | ❌ |
-| **K3-C vs K.01** | 本期折旧 vs 后推计提 / 表4 | ❌ 依赖 K.01 区块5 |
-| **K3-D 政策** | 三要素、变更理由 | ❌ REVIEW / LLM |
+| **K3-A SAP** | CRA 与 Lead 一致、精确度选择、差异处理提示 | ✅ 第一阶段已纳入；复杂证据充分性仍需人工复核 |
+| **K3-B TOD 抽样** | 抽样过程、选样输出、抽样币种、方法和差异处理提示 | ✅ 第一阶段已纳入；样本证据充分性仍需人工复核 |
+| **K3-C TOD by item / vs K.01** | 字段完整、重算差异、本期折旧 vs 后推计提 / 表4 | ✅ by-item 已纳入；跨表复杂差异解释仍需人工复核 |
+| **K3-D 政策** | 三要素、变更理由、明显异常 | ✅ 基础规则已纳入；政策合理性语义判断仍为 REVIEW / LLM 候选 |
 
 ### Checklist 对照（摘要）
 
 | 检查点 | rule_id | 状态 |
 | --- | --- | --- |
-| 折旧清单字段完整 | `depreciation_required_fields` | ❌ |
-| vs 后推折旧 | `depreciation_rollforward_reconciliation` | ❌ |
-| 重算差异 | `depreciation_recalculation_difference` | ❌ |
-| SAP CRA/精确度 | `sap_*` | ❌ |
-| 政策复核 | `depreciation_policy_*` | ❌ |
+| 折旧清单字段完整 | `depreciation_required_fields` / `k03_tod_by_item_*` | ✅ by-item 已覆盖；抽样页字段按抽样规则提示 |
+| vs 后推折旧 | `depreciation_rollforward_reconciliation` / `k03_tod_by_item_*` | ✅ by-item 已覆盖部分口径 |
+| 重算差异 | `depreciation_recalculation_difference` / `k03_tod_by_item_*` | ✅ by-item 已覆盖部分口径 |
+| SAP CRA/精确度 | `sap_precision_selection` / `sap_depreciation_difference` | ✅ 第一阶段部分覆盖 |
+| TOD 抽样过程 | `depreciation_tod_sampling` | ✅ 第一阶段部分覆盖 |
+| TOD 抽样差异 | `depreciation_tod_difference` | ✅ 第一阶段部分覆盖 |
+| 政策复核 | `depreciation_policy_*` | ✅ 基础规则已纳入 |
 
 ---
 
@@ -82,7 +86,7 @@
 
 1. K.01 M2b（FA list、SAD、TE 路由）  
 2. K.02 清单 **ingest + 必填 + vs 后推**  
-3. K.03 TOD **字段 + vs 后推**  
-4. SAP / 政策 → `NEED_REVIEW` + LLM
+3. K.03 第一阶段已完成：SAP 中/高精度、TOD 抽样、TOD by-item、政策复核已接入主 runner 和执行台账。  
+4. 后续继续补 K.03 证据充分性、复杂组合判断、LLM 语义复核和更细的跨表闭环。
 
 新建详细矩阵时：可复制 [k01-six-block-qc-matrix.md](./k01-six-block-qc-matrix.md) 表头，按上表「逻辑模块」拆区块逐条填「风险点 / 规则 / 状态」。

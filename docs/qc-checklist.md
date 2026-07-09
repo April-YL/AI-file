@@ -94,6 +94,7 @@ Agent 规则化建议：
 | 检查点 | 检查描述 | 自动化等级 | 建议规则 ID |
 | --- | --- | --- | --- |
 | SAP 类型选择 | `CRA = Minimal` 通常使用中精确度；`CRA = Low/Moderate/High` 通常使用高精确度 | `REVIEW` | `sap_precision_selection` |
+| SAP 差异处理 | SAP 测试差异应小于偏差阈值；如超过阈值，应有进一步跟进、调查和结论记录 | `REVIEW` | `sap_depreciation_difference` |
 | CRA 一致 | SAP 中 CRA 应与 K.00 计价/计量认定 CRA 一致 | `REVIEW` | `sap_cra_consistency` |
 | 实体类型 | 实体类型选择应与非复杂方法或抽样判断一致 | `REVIEW` | `sap_entity_type_consistency` |
 | 特别风险 | 存在特别风险且不依赖控制或控制无效时，应执行 TOD | `REVIEW` | `sap_special_risk_tod_required` |
@@ -108,6 +109,10 @@ Agent 规则化建议：
 | 重新计算差异 | 重新计算折旧与账面折旧差异超过容差应提示 | `AUTO_WARN` | `depreciation_recalculation_difference` |
 | 差异超过 SAD | 单项或合计差异超过 `SAD` 应进一步核查 | `AUTO_WARN` | `depreciation_difference_over_sad` |
 | 标准公式不适用 | 存在减值、后续资本性支出、寿命变更时，应人工复核公式 | `REVIEW` | `depreciation_formula_exception` |
+| TOD 抽样过程 | TOD-抽样折旧测试应能追溯总体、关键项目、选样输出参数和样本生成过程 | `REVIEW` | `depreciation_tod_sampling` |
+| TOD 抽样差异 | TOD-抽样折旧测试应保留样本明细、差异跟进和测试结论 | `REVIEW` | `depreciation_tod_difference` |
+
+> K.03 当前自动化边界：`sap_precision_selection`、`sap_depreciation_difference`、`depreciation_tod_sampling`、`depreciation_tod_difference` 已纳入主 runner，但均为“规则自动提示 + 人工判断”。系统检查路径、参数、差异结果、说明/结论是否存在或明显异常；证据是否充分恰当、差异说明是否足够支持审计结论，仍由质检人员复核。
 
 ## 九、K.03.3 折旧政策复核
 

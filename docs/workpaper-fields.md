@@ -41,9 +41,11 @@
 | `新增清单` | 当期新增资产清单 | `src/ingest/`、`src/rules/` |
 | `K.02.2 处置测试` | 处置/报废详细测试 | `src/report/`、人工复核 |
 | `处置清单` | 当期处置资产清单 | `src/ingest/`、`src/rules/` |
-| `K.03.1 SAP` | 折旧实质性分析程序 | `src/report/`、人工复核 |
-| `K.03.2 折旧测试TOD` | 折旧详细测试 | `src/rules/` |
-| `K.03.3 折旧政策复核` | 折旧政策合理性复核 | 人工复核 |
+| `K.03.1 SAP-中精确度` / `K.03.1 SAP-高精确度` | 折旧实质性分析程序；区分中精度、高精度路径，读取 CRA/TE/差异等摘要 | `src/ingest/k03_sheet.py`、`src/rules/k03_sap.py`；复杂证据充分性仍需人工复核 |
+| `K.03.2 折旧测试TOD-抽样` | 抽样方式折旧测试；与 `K.03.2a 折旧选样输出` 配套读取 | `src/ingest/k03_sheet.py`、`src/rules/k03_tod_sampling.py`；样本证据充分性仍需人工复核 |
+| `K.03.2a 折旧选样输出` | TOD 抽样/选样输出，作为抽样过程与总体口径核对的辅助输入 | `src/ingest/k03_sheet.py`、`src/rules/k03_tod_sampling.py` |
+| `K.03.2 折旧测试TOD-by item测试` | by-item 折旧详细测试；读取明细表、重算差异、合计和结论区 | `src/ingest/k03_sheet.py`、`src/rules/k03_tod_by_item.py` |
+| `K.03.3 折旧政策复核` | 折旧政策合理性复核；读取政策文本、结论区和明显异常提示 | `src/ingest/k03_sheet.py`、`src/rules/k03_policy_review.py`；复杂政策判断仍需人工复核 |
 
 ### K.01 Agree SL to GL（后推 / BKD）
 

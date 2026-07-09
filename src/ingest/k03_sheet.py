@@ -1067,3 +1067,387 @@ def _text(value: Any) -> str:
 
 def _norm(text: str) -> str:
     return re.sub(r"\s+", "", str(text).strip().lower())
+
+
+def _parse_sap_sheet(
+    path: Path,
+    sheet_name: str,
+    rows: list[tuple[Any, ...]],
+) -> K03SheetDataset:
+    name_text = _norm(sheet_name)
+    head_text = _norm(_combined_text(sheet_name, rows[:15]))
+    if "高精确度" in name_text or "高精度" in name_text or "highprecision" in head_text:
+        execution_path = EXECUTION_PATH_SAP_HIGH
+        template_type = "sap_high_precision"
+    elif "中精确度" in name_text or "中精度" in name_text or "mediumprecision" in head_text:
+        execution_path = EXECUTION_PATH_SAP_MEDIUM
+        template_type = "sap_medium_precision"
+    else:
+        execution_path = EXECUTION_PATH_UNKNOWN
+        template_type = "sap"
+
+    warnings: list[str] = []
+    if execution_path == EXECUTION_PATH_UNKNOWN:
+        warnings.append("k03_sap_precision_not_identified")
+
+    summary = _extract_sap_summary(rows)
+    return K03SheetDataset(
+        workbook_name=path.name,
+        source_file=str(path),
+        sheet_name=sheet_name,
+        k03_branch=K03_BRANCH_DEPRECIATION_TEST,
+        execution_path=execution_path,
+        template_type=template_type,
+        ingest_depth=INGEST_DEPTH_LIGHTWEIGHT,
+        rule_status=RULE_STATUS_READY_FOR_LATER_RULES,
+        detected_sections=_sap_detected_sections(summary),
+        warnings=warnings,
+        row_count=sum(1 for item in summary.get("sap_deviation_rows", []) if item),
+        column_count=0,
+        unsupported_or_later_phase=False,
+        summary=summary,
+        llm_candidate_context={
+            "sap_expectation_text": summary.get("sap_expectation_text"),
+            "sap_precision_reason_text": summary.get("sap_precision_reason_text"),
+            "sap_conclusion_text": summary.get("sap_conclusion_text"),
+            "warnings": warnings,
+        },
+    )
+
+
+def _parse_tod_sheet(
+    path: Path,
+    sheet_name: str,
+    rows: list[tuple[Any, ...]],
+    classified_kind: SheetKind,
+) -> K03SheetDataset:
+    header_row, header_cells, _ = scan_rows_for_headers(
+        rows,
+        sheet_kind=SheetKind.DEPRECIATION_TOD,
+    )
+    mapped_fields, unmapped = _map_k03_headers(header_cells)
+    normalized = {m.standard_field: m for m in mapped_fields}
+    raw_columns = [
+        K03Column(
+            source_header=text,
+            column_index=col,
+            column_letter=get_column_letter(col),
+            standard_field=next(
+                (m.standard_field for m in mapped_fields if m.column_index == col),
+                None,
+            ),
+        )
+        for col, text in header_cells
+    ]
+    by_item_score = _by_item_score(normalized)
+    sample_score = _sample_score(sheet_name, rows, header_cells)
+    sheet_text = _norm(sheet_name)
+    is_sampling_sheet = "抽样" in sheet_text or "sampling" in sheet_text
+    is_sample_output_sheet = "选样输出" in sheet_text or "sampleoutput" in sheet_text
+    warnings: list[str] = []
+
+    if is_sample_output_sheet:
+        execution_path = EXECUTION_PATH_TOD_SAMPLING
+        ingest_depth = INGEST_DEPTH_LIGHTWEIGHT
+        template_type = "tod_sampling_output"
+    elif is_sampling_sheet:
+        execution_path = EXECUTION_PATH_TOD_SAMPLING
+        ingest_depth = INGEST_DEPTH_LIGHTWEIGHT
+        template_type = "tod_sampling"
+    elif by_item_score >= 6 and sample_score < 3:
+        execution_path = EXECUTION_PATH_TOD_BY_ITEM
+        ingest_depth = INGEST_DEPTH_DETAILED
+        template_type = "tod_by_item"
+    elif by_item_score >= 7:
+        execution_path = EXECUTION_PATH_TOD_BY_ITEM
+        ingest_depth = INGEST_DEPTH_DETAILED
+        template_type = "tod_by_item"
+    elif sample_score >= 2 or (
+        classified_kind == SheetKind.DEPRECIATION_TOD_SAMPLE and bool(header_cells)
+    ):
+        execution_path = EXECUTION_PATH_TOD_SAMPLING
+        ingest_depth = INGEST_DEPTH_LIGHTWEIGHT
+        template_type = "tod_sampling"
+    else:
+        execution_path = EXECUTION_PATH_UNKNOWN
+        ingest_depth = INGEST_DEPTH_LIGHTWEIGHT
+        template_type = "tod_unknown"
+        warnings.append("k03_tod_execution_path_not_identified")
+
+    detail_rows, detail_range, total_rows = _extract_detail_rows(
+        rows,
+        header_row=header_row,
+        header_cells=header_cells,
+        normalized=normalized,
+    )
+    conclusion = _detect_conclusion_area(rows, header_row, detail_range)
+    note = _area_for_rows(rows, _rows_containing(rows, ("说明", "注：", "注", "Notes", "note")))
+    instruction = _area_for_rows(rows, _rows_containing(rows, ("获取", "编制", "按照", "根据")))
+    detected_sections: list[str] = []
+    if header_row:
+        detected_sections.append("header")
+    if detail_range:
+        detected_sections.append("detail_table")
+    if total_rows:
+        detected_sections.append("total_rows")
+    if conclusion:
+        detected_sections.append("conclusion_area")
+    if note:
+        detected_sections.append("note_area")
+    if instruction:
+        detected_sections.append("instruction_area")
+
+    if unmapped:
+        warnings.append("k03_unmapped_columns_present")
+    missing_noncritical = sorted(_BY_ITEM_CORE_FIELDS - set(normalized))
+    if execution_path == EXECUTION_PATH_TOD_BY_ITEM and missing_noncritical:
+        warnings.append("k03_tod_by_item_missing_noncritical_fields:" + ",".join(missing_noncritical))
+
+    preview_rows = [row.to_dict() for row in detail_rows[:5]]
+    field_summary = {
+        "raw_column_count": len(raw_columns),
+        "mapped_field_count": len(normalized),
+        "mapped_fields": sorted(normalized),
+        "unmapped_column_count": len(unmapped),
+        "amount_columns": sorted(set(normalized) & _AMOUNT_FIELDS),
+        "date_columns": sorted(set(normalized) & _DATE_FIELDS),
+    }
+    sampling_summary = _extract_tod_sampling_summary(rows, template_type, detail_rows)
+    table_ref = (
+        K03DetailTableRef(
+            source_file=str(path),
+            sheet_name=sheet_name,
+            start_row=detail_range.start_row,
+            end_row=detail_range.end_row,
+            start_col=detail_range.start_col,
+            end_col=detail_range.end_col,
+            header_row=header_row,
+        )
+        if detail_range
+        else None
+    )
+
+    return K03SheetDataset(
+        workbook_name=path.name,
+        source_file=str(path),
+        sheet_name=sheet_name,
+        k03_branch=K03_BRANCH_DEPRECIATION_TEST,
+        execution_path=execution_path,
+        template_type=template_type,
+        ingest_depth=ingest_depth,
+        rule_status=RULE_STATUS_READY_FOR_LATER_RULES,
+        detected_sections=detected_sections,
+        header_rows=[header_row] if header_row else [],
+        detail_table_ref=table_ref,
+        detail_table_range=detail_range,
+        total_rows=total_rows,
+        conclusion_area=conclusion,
+        note_area=note,
+        instruction_area=instruction,
+        raw_columns=raw_columns,
+        normalized_column_map={
+            field: K03Column(
+                source_header=m.source_header,
+                column_index=m.column_index,
+                column_letter=get_column_letter(m.column_index),
+                standard_field=m.standard_field,
+            )
+            for field, m in normalized.items()
+        },
+        unmapped_columns=unmapped,
+        warnings=warnings,
+        row_count=len(detail_rows),
+        column_count=len(raw_columns),
+        amount_columns=sorted(set(normalized) & _AMOUNT_FIELDS),
+        date_columns=sorted(set(normalized) & _DATE_FIELDS),
+        unsupported_or_later_phase=False,
+        summary={
+            **field_summary,
+            **sampling_summary,
+            "total_row_count": len(total_rows),
+            "has_conclusion_area": conclusion is not None,
+            "has_note_area": note is not None,
+            "has_instruction_area": instruction is not None,
+        },
+        preview_rows=preview_rows,
+        llm_candidate_context={
+            "instruction_area": instruction.to_dict() if instruction else None,
+            "note_area": note.to_dict() if note else None,
+            "conclusion_area": conclusion.to_dict() if conclusion else None,
+            "warnings": warnings,
+        },
+    )
+
+
+def _extract_sap_summary(rows: list[tuple[Any, ...]]) -> dict[str, Any]:
+    labels = {
+        "sap_entity_type": ("实体类型", "entity type"),
+        "sap_te": ("可容忍误差", "te"),
+        "sap_cra": ("cra",),
+        "sap_evidence_level": ("计划的保证水平", "planned assurance"),
+        "sap_threshold": ("偏差阈值", "deviation threshold"),
+    }
+    summary: dict[str, Any] = {}
+    for key, candidates in labels.items():
+        value, row_no, col_no = _find_label_value(rows, candidates)
+        if value is not None:
+            summary[key] = value
+            summary[f"{key}_row"] = row_no
+            summary[f"{key}_col"] = col_no
+    summary["sap_expectation_text"] = _collect_rows_after_tokens(rows, ("预期", "expectation"), max_rows=8)
+    summary["sap_precision_reason_text"] = _collect_rows_after_tokens(rows, ("精确", "precision"), max_rows=8)
+    summary["sap_decomposition_text"] = _collect_rows_after_tokens(rows, ("细分", "分解", "decomposition"), max_rows=8)
+    summary["sap_note_text"] = _collect_rows_after_tokens(rows, ("说明", "note", "备注"), max_rows=8)
+    summary["sap_conclusion_text"] = _collect_rows_after_tokens(rows, ("结论", "conclusion"), max_rows=8)
+    deviation_rows = _extract_sap_deviation_rows(rows)
+    summary["sap_deviation_rows"] = deviation_rows
+    summary["sap_deviation_over_threshold_count"] = sum(
+        1 for item in deviation_rows if _looks_yes(item.get("over_threshold"))
+    )
+    return summary
+
+
+def _extract_tod_sampling_summary(
+    rows: list[tuple[Any, ...]],
+    template_type: str,
+    detail_rows: list[K03DetailRow],
+) -> dict[str, Any]:
+    if template_type == "tod_sampling_output":
+        return _extract_tod_sampling_output_summary(rows)
+    if template_type != "tod_sampling":
+        return {}
+    summary: dict[str, Any] = {
+        "tod_population_amount": _find_label_value(rows, ("折旧费用总体", "population"))[0],
+        "tod_breakdown_depreciation_amount": _find_label_value(rows, ("breakdown", "折旧计提金额"))[0],
+        "tod_key_item_amount": _find_label_value(rows, ("测试的关键项目", "key item"))[0],
+        "tod_remaining_population": _find_label_value(rows, ("剩余总体", "remaining population"))[0],
+        "tod_key_item_reason_text": _collect_rows_after_tokens(rows, ("关键项目", "key item"), max_rows=6),
+        "tod_conclusion_text": _collect_rows_after_tokens(rows, ("结论", "conclusion"), max_rows=8),
+        "tod_sample_rows_count": len(detail_rows),
+    }
+    if detail_rows:
+        summary["tod_sample_preview"] = [row.to_dict() for row in detail_rows[:5]]
+    return summary
+
+
+def _extract_tod_sampling_output_summary(rows: list[tuple[Any, ...]]) -> dict[str, Any]:
+    return {
+        "sample_output_te": _find_label_value(rows, ("可容忍误差", "TE"))[0],
+        "sample_output_sampling_currency": _find_label_value(rows, ("抽样货币单元", "sampling currency"))[0],
+        "sample_output_population_amount": _find_label_value(rows, ("总体金额", "population amount"))[0],
+        "sample_output_key_item_count": _find_label_value(rows, ("关键项目数量", "key item quantity"))[0],
+        "sample_output_key_item_amount": _find_label_value(rows, ("关键项目金额", "key item amount"))[0],
+        "sample_output_dual_purpose": _find_label_value(rows, ("双重目的", "dual purpose"))[0],
+        "sample_output_overstatement": _find_label_value(rows, ("高估", "overstatement"))[0],
+        "sample_output_assurance_level": _find_label_value(rows, ("保证水平", "assurance"))[0],
+        "sample_output_sample_pool_amount": _find_label_value(rows, ("样本池", "sample pool"))[0],
+        "sample_output_expected_misstatement": _find_label_value(rows, ("预期错报", "expected misstatement"))[0],
+        "sample_output_sampling_method": _find_label_value(rows, ("抽样方法", "sampling method"))[0],
+        "sample_output_summary_text": _collect_rows_after_tokens(rows, ("样本", "sample"), max_rows=10),
+    }
+
+
+def _find_label_value(
+    rows: list[tuple[Any, ...]],
+    labels: tuple[str, ...],
+) -> tuple[Any, int | None, int | None]:
+    compact_labels = tuple(_norm(label) for label in labels)
+    for row_no, row in enumerate(rows, start=1):
+        for col_no, value in enumerate(row, start=1):
+            text = _norm(_text(value))
+            if not text or not any(label in text for label in compact_labels):
+                continue
+            for offset in range(1, 5):
+                candidate = _cell_value(row, col_no + offset)
+                if _text(candidate):
+                    return candidate, row_no, col_no + offset
+    return None, None, None
+
+
+def _collect_rows_after_tokens(
+    rows: list[tuple[Any, ...]],
+    tokens: tuple[str, ...],
+    *,
+    max_rows: int,
+) -> str | None:
+    compact_tokens = tuple(_norm(token) for token in tokens)
+    collected: list[str] = []
+    started = False
+    for row in rows:
+        row_text = " ".join(_text(value) for value in row if _text(value))
+        compact = _norm(row_text)
+        if not started:
+            if not any(token in compact for token in compact_tokens):
+                continue
+            started = True
+        if started and row_text:
+            collected.append(row_text)
+            if len(collected) >= max_rows:
+                break
+    return " ".join(collected) if collected else None
+
+
+def _extract_sap_deviation_rows(rows: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
+    marker_row = None
+    for row_no, row in enumerate(rows, start=1):
+        if "偏差是否超过阈值" in _norm(" ".join(_text(value) for value in row)):
+            marker_row = row_no
+            break
+    if marker_row is None:
+        return []
+    result: list[dict[str, Any]] = []
+    marker = rows[marker_row - 1]
+    deviation = rows[marker_row - 3] if marker_row >= 3 else ()
+    threshold = rows[marker_row - 4] if marker_row >= 4 else ()
+    actual = rows[marker_row - 2] if marker_row >= 2 else ()
+    for col_no in range(1, max(len(marker), len(deviation), len(threshold), len(actual)) + 1):
+        over_threshold = _cell_value(marker, col_no)
+        if not _text(over_threshold):
+            continue
+        result.append(
+            {
+                "row": marker_row,
+                "column": col_no,
+                "actual_depreciation": _cell_value(actual, col_no),
+                "deviation_amount": _cell_value(deviation, col_no),
+                "threshold": _cell_value(threshold, col_no),
+                "over_threshold": over_threshold,
+            }
+        )
+    return result[:20]
+
+
+def _looks_yes(value: Any) -> bool:
+    text = _norm(_text(value))
+    return text in {"是", "yes", "y", "true"} or text.startswith("是")
+
+
+def _sap_detected_sections(summary: dict[str, Any]) -> list[str]:
+    sections = ["sap_template"]
+    for key, name in (
+        ("sap_expectation_text", "expectation_area"),
+        ("sap_precision_reason_text", "precision_area"),
+        ("sap_deviation_rows", "deviation_table"),
+        ("sap_conclusion_text", "conclusion_area"),
+    ):
+        if summary.get(key):
+            sections.append(name)
+    return sections
+
+
+def _parse_k03_sheet(
+    *,
+    path: Path,
+    sheet_name: str,
+    rows: list[tuple[Any, ...]],
+    classified_kind: SheetKind,
+    classification_confidence: float,
+) -> K03SheetDataset:
+    sheet_text = _norm(sheet_name)
+    if "选样输出" in sheet_text or "抽样" in sheet_text or "sampling" in sheet_text:
+        return _parse_tod_sheet(path, sheet_name, rows, classified_kind)
+    if _is_policy_review(sheet_name, rows, classified_kind):
+        return _parse_policy_review(path, sheet_name, rows, classification_confidence)
+    if _is_sap_sheet(sheet_name, classified_kind):
+        return _parse_sap_sheet(path, sheet_name, rows)
+    return _parse_tod_sheet(path, sheet_name, rows, classified_kind)

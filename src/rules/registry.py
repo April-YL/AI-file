@@ -1580,7 +1580,7 @@ def _specs() -> list[RuleSpec]:
             k1_ref="K1 CheckList 第35条",
             manual_priority="P2-高优先级",
             agent_priority=AgentPriority.P3,
-            implementation=ImplementationStatus.PLANNED,
+            implementation=ImplementationStatus.IMPLEMENTED,
         ),
         RuleSpec(
             dict_code="DP-004",
@@ -1596,7 +1596,7 @@ def _specs() -> list[RuleSpec]:
             qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
             k1_ref="K1 CheckList 第36条",
             agent_priority=AgentPriority.P3,
-            implementation=ImplementationStatus.PLANNED,
+            implementation=ImplementationStatus.IMPLEMENTED,
         ),
         RuleSpec(
             dict_code="DP-005",
@@ -1627,7 +1627,7 @@ def _specs() -> list[RuleSpec]:
             qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
             k1_ref="K1 CheckList 第38条",
             agent_priority=AgentPriority.P3,
-            implementation=ImplementationStatus.PLANNED,
+            implementation=ImplementationStatus.IMPLEMENTED,
         ),
         RuleSpec(
             dict_code="DP-BI-PRE-001",
@@ -1778,7 +1778,7 @@ def _specs() -> list[RuleSpec]:
             qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
             k1_ref="K1 CheckList 第39条",
             agent_priority=AgentPriority.P3,
-            implementation=ImplementationStatus.PLANNED,
+            implementation=ImplementationStatus.IMPLEMENTED,
         ),
         RuleSpec(
             dict_code="DL-001",

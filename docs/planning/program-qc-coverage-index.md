@@ -34,7 +34,7 @@
 | **K.01 后推** | `K.01 Agree SL to GL` | [k01-six-block-qc-matrix.md](./k01-six-block-qc-matrix.md) | [k01-qc-rules.md](./k01-qc-rules.md) | ✅ 六区块 + L1 + 表2/表3 + TB check 摘录 + 表4折旧核对 | ✅ GL-005/006/007 + GL-002 表3 check/SAD/Notes + GL-004 表4折旧/SAD/Notes + GL-008 >SAD | ✅ `rollforward_sheet_section` |
 | **FA list** | `FA list` 等 | （见 checklist §四） | `fa_list_*` | ✅ | ✅ M1 三条 + 扩展规划 | findings + 标注 |
 | **K.02 新增/处置** | 新增清单、处置清单、测试表 | [k02-k03-qc-matrix.md](./k02-k03-qc-matrix.md) § K.02 | 待建 | ⏳ 清单 ingest | ❌ | ❌ |
-| **K.03 折旧** | SAP、TOD、政策复核 | [k02-k03-qc-matrix.md](./k02-k03-qc-matrix.md) § K.03 | 待建 | ⏳ 部分 | ❌ | ❌ |
+| **K.03 折旧** | SAP、TOD、政策复核 | [k02-k03-qc-matrix.md](./k02-k03-qc-matrix.md) § K.03 | 第一阶段已纳入：SAP 中/高精度、TOD 抽样、TOD by-item、政策复核 | ✅ 路径识别 + 轻量摘要 | ✅ SAP/TOD 抽样/TOD by-item/政策复核部分规则 | ✅ K.03 findings + execution ledger |
 
 **交叉规则（多程序）**：
 
@@ -58,7 +58,7 @@
     → K.02 / K.03（>TE 路由后的详细程序）
 ```
 
-当前 **已通链路**：汇总 AE-003 + Lead 规则集 + K.01 识别与 P0 + LEAD-010 + GL-002 表3 check + TB check 摘录 + GL-004 表4折旧核对 + GL-008 >SAD Notes；**未通**：K.01 TE 路由、K.02/K.03 规则、Notes 充分性/TE 闭环。
+当前 **已通链路**：汇总 AE-003 + Lead 规则集 + K.01 识别与 P0 + LEAD-010 + GL-002 表3 check + TB check 摘录 + GL-004 表4折旧核对 + GL-008 >SAD Notes + K.03 第一阶段（SAP 中/高精度、TOD 抽样、TOD by-item、政策复核）；**未通**：K.01 TE 路由、K.02 规则余量、K.03 证据充分性/复杂组合判断、Notes 充分性/TE 闭环。
 
 ---
 

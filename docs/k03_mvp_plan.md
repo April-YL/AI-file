@@ -6,7 +6,9 @@ K.03 MVP 的目标不是一次性完成 K.03 全路径，而是先形成可展�
 
 1. 优先完成折旧测试中的 TOD-by item ingest + rules；
 2. 紧接完成折旧政策复核 ingest + 最小 rules；
-3. SAP 中精确度、SAP 高精确度、TOD-抽样、SAP + TOD-抽样组合暂时只保留路径识别和 later-phase marker，后续再完善。
+3. SAP 中精确度、SAP 高精确度、TOD-抽样、SAP + TOD-抽样组合先以“路径识别 + 部分确定性规则 + 人工复核边界”的方式纳入第一阶段，不一次性判断全部证据充分性。
+
+> 2026-07-09 更新：本文原先的 1A–1F 是早期 MVP 计划。当前实际进度已经完成 K.03 第一阶段扩展：SAP 中/高精度、TOD 抽样、TOD by-item、折旧政策复核均已接入主 runner、registry、execution ledger 和 checklist 映射 v0.5。下文保留原阶段结构，但早期“仅保留 SAP / TOD-抽样路径识别”的旧口径已不再代表当前状态。
 
 ## A. K.03 业务结构
 
@@ -26,17 +28,31 @@ K.03 包含两个重要测试：
 
 ## B. 当前 MVP 范围
 
-当前为了满足整体进度展示，MVP 不追求一次性完成 K.03 全路径，而是优先完成：
+当前为了满足整体进度展示，MVP 不追求一次性完成 K.03 全路径。早期优先完成：
 
 1. TOD-by item 折旧测试；
 2. 折旧政策复核。
 
-MVP 暂不展开：
+早期 MVP 暂不展开：
 
 1. SAP 中精确度详细规则；
 2. SAP 高精确度详细规则；
 3. TOD-抽样详细规则；
 4. SAP + TOD-抽样组合充分性判断。
+
+当前第一阶段已补充展开：
+
+1. SAP 中精确度 / 高精确度路径识别、精确度选择与差异处理提示；
+2. TOD-抽样主测试页与 `K.03.2a` 选样输出识别、抽样过程与差异处理提示；
+3. TOD-by item 明细读取、重算差异和 K.01 折旧勾稽；
+4. 折旧政策复核轻量读取、基础完整性和明显异常提示。
+
+仍不自动覆盖的边界：
+
+1. SAP + TOD-抽样组合是否足以支持整体审计结论；
+2. 抽样证据、解释和支持性文件是否充分；
+3. 折旧政策合理性的复杂语义判断；
+4. 涉及项目背景、重大判断或非标准底稿结构的人工复核事项。
 
 ## C. 已完成阶段
 
@@ -50,6 +66,15 @@ MVP 暂不展开：
 6. SAP / TOD-抽样 later-phase marker；
 7. 大表 deterministic 全量 ingest、LLM/report 轻量 context；
 8. K.03 ingest 不产生 finding 的护栏。
+
+阶段 1B–1F 当前状态：
+
+1. TOD-by item deterministic rules 已接入；
+2. 折旧政策复核最小 rules 已接入；
+3. SAP 中/高精度第一阶段规则已接入；
+4. TOD-抽样第一阶段规则已接入；
+5. K.03 report / execution ledger 已随主流程输出；
+6. checklist 映射已同步至 `规则映射v0.5_K03更新` 和 `当前规则能力目录_v2`。
 
 阶段 1A checkpoint：
 
@@ -66,7 +91,7 @@ MVP 暂不展开：
 1. 基于阶段 1A ingest dataset 输出最小 finding；
 2. 优先覆盖高频实际底稿；
 3. 不依赖 LLM；
-4. 不开发 SAP / TOD-抽样规则。
+4. 本阶段原计划仅覆盖 TOD-by item；当前已由 2026-07-09 第一阶段扩展补齐 SAP / TOD-抽样部分自动规则。
 
 建议规则：
 
@@ -121,9 +146,9 @@ MVP 暂不展开：
 
 后续完善包括：
 
-1. SAP 中精确度详细 ingest/rules；
-2. SAP 高精确度详细 ingest/rules；
-3. TOD-抽样详细 ingest/rules；
+1. SAP 中精确度详细证据充分性判断；
+2. SAP 高精确度详细证据充分性判断；
+3. TOD-抽样样本证据充分性和支持性文件判断；
 4. SAP + TOD-抽样组合判断；
 5. 更细的 LLM semantic checks。
 
@@ -138,9 +163,9 @@ MVP 暂不展开：
 
 ## F. 阶段边界
 
-1. 当前主线不是完整 K.03 全路径，而是 K.03 MVP。
-2. 当前优先级是 TOD-by item 和折旧政策复核。
-3. SAP / TOD-抽样不是不重要，而是 later phase。
+1. 当前主线不是完整 K.03 全路径，而是 K.03 第一阶段闭环。
+2. 当前已覆盖 TOD-by item、折旧政策复核、SAP 中/高精度和 TOD-抽样的部分自动规则。
+3. SAP / TOD-抽样已经纳入第一阶段，但复杂证据充分性和组合结论仍是后续完善项。
 4. 不允许 LLM 覆盖 deterministic rules。
 5. 不允许因为非关键字段缺失直接 FAIL。
 6. 不允许将全量明细塞入 report 或 LLM context。
