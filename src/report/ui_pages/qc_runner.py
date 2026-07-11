@@ -23,7 +23,8 @@ from report.export_json import export_report_json
 from report.export_review_html import export_review_html
 from report.pipeline import run_input_qc
 from report.ui_state.project_store import ensure_default_project
-from report.ui_state.run_store import save_run
+from report.ui_state.database import ARTIFACTS_DIR
+from report.ui_state.run_store import get_run, save_run
 from rules.delivery_completion import DeliveryCompletionContext
 
 _QC_CACHE_VERSION = "20260708-ui-v3-workbench"
@@ -61,6 +62,8 @@ _RUNNER_STEPS = [
     "生成标注副本",
     "保存运行记录",
 ]
+
+_ACTIVE_RUN_KEY = "active_run"
 
 
 def _new_run_id(now: datetime | None = None) -> str:
@@ -251,16 +254,8 @@ def render_qc_runner() -> None:
     )
 
     if not uploaded:
-        _persist_runner_config(
-            runner_state,
-            delivery_stage=delivery_stage,
-            use_llm=use_llm,
-            provider=provider,
-            model_name=model_name,
-            api_url=api_url,
-            api_key_present=bool(api_key),
-            uploaded=[],
-        )
+        if _render_unfinished_run_notice():
+            return
         _render_upload_summary([])
         return
     _persist_runner_config(
@@ -279,6 +274,7 @@ def render_qc_runner() -> None:
     if st.button("执行复核", type="primary", use_container_width=True):
         st.session_state["qc_results"] = {}
         st.session_state["qc_errors"] = {}
+        st.session_state.pop("last_saved_run_id", None)
         run_id = _new_run_id()
         runner_state["status"] = "running"
         runner_state["started_at"] = datetime.now().isoformat(timespec="seconds")
@@ -291,6 +287,7 @@ def render_qc_runner() -> None:
 
         for idx, uf in enumerate(uploaded):
             progress.progress(idx / len(uploaded), text=f"读取底稿：{uf.name}")
+            _start_active_run(uf.name, run_id)
             try:
                 _mark_runner_step(runner_state, "读取底稿", status="进行中")
                 _mark_runner_step(runner_state, "识别工作表", status="进行中")
@@ -311,8 +308,12 @@ def render_qc_runner() -> None:
                 for step in _RUNNER_STEPS[:-1]:
                     _mark_runner_step(runner_state, step, data.get("runtime_timings") or {}, status="已完成")
                 progress.progress((idx + 0.85) / len(uploaded), text=f"保存运行记录：{uf.name}")
+                _mark_runner_step(runner_state, "保存运行记录", status="进行中")
                 saved_run_id = save_run(project_id, uf.name, data, json_bytes, html_bytes, ann_bytes)
+                _validate_saved_run(saved_run_id, expect_annotated=ann_bytes is not None)
                 _mark_runner_step(runner_state, "保存运行记录", status="已完成")
+                _finish_active_run(saved_run_id)
+                st.session_state["last_saved_run_id"] = saved_run_id
                 st.session_state.setdefault("qc_results", {})[uf.name] = {
                     "data": data,
                     "json_bytes": json_bytes,
@@ -326,6 +327,7 @@ def render_qc_runner() -> None:
                 runner_state["status"] = "failed"
                 runner_state["current_step"] = "执行异常"
                 runner_state["last_error"] = str(e)
+                _fail_active_run(str(e))
                 _mark_runner_step(runner_state, runner_state.get("current_step") or "执行异常", status="失败")
             progress.progress((idx + 1) / len(uploaded), text="已处理")
 
@@ -343,6 +345,8 @@ def render_qc_runner() -> None:
 
         if st.session_state.get("qc_errors"):
             runner_state["status"] = "failed"
+            st.error("本次复核未完成保存，请查看最近错误后重新执行。")
+            return
         else:
             runner_state["status"] = "finished"
             runner_state["current_step"] = "保存运行记录"
@@ -374,6 +378,93 @@ def _runner_state() -> dict:
     state.setdefault("last_error", "")
     state.setdefault("api_key_present", False)
     return state
+
+
+def _start_active_run(filename: str, run_id: str) -> dict:
+    """记录当前同步执行草稿，避免结果页误展示旧运行。"""
+    active = {
+        "status": "running",
+        "filename": filename,
+        "run_id": run_id,
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+        "current_step": "读取底稿",
+        "saved_run_id": None,
+        "error": "",
+        "step_statuses": {step: "未开始" for step in _RUNNER_STEPS},
+    }
+    st.session_state[_ACTIVE_RUN_KEY] = active
+    return active
+
+
+def _active_run() -> dict:
+    active = st.session_state.setdefault(_ACTIVE_RUN_KEY, {})
+    return active if isinstance(active, dict) else {}
+
+
+def _finish_active_run(saved_run_id: int) -> None:
+    active = _active_run()
+    active.update(
+        {
+            "status": "finished",
+            "current_step": "保存运行记录",
+            "saved_run_id": saved_run_id,
+            "finished_at": datetime.now().isoformat(timespec="seconds"),
+            "error": "",
+        }
+    )
+
+
+def _fail_active_run(error: str) -> None:
+    active = _active_run()
+    active.update(
+        {
+            "status": "failed",
+            "current_step": "执行异常",
+            "error": error,
+            "failed_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+
+
+def _validate_saved_run(saved_run_id: int, *, expect_annotated: bool) -> None:
+    saved = get_run(saved_run_id)
+    if not saved or not saved.get("data"):
+        raise RuntimeError(f"运行记录 {saved_run_id} 保存后无法读取")
+    artifact_dir = saved.get("artifact_dir")
+    if not artifact_dir:
+        raise RuntimeError(f"运行记录 {saved_run_id} 未记录产物目录")
+    artifact_path = ARTIFACTS_DIR / str(artifact_dir)
+    required = ["report.json", "review.html"]
+    if expect_annotated:
+        required.append("annotated.xlsx")
+    missing = [name for name in required if not (artifact_path / name).exists()]
+    if missing:
+        raise RuntimeError(f"运行记录 {saved_run_id} 缺少产物：{', '.join(missing)}")
+
+
+def _render_unfinished_run_notice() -> bool:
+    active = _active_run()
+    status = active.get("status")
+    if status not in {"running", "failed"}:
+        return False
+    filename = active.get("filename") or "上一份底稿"
+    if status == "running":
+        st.warning(
+            f"{filename} 的复核状态尚未完成保存。当前步骤：{active.get('current_step') or '—'}。"
+            "请等待执行完成，或刷新后重新上传执行。"
+        )
+    else:
+        st.error(f"{filename} 的复核未完成保存：{active.get('error') or '未知错误'}")
+        if st.button("清除本次失败状态", key="runner_clear_failed_run"):
+            st.session_state.pop(_ACTIVE_RUN_KEY, None)
+            runner_state = st.session_state.get("runner_state")
+            if isinstance(runner_state, dict):
+                runner_state["status"] = "idle"
+                runner_state["current_step"] = "待执行"
+                runner_state["last_error"] = ""
+                runner_state["step_statuses"] = {step: "未开始" for step in _RUNNER_STEPS}
+            st.rerun()
+    return True
 
 
 def _render_runner_status_panel(state: dict) -> None:
@@ -472,8 +563,13 @@ def _mark_runner_step(
     status: str | None = None,
 ) -> None:
     state["current_step"] = step
+    active = _active_run()
+    if active.get("status") == "running":
+        active["current_step"] = step
     if status and step in _RUNNER_STEPS:
         state.setdefault("step_statuses", {})[step] = status
+        if active.get("status") == "running":
+            active.setdefault("step_statuses", {})[step] = status
     step_timings = state.setdefault("step_timings", {})
     mapping = {
         "读取底稿": "ingest_seconds",

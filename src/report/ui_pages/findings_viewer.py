@@ -27,23 +27,34 @@ from report.ui_state.run_store import get_latest_run, list_runs, get_run
 
 def render_findings_viewer() -> None:
     """渲染复核结果页。"""
+    active_run = st.session_state.get("active_run") or {}
+    if _block_unfinished_active_run(active_run):
+        return
+
     # 历史运行选择器
     runs = list_runs(limit=50)
     # 先从 session_state 取最新结果
     session_results = st.session_state.get("qc_results", {})
+    target_run_id = st.session_state.get("last_saved_run_id")
     if session_results:
         latest_run_id = None
         for bundle in session_results.values():
             latest_run_id = bundle.get("saved_run_id")
             break
+        target_run_id = target_run_id or latest_run_id
         default_idx = 0
-        if latest_run_id and runs:
+        if target_run_id and runs:
             for i, r in enumerate(runs):
-                if r["id"] == latest_run_id:
+                if r["id"] == target_run_id:
                     default_idx = i
                     break
     else:
         default_idx = 0
+        if target_run_id and runs:
+            for i, r in enumerate(runs):
+                if r["id"] == target_run_id:
+                    default_idx = i
+                    break
 
     if not runs:
         st.info("暂无运行记录。请先执行一次复核。")
@@ -56,7 +67,7 @@ def render_findings_viewer() -> None:
     )
 
     # 优先 session_state 最新结果
-    if session_results and selected_run == runs[default_idx]["id"]:
+    if session_results and selected_run == target_run_id:
         names = list(session_results.keys())
         bundle = session_results[names[0]]
         data = bundle["data"]
@@ -135,6 +146,31 @@ def render_findings_viewer() -> None:
 
     with tab_extract:
         _render_manual_review(data)
+
+
+def _block_unfinished_active_run(active_run: dict) -> bool:
+    """阻止未保存运行时把旧历史结果误展示为本次结果。"""
+    if not isinstance(active_run, dict):
+        return False
+    status = active_run.get("status")
+    saved_run_id = active_run.get("saved_run_id")
+    if status in {"running", "failed"} and not saved_run_id:
+        filename = active_run.get("filename") or "当前底稿"
+        if status == "running":
+            st.warning(
+                f"{filename} 的复核尚未完成保存，当前步骤：{active_run.get('current_step') or '—'}。"
+                "为避免误读旧结果，本页暂不展示历史运行。"
+            )
+        else:
+            st.error(
+                f"{filename} 的复核未完成保存：{active_run.get('error') or '未知错误'}。"
+                "请回到执行复核页重新执行。"
+            )
+        if st.button("返回执行复核", key="fv_back_to_runner_for_active_run"):
+            st.session_state["active_page"] = "runner"
+            st.rerun()
+        return True
+    return False
 
 
 def _render_findings_stats(data: dict) -> None:

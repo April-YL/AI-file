@@ -37,6 +37,11 @@ def test_runner_uses_vertical_audit_workflow():
     assert "LLM 默认关闭" in source
     assert "后端 LLM 调用逻辑保持不变" in source
     assert "runner_state" in source
+    assert "active_run" in inspect.getsource(__import__("report.ui_pages.qc_runner", fromlist=[""]))
+    assert "last_saved_run_id" in source
+    assert "_validate_saved_run(saved_run_id" in source
+    assert "get_run(saved_run_id)" in inspect.getsource(__import__("report.ui_pages.qc_runner", fromlist=[""]))
+    assert "_render_unfinished_run_notice()" in source
     assert "服务商" in source
     assert "模型名称" in source
     assert "拖拽 Excel 到此处或点击选择" in source
@@ -127,8 +132,13 @@ def test_findings_result_tabs_are_not_duplicate_or_ambiguous():
     from report.ui_components.findings_table import _render_finding_trace
 
     viewer_source = inspect.getsource(render_findings_viewer)
+    viewer_module = inspect.getsource(__import__("report.ui_pages.findings_viewer", fromlist=[""]))
     trace_source = inspect.getsource(_render_finding_trace)
 
+    assert "last_saved_run_id" in viewer_source
+    assert "_block_unfinished_active_run(active_run)" in viewer_source
+    assert "为避免误读旧结果" in viewer_module
+    assert "返回执行复核" in viewer_module
     assert "Findings 明细" in viewer_source
     assert "质检点执行台账" in viewer_source
     assert "基本信息摘录" in viewer_source
