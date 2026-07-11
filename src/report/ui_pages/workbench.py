@@ -7,56 +7,37 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import streamlit as st
 
 from report.ui_components.cards import (
-    render_info_banner,
     render_section_title,
     render_severity_badge,
     render_stat_card,
 )
-from report.ui_components.download_bar import render_download_bar
 from report.ui_components.execution_ledger_table import build_execution_scope_summary
-from report.ui_state.run_store import get_latest_run, list_runs, get_run
+from report.ui_state.run_store import get_latest_run
 from report.ui_state.project_store import get_project
 
 
 def render_workbench() -> None:
     """渲染复核工作台首页。"""
-    runs = list_runs(limit=50)
-    if not runs:
+    latest = get_latest_run()
+    if not latest or not latest.get("data"):
         _render_empty_state()
         return
 
-    # 运行选择器
-    run_options = {r["id"]: f"{r.get('completed_at','')} · {r.get('source_filename','')} · {r.get('overall_severity','')}" for r in runs}
-    selected_run = st.selectbox(
-        "查看运行", options=list(run_options.keys()),
-        format_func=lambda x: run_options[x], index=0, key="wb_run_sel",
-    )
-    run = get_run(selected_run)
-    if not run or not run.get("data"):
-        _render_empty_state()
-        return
-
-    latest = run
     data = latest.get("data") or {}
     summary = data.get("summary") or {}
     project = get_project(latest.get("project_id"))
 
-    _render_project_status(project, latest, summary)
-    _render_quick_stats(summary, data)
-    col_left, col_right = st.columns([1.9, 1])
+    top_left, top_right = st.columns([2.2, 1])
+    with top_left:
+        _render_project_status(project, latest, summary)
+    with top_right:
+        _render_primary_actions(data)
 
-    with col_left:
-        _render_pending_queue(data)
-        _render_execution_coverage(data)
-
-    with col_right:
-        _render_quick_actions(latest)
-        _render_recent_timeline()
+    _render_pending_queue(data)
+    _render_execution_coverage(data)
 
 
 def _render_empty_state() -> None:
@@ -80,10 +61,11 @@ def _render_empty_state() -> None:
 
 def _render_project_status(project: dict | None, latest: dict, summary: dict) -> None:
     """项目状态栏。"""
-    proj_name = project.get("name", "未命名项目") if project else "未命名项目"
+    proj_name = "当前复核状态"
     eng_name = project.get("engagement_name", "") if project else ""
     subject = latest.get("subject_code", "FA_K1")
     subject_display = "固定资产 K1" if subject == "FA_K1" else subject
+    data = latest.get("data") or {}
 
     eng_badge = f" · {eng_name}" if eng_name else ""
     overall = summary.get("overall_severity", "PASS")
@@ -91,45 +73,30 @@ def _render_project_status(project: dict | None, latest: dict, summary: dict) ->
         f"""
         <div class="qc-file-header">
           <h2>{proj_name}{eng_badge}</h2>
-          <p>科目：{subject_display} · 最近复核：{latest.get('completed_at', '—')} · 最高提示级别：{overall}</p>
+          <p>科目：{subject_display} · 待处理事项：{_non_pass_count(data)} · 最高提示级别：{overall}</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-def _render_quick_stats(summary: dict, data: dict) -> None:
-    """快速统计卡片行。"""
-    overall = summary.get("overall_severity", "PASS")
-    findings = _non_pass_count(data)
-    scope = build_execution_scope_summary(data)
-    all_rules = scope.get("total") or (data.get("rule_execution_summary") or {}).get("matrix_rule_count", 0)
-    executed = scope.get("executed") or 0
-
-    cols = st.columns(4)
-    with cols[0]:
-        render_stat_card(
-            "上次复核最高提示级别",
-            render_severity_badge(overall),
-            f"{findings} findings",
-            "high" if overall == "FAIL" else "warn" if overall == "WARN" else "info",
-        )
-    with cols[1]:
-        render_stat_card("规则执行", f"{executed} / {all_rules}", f"{scope.get('pending_record', 0)} 条待补充记录", "info")
-    with cols[2]:
-        fail_count = summary.get("fail_count", 0)
-        warn_count = summary.get("warn_count", 0)
-        render_stat_card("需关注项", str(fail_count + warn_count), f"异常 {fail_count} + 需关注 {warn_count}", "warn")
-    with cols[3]:
-        review_count = summary.get("need_review_count", 0)
-        render_stat_card("待审计师判断", str(review_count), "NEED_REVIEW · 需审计师判断", "review")
-
-
 def _render_pending_queue(data: dict) -> None:
     """待处理 Findings 摘要：工作台只保留入口，不重复完整清单。"""
-    render_section_title("待处理复核事项")
-
+    summary = data.get("summary") or {}
     issues = _non_pass_issues(data)
+    render_section_title("待处理复核事项", "首页只展示当前需要处理的事项入口，不替代复核结果明细。")
+
+    count_cols = st.columns(4)
+    count_items = [
+        ("待处理", len(issues), "非 PASS findings", "info"),
+        ("异常", summary.get("fail_count", 0), "FAIL", "high"),
+        ("需关注", summary.get("warn_count", 0), "WARN", "warn"),
+        ("待人工判断", summary.get("need_review_count", 0), "NEED_REVIEW", "review"),
+    ]
+    for col, (label, value, note, tone) in zip(count_cols, count_items):
+        with col:
+            render_stat_card(label, str(value), note, tone)
+
     if not issues:
         st.success("暂无待处理 Findings。")
         return
@@ -174,58 +141,17 @@ def _render_execution_coverage(data: dict) -> None:
             render_stat_card(label, str(value), note, tone)
 
 
-def _render_quick_actions(latest: dict) -> None:
-    """快速操作区。"""
-    st.markdown("**快速操作**")
+def _render_primary_actions(data: dict) -> None:
+    """首页主操作：只保留启动复核与查看结果。"""
+    st.markdown("**操作**")
 
-    if st.button("开始新复核", type="primary", use_container_width=True):
+    if st.button("开始新复核", type="primary", use_container_width=True, key="wb_start_review"):
         st.session_state["active_page"] = "runner"
+        st.rerun()
 
-    # 底稿交付物下载
-    artifact_dir = latest.get("artifact_dir")
-    data = latest.get("data") or {}
-    if data and artifact_dir:
-        from report.ui_state.database import ARTIFACTS_DIR
-        ad = ARTIFACTS_DIR / artifact_dir
-        json_path = ad / "report.json"
-        html_path = ad / "review.html"
-        xlsx_path = ad / "annotated.xlsx"
-
-        if json_path.exists() and html_path.exists():
-            st.markdown("**上次复核交付物**")
-            with open(json_path, "rb") as f:
-                json_bytes = f.read()
-            with open(html_path, "rb") as f:
-                html_bytes = f.read()
-            annotated = xlsx_path.read_bytes() if xlsx_path.exists() else None
-            render_download_bar(
-                latest.get("source_filename", "workpaper"),
-                str(latest.get("id", "")),
-                json_bytes,
-                html_bytes,
-                annotated,
-            )
-
-    if st.button("查看运行历史", use_container_width=True):
-        st.session_state["active_page"] = "history"
-
-
-def _render_recent_timeline() -> None:
-    """最近运行时间线（最多 2 条）。"""
-    st.markdown("**最近运行**")
-    runs = list_runs(limit=2)
-    if not runs:
-        st.caption("暂无运行记录")
-        return
-    for item in runs[:2]:
-        sev = item.get("overall_severity", "PASS")
-        cls = {"FAIL": "high", "WARN": "warn", "PASS": "pass"}.get(sev, "info")
-        render_stat_card(
-            item.get("source_filename", "—"),
-            render_severity_badge(sev),
-            f"{item.get('completed_at', '—')} · {item.get('finding_count', 0)} findings · {'LLM' if item.get('llm_enabled') else '纯规则'}",
-            cls,
-        )
+    if st.button(f"查看结果（{_non_pass_count(data)} 条）", use_container_width=True, key="wb_view_results"):
+        st.session_state["active_page"] = "findings"
+        st.rerun()
 
 
 # ---- helpers ----

@@ -175,35 +175,49 @@ def render_findings_explorer(
     if pri_filter and pri_filter != "全部优先级":
         filtered = [r for r in filtered if r["优先级"] == pri_filter]
 
-    # --- 表格 ---
+    # --- 表格 + 详情 ---
     st.caption(f"共 {len(filtered)} 条（总数 {len(rows)} 条）")
+    if not filtered:
+        st.info("当前筛选条件下暂无 findings。")
+        return
 
     display_cols = ["级别", "优先级", "程序", "工作表", "单元格", "规则", "说明"]
-    st.dataframe(
-        [{c: r[c] for c in display_cols} for r in filtered],
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "级别": st.column_config.TextColumn(width="small"),
-            "说明": st.column_config.TextColumn(width="large"),
-        },
-    )
-
-    # --- 行详情展开 ---
-    with st.expander("点击上方表格行序号查看详情（选择行号）", expanded=False):
-        row_idx = st.number_input(
-            "行号", min_value=1, max_value=len(filtered),
-            value=1, key=f"{key_prefix}_detail_idx",
-            label_visibility="collapsed",
+    table_col, detail_col = st.columns([1.55, 1])
+    with table_col:
+        event = st.dataframe(
+            [{c: r[c] for c in display_cols} for r in filtered],
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key=f"{key_prefix}_findings_table",
+            column_config={
+                "级别": st.column_config.TextColumn(width="small"),
+                "优先级": st.column_config.TextColumn(width="medium"),
+                "程序": st.column_config.TextColumn(width="medium"),
+                "工作表": st.column_config.TextColumn(width="medium"),
+                "单元格": st.column_config.TextColumn(width="small"),
+                "规则": st.column_config.TextColumn(width="medium"),
+                "说明": st.column_config.TextColumn(width="large"),
+            },
         )
-        if 1 <= row_idx <= len(filtered):
-            _render_finding_detail(filtered[row_idx - 1])
+
+    selected_rows = event.selection.rows if hasattr(event, "selection") else []
+    selected_row = filtered[0]
+    if selected_rows:
+        selected_idx = selected_rows[0]
+        if 0 <= selected_idx < len(filtered):
+            selected_row = filtered[selected_idx]
+
+    with detail_col:
+        st.caption("选中左侧 finding 后查看定位、说明和系统取数证据。")
+        _render_finding_detail(selected_row)
 
 
 def _render_finding_detail(row: dict) -> None:
     """渲染单条 finding 的详细面板（含 trace）。"""
     issue = row.get("_issue", {})
-    st.markdown(f"### {render_severity_badge(row['级别'])}  {row.get('规则', '—')}", unsafe_allow_html=True)
+    st.markdown(f"#### {render_severity_badge(row['级别'])}  {row.get('规则', '—')}", unsafe_allow_html=True)
 
     col1, col2 = st.columns(2)
     with col1:

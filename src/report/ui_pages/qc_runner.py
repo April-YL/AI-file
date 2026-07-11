@@ -131,9 +131,7 @@ def _run_qc_cached(
 def render_qc_runner() -> None:
     """渲染执行复核页。"""
     st.subheader("执行复核")
-    render_info_banner()
     runner_state = _runner_state()
-    _render_runner_status_panel(runner_state)
 
     # --- 项目选择 ---
     project_id = _ensure_project()
@@ -254,9 +252,20 @@ def render_qc_runner() -> None:
     )
 
     if not uploaded:
-        if _render_unfinished_run_notice():
-            return
+        _persist_runner_config(
+            runner_state,
+            delivery_stage=delivery_stage,
+            use_llm=use_llm,
+            provider=provider,
+            model_name=model_name,
+            api_url=api_url,
+            api_key_present=bool(api_key),
+            uploaded=[],
+        )
         _render_upload_summary([])
+        _render_execute_area([])
+        _render_runner_status_panel(runner_state)
+        _render_unfinished_run_notice()
         return
     _persist_runner_config(
         runner_state,
@@ -271,7 +280,7 @@ def render_qc_runner() -> None:
     _render_upload_summary(uploaded)
 
     # --- 4. 执行复核 ---
-    if st.button("执行复核", type="primary", use_container_width=True):
+    if _render_execute_area(uploaded):
         st.session_state["qc_results"] = {}
         st.session_state["qc_errors"] = {}
         st.session_state.pop("last_saved_run_id", None)
@@ -353,6 +362,7 @@ def render_qc_runner() -> None:
             runner_state["finished_at"] = datetime.now().isoformat(timespec="seconds")
         st.session_state["active_page"] = "findings"
         st.rerun()
+    _render_runner_status_panel(runner_state)
 
 
 def render_info_banner() -> None:
@@ -618,6 +628,16 @@ def _render_upload_summary(uploaded: list) -> None:
         f"已选择 {len(uploaded)} 个文件，总大小 {_format_file_size(total_size)}："
         + "；".join(f"{uf.name}（{_format_file_size(len(uf.getvalue()))}）" for uf in uploaded)
     )
+
+
+def _render_execute_area(uploaded: list) -> bool:
+    """渲染执行入口；未上传时入口保持可见但不可执行。"""
+    st.markdown("### 执行复核")
+    if not uploaded:
+        st.button("执行复核", type="primary", use_container_width=True, disabled=True, key="runner_execute_disabled")
+        st.caption("请先上传底稿，再开始质检。")
+        return False
+    return st.button("执行复核", type="primary", use_container_width=True, key="runner_execute")
 
 
 def _test_llm_connection(

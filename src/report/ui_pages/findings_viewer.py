@@ -101,7 +101,7 @@ def render_findings_viewer() -> None:
             if xlsx_path.exists():
                 annotated_bytes = xlsx_path.read_bytes()
 
-    # --- 顶栏 ---
+    # --- 顶部：紧凑运行条 + 交付物 ---
     summary = data.get("summary") or {}
     overall = summary.get("overall_severity", "PASS")
     findings = _finding_count(data)
@@ -109,8 +109,8 @@ def render_findings_viewer() -> None:
     st.markdown(
         f"""
         <div class="qc-info-banner">
-          当前查看：<strong>{filename}</strong> ·
-          {render_severity_badge(overall)} · {findings} findings
+          当前运行：<strong>{filename}</strong> ·
+          {render_severity_badge(overall)} · {findings} findings · 运行编号 {run_id}
         </div>
         """,
         unsafe_allow_html=True,
@@ -119,23 +119,15 @@ def render_findings_viewer() -> None:
     # --- 底稿交付物下载（仅在有真实数据时显示）---
     if json_bytes and html_bytes and json_bytes != b"{}" and html_bytes != b"<html></html>":
         render_download_bar(filename, run_id, json_bytes, html_bytes, annotated_bytes)
+    else:
+        st.info("当前运行暂无可下载交付物。")
 
-    _render_runtime_timings(data.get("runtime_timings") or {}, filename, duration_seconds=duration_seconds)
-
-    _render_findings_stats(data)
-    _render_execution_scope_stats(data)
-
-    # --- 临时执行耗时（来自刚执行后的 session_state，作为补充展示）---
-    qc_timings = st.session_state.get("qc_timings", {})
-    if qc_timings:
-        for fname, timings in qc_timings.items():
-            if fname != filename:
-                _render_runtime_timings(timings, fname)
-        st.divider()
+    _render_findings_summary_row(data)
+    _render_execution_summary_row(data)
 
     # --- 主 Tab ---
-    tab_browser, tab_ledger, tab_extract = st.tabs([
-        "Findings 明细", "质检点执行台账", "基本信息摘录",
+    tab_browser, tab_ledger, tab_extract, tab_runtime = st.tabs([
+        "Findings 明细", "质检点执行台账", "基本信息摘录", "运行耗时",
     ])
 
     with tab_browser:
@@ -147,6 +139,65 @@ def render_findings_viewer() -> None:
     with tab_extract:
         _render_manual_review(data)
 
+    with tab_runtime:
+        _render_runtime_timings(data.get("runtime_timings") or {}, filename, duration_seconds=duration_seconds)
+        qc_timings = st.session_state.get("qc_timings", {})
+        if qc_timings:
+            for fname, timings in qc_timings.items():
+                if fname != filename:
+                    _render_runtime_timings(timings, fname)
+
+
+def _render_findings_summary_row(data: dict) -> None:
+    """Tab 上方 Findings 摘要行。"""
+    issues = _finding_issues(data)
+    severity_counts = {"FAIL": 0, "WARN": 0, "NEED_REVIEW": 0}
+    for issue in issues:
+        severity = str(issue.get("severity") or "").upper()
+        if severity in severity_counts:
+            severity_counts[severity] += 1
+
+    cols = st.columns(4)
+    with cols[0]:
+        render_stat_card("Findings", str(len(issues)), "不含 PASS", "info")
+    with cols[1]:
+        render_stat_card("优先查看", str(severity_counts["FAIL"]), "FAIL", "high")
+    with cols[2]:
+        render_stat_card("需关注", str(severity_counts["WARN"]), "WARN", "warn")
+    with cols[3]:
+        render_stat_card("待人工处理", str(severity_counts["NEED_REVIEW"]), "NEED_REVIEW", "review")
+
+
+def _render_execution_summary_row(data: dict) -> None:
+    """Tab 上方质检点执行台账摘要行。"""
+    scope = build_execution_scope_summary(data)
+    if scope["ledger_rows"]:
+        total = scope["total"]
+        executed = scope["executed"]
+        not_executed_with_reason = scope["not_executed_with_reason"]
+        pending_record = scope["pending_record"]
+    else:
+        ledger = data.get("execution_ledger") or {}
+        ledger_summary = ledger.get("summary") or {}
+        total = int(ledger_summary.get("total_observed_checkpoints") or 0)
+        executed = int(ledger_summary.get("executed") or 0)
+        not_executed_with_reason = int(ledger_summary.get("data_insufficient") or 0) + int(
+            ledger_summary.get("not_applicable") or 0
+        )
+        pending_record = max(total - executed - not_executed_with_reason, 0)
+
+    cols = st.columns(4)
+    with cols[0]:
+        render_stat_card("质检点总数", str(total), "来自完整质检点清单", "info")
+    with cols[1]:
+        render_stat_card("已执行", str(executed), "规则流程已运行", "pass")
+    with cols[2]:
+        render_stat_card("原因明确", str(not_executed_with_reason), "资料不足或场景不适用", "warn")
+    with cols[3]:
+        render_stat_card("待补充", str(pending_record), "需补状态或原因", "info")
+
+    if scope.get("errors"):
+        st.error("；".join(scope["errors"]))
 
 def _block_unfinished_active_run(active_run: dict) -> bool:
     """阻止未保存运行时把旧历史结果误展示为本次结果。"""
@@ -295,10 +346,8 @@ def _render_runtime_timings(timings: dict, filename: str, *, duration_seconds: o
                 label = item.get("label") or item.get("key") or "LLM"
                 detail_parts.append(f"{label}: {_format_seconds(item.get('seconds'))} ({item.get('calls', 0)}次)")
         if detail_parts:
-            st.markdown(
-                f'<div style="font-size:0.74rem;color:#777">LLM 分项：' + " · ".join(detail_parts) + "</div>",
-                unsafe_allow_html=True,
-            )
+            with st.expander("LLM 分项耗时", expanded=False):
+                st.caption(" · ".join(detail_parts))
 
 
 def _render_manual_review(data: dict) -> None:

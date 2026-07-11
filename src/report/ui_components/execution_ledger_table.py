@@ -247,13 +247,12 @@ def render_execution_ledger_table(data: dict[str, Any], *, key_prefix: str = "le
         "执行状态",
         "未执行原因",
         "异常记录",
-        "取数来源",
         "证据摘要",
     ]
     st.markdown(
         """
         <style>
-        div[data-testid="stDataFrame"] div[role="gridcell"][aria-colindex="8"] {
+        div[data-testid="stDataFrame"] div[role="gridcell"][aria-colindex="7"] {
             color: #175cd3 !important;
             font-weight: 600 !important;
         }
@@ -270,6 +269,15 @@ def render_execution_ledger_table(data: dict[str, Any], *, key_prefix: str = "le
             on_select="rerun",
             selection_mode="single-row",
             key=f"{key_prefix}_table",
+            column_config={
+                "程序": st.column_config.TextColumn(width="medium"),
+                "质检点ID": st.column_config.TextColumn(width="small"),
+                "质检点名称": st.column_config.TextColumn(width="large"),
+                "执行状态": st.column_config.TextColumn(width="small"),
+                "未执行原因": st.column_config.TextColumn(width="medium"),
+                "异常记录": st.column_config.TextColumn(width="small"),
+                "证据摘要": st.column_config.TextColumn(width="medium"),
+            },
         )
 
     selected_rows = event.selection.rows if hasattr(event, "selection") else []
@@ -300,6 +308,7 @@ def _render_row_detail(row: dict[str, Any]) -> None:
             {"项目": "执行状态", "内容": _display_value(row.get("执行状态"))},
             {"项目": "未执行原因", "内容": _display_value(row.get("未执行原因"))},
             {"项目": "异常记录", "内容": _display_value(row.get("异常记录"))},
+            {"项目": "取数来源", "内容": _display_value(row.get("取数来源"))},
         ],
         use_container_width=True,
         hide_index=True,

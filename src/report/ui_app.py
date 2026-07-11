@@ -2046,8 +2046,6 @@ def _render_upload_panel(*, collapsed_after_results: bool) -> None:
 from report.ui_components.styles import get_global_css
 st.markdown(get_global_css(), unsafe_allow_html=True)
 def main() -> None:
-    _render_topbar()
-
     # 页面路由
     if "active_page" not in st.session_state:
         st.session_state["active_page"] = "workbench"

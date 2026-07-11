@@ -54,7 +54,7 @@ def render_download_bar(
         html_bytes: 复核报告 HTML
         annotated_bytes: 标注底稿（可选，CSV 输入时无）
     """
-    st.subheader("底稿交付物")
+    st.markdown("**底稿交付物**")
     st.caption(f"运行编号：`{run_id}`")
 
     col1, col2, col3 = st.columns(3)

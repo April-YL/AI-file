@@ -262,6 +262,14 @@ div.stDownloadButton > button[kind="primary"]:hover {
     border-color: #1f1f26;
     color: #ffffff;
 }
+div.stButton > button:disabled,
+div.stButton > button:disabled:hover {
+    background: var(--gray-100) !important;
+    color: var(--gray-500) !important;
+    border-color: var(--gray-200) !important;
+    cursor: not-allowed !important;
+    opacity: 1 !important;
+}
 div[data-testid="stExpander"] {
     border-radius: 6px;
 }
@@ -362,7 +370,7 @@ SIDEBAR_STYLES = """
     border: none;
     color: rgba(255,255,255,0.65) !important;
     text-align: left;
-    padding: 6px 10px;
+    padding: 5px 10px;
     border-radius: 5px;
     font-size: 0.84rem;
     font-weight: 400;
@@ -385,7 +393,7 @@ SIDEBAR_STYLES = """
 }
 [data-testid="stSidebar"] hr {
     border-color: rgba(255,255,255,0.10) !important;
-    margin: 4px 0;
+    margin: 2px 0;
 }
 .sidebar-brand-text {
     font-size: 0.92rem;
@@ -405,7 +413,7 @@ SIDEBAR_STYLES = """
     border: 1px solid rgba(255,255,255,0.15);
     border-radius: 3px;
     padding: 1px 7px;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     border-left: 3px solid var(--ey-yellow);
 }
 .sidebar-section-label {
@@ -413,12 +421,12 @@ SIDEBAR_STYLES = """
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: rgba(255,255,255,0.25) !important;
-    padding: 6px 4px 2px;
+    padding: 4px 4px 1px;
 }
 .sidebar-footer-text {
     font-size: 0.68rem;
     color: rgba(255,255,255,0.25) !important;
-    padding: 6px 4px;
+    padding: 4px 4px;
 }
 """
 
