@@ -292,11 +292,14 @@ def render_qc_runner() -> None:
         runner_state["last_error"] = ""
         runner_state["step_statuses"] = {step: "未开始" for step in _RUNNER_STEPS}
         runner_state["step_timings"] = {}
+        status_placeholder = st.empty()
+        _render_runner_status_placeholder(status_placeholder, runner_state)
         progress = st.progress(0, text="准备中...")
 
         for idx, uf in enumerate(uploaded):
             progress.progress(idx / len(uploaded), text=f"读取底稿：{uf.name}")
             _start_active_run(uf.name, run_id)
+            _render_runner_status_placeholder(status_placeholder, runner_state)
             try:
                 _mark_runner_step(runner_state, "读取底稿", status="进行中")
                 _mark_runner_step(runner_state, "识别工作表", status="进行中")
@@ -304,6 +307,7 @@ def render_qc_runner() -> None:
                 if use_llm:
                     _mark_runner_step(runner_state, "LLM 辅助", status="进行中")
                 progress.progress((idx + 0.2) / len(uploaded), text=f"规则检查与 LLM 辅助：{uf.name}")
+                _render_runner_status_placeholder(status_placeholder, runner_state)
                 data, json_bytes, html_bytes, ann_bytes = _run_qc_cached(
                     uf.getvalue(),
                     uf.name,
@@ -318,6 +322,7 @@ def render_qc_runner() -> None:
                     _mark_runner_step(runner_state, step, data.get("runtime_timings") or {}, status="已完成")
                 progress.progress((idx + 0.85) / len(uploaded), text=f"保存运行记录：{uf.name}")
                 _mark_runner_step(runner_state, "保存运行记录", status="进行中")
+                _render_runner_status_placeholder(status_placeholder, runner_state)
                 saved_run_id = save_run(project_id, uf.name, data, json_bytes, html_bytes, ann_bytes)
                 _validate_saved_run(saved_run_id, expect_annotated=ann_bytes is not None)
                 _mark_runner_step(runner_state, "保存运行记录", status="已完成")
@@ -338,9 +343,11 @@ def render_qc_runner() -> None:
                 runner_state["last_error"] = str(e)
                 _fail_active_run(str(e))
                 _mark_runner_step(runner_state, runner_state.get("current_step") or "执行异常", status="失败")
+                _render_runner_status_placeholder(status_placeholder, runner_state)
             progress.progress((idx + 1) / len(uploaded), text="已处理")
 
         progress.empty()
+        status_placeholder.empty()
 
         # 真实耗时存 session_state（rerun 后由 Findings 页面展示）
         timing_info: dict[str, dict] = {}
@@ -514,26 +521,64 @@ def _render_runner_status_panel(state: dict) -> None:
         """,
         unsafe_allow_html=True,
     )
-    _render_step_progress(state)
+    if str(status) == "running":
+        _render_current_execution_state(state)
+    elif str(status) == "finished":
+        _render_completed_runtime_summary(state)
     if state.get("last_error"):
         st.error(f"最近错误：{state['last_error']}")
 
 
-def _render_step_progress(state: dict) -> None:
+def _render_runner_status_placeholder(placeholder, state: dict) -> None:
+    placeholder.empty()
+    with placeholder.container():
+        _render_runner_status_panel(state)
+
+
+def _render_current_execution_state(state: dict) -> None:
+    """执行中只展示可信粗状态，不伪装成精确实时阶段。"""
     step_statuses = state.get("step_statuses") or {}
+    if step_statuses.get("保存运行记录") == "进行中":
+        stage = "保存结果"
+        note = "正在保存运行记录和交付物，完成后会进入复核结果。"
+    elif step_statuses.get("生成报告") == "已完成" or step_statuses.get("生成标注副本") == "已完成":
+        stage = "生成交付物"
+        note = "正在生成报告与标注副本。"
+    elif any(step_statuses.get(step) == "进行中" for step in ("规则检查", "LLM 辅助")):
+        stage = "质检执行中"
+        note = "正在执行规则检查与 LLM 辅助，完成前请勿刷新或切换页面。"
+    elif step_statuses.get("读取底稿") == "进行中" or step_statuses.get("识别工作表") == "进行中":
+        stage = "读取与识别底稿"
+        note = "正在读取底稿并识别工作表结构。"
+    else:
+        stage = "准备中"
+        note = "正在准备本次复核。"
+    st.markdown(f"**当前执行状态：{stage}**")
+    st.caption(note)
+
+
+def _render_completed_runtime_summary(state: dict) -> None:
+    """完成后展示真实耗时拆分；数据只来自 runtime_timings。"""
     step_timings = state.get("step_timings") or {}
-    completed = sum(1 for step in _RUNNER_STEPS if step_statuses.get(step) == "已完成")
-    st.progress(completed / len(_RUNNER_STEPS), text=f"阶段进度：{completed}/{len(_RUNNER_STEPS)}")
-    columns = st.columns(len(_RUNNER_STEPS))
-    for column, step in zip(columns, _RUNNER_STEPS):
-        status = step_statuses.get(step, "未开始")
+    if not step_timings:
+        return
+    st.markdown("**本次运行耗时**")
+    labels = [
+        ("读取底稿", "读取底稿"),
+        ("规则检查", "规则检查"),
+        ("LLM", "LLM 辅助"),
+        ("报告生成", "生成报告"),
+        ("标注副本", "生成标注副本"),
+    ]
+    columns = st.columns(min(len(labels), 5))
+    for column, (label, step) in zip(columns, labels):
         seconds = step_timings.get(step)
         with column:
             st.markdown(
                 f"""
-                <div class="qc-step-chip qc-step-{_step_status_class(status)}">
-                  <div class="qc-step-name">{step}</div>
-                  <div class="qc-step-status">{status}{f" · {_format_seconds(seconds)}" if seconds else ""}</div>
+                <div class="qc-step-chip qc-step-done">
+                  <div class="qc-step-name">{label}</div>
+                  <div class="qc-step-status">{_format_seconds(seconds) if seconds else "—"}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,

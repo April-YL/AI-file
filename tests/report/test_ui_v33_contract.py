@@ -36,11 +36,18 @@ def test_workbench_pending_queue_is_summary_only():
 
 
 def test_runner_uses_vertical_audit_workflow():
-    from report.ui_pages.qc_runner import _LLM_PRESETS, _RUNNER_STEPS, _render_execute_area, render_qc_runner
+    from report.ui_pages.qc_runner import (
+        _LLM_PRESETS,
+        _RUNNER_STEPS,
+        _render_current_execution_state,
+        _render_execute_area,
+        render_qc_runner,
+    )
     from report.ui_components.styles import BUTTON_STYLES
 
     source = inspect.getsource(render_qc_runner)
     execute_source = inspect.getsource(_render_execute_area)
+    running_status_source = inspect.getsource(_render_current_execution_state)
 
     assert "复核配置" in source
     assert "render_info_banner()" not in source
@@ -63,6 +70,11 @@ def test_runner_uses_vertical_audit_workflow():
     assert "button:disabled" in BUTTON_STYLES
     assert "cursor: not-allowed" in BUTTON_STYLES
     assert "_render_runner_status_panel(runner_state)" in source
+    assert "_render_runner_status_placeholder(status_placeholder, runner_state)" in source
+    assert "当前执行状态" in running_status_source
+    assert "完成前请勿刷新或切换页面" in running_status_source
+    assert "st.progress(" not in running_status_source
+    assert "阶段进度" not in inspect.getsource(__import__("report.ui_pages.qc_runner", fromlist=[""]))
     assert "服务商" in source
     assert "模型名称" in source
     assert "拖拽 Excel 到此处或点击选择" in source
