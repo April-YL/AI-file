@@ -267,6 +267,73 @@ class K03SheetDataset:
         }
 
 
+@dataclass
+class K03ComponentSheet:
+    role: str
+    sheet_name: str
+    execution_path: str
+    template_type: str
+    evidence: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "role": self.role,
+            "sheet_name": self.sheet_name,
+            "execution_path": self.execution_path,
+            "template_type": self.template_type,
+            "evidence": self.evidence,
+            "warnings": self.warnings,
+        }
+
+
+@dataclass
+class K03LeadLinkage:
+    assertion: str | None = None
+    cra: str | None = None
+    tt: str | None = None
+    tt_overall: str | None = None
+    source_row: int | None = None
+    cra_cell: str | None = None
+    tt_cell: str | None = None
+    tt_overall_cell: str | None = None
+    source: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "assertion": self.assertion,
+            "cra": self.cra,
+            "tt": self.tt,
+            "tt_overall": self.tt_overall,
+            "source_row": self.source_row,
+            "cra_cell": self.cra_cell,
+            "tt_cell": self.tt_cell,
+            "tt_overall_cell": self.tt_overall_cell,
+            "source": self.source,
+        }
+
+
+@dataclass
+class K03ExecutionProfile:
+    primary_depreciation_path: str = EXECUTION_PATH_UNKNOWN
+    component_sheets: dict[str, list[K03ComponentSheet]] = field(default_factory=dict)
+    evidence_completeness: dict[str, Any] = field(default_factory=dict)
+    lead_linkage: K03LeadLinkage | None = None
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "primary_depreciation_path": self.primary_depreciation_path,
+            "component_sheets": {
+                role: [item.to_dict() for item in items]
+                for role, items in self.component_sheets.items()
+            },
+            "evidence_completeness": self.evidence_completeness,
+            "lead_linkage": self.lead_linkage.to_dict() if self.lead_linkage else None,
+            "warnings": self.warnings,
+        }
+
+
 def load_k03_sheets_from_workbook(
     path: str | Path,
     *,
@@ -294,6 +361,289 @@ def load_k03_sheets_from_workbook(
     finally:
         wb.close()
     return datasets
+
+
+def build_k03_execution_profile(
+    k03_sheets: list[K03SheetDataset] | None,
+    *,
+    lead: Any | None = None,
+    workbook_sheet_names: list[str] | None = None,
+) -> K03ExecutionProfile:
+    """Build workbook-level K.03 path recognition without applying QC rules."""
+    datasets = k03_sheets or []
+    components: dict[str, list[K03ComponentSheet]] = {}
+    for dataset in datasets:
+        role = _component_role(dataset)
+        if role is None:
+            continue
+        components.setdefault(role, []).append(
+            K03ComponentSheet(
+                role=role,
+                sheet_name=dataset.sheet_name,
+                execution_path=dataset.execution_path,
+                template_type=dataset.template_type,
+                evidence=_component_evidence(dataset),
+                warnings=list(dataset.warnings),
+            )
+        )
+
+    auxiliary_names = _auxiliary_current_depreciation_sheets(workbook_sheet_names or [])
+    if auxiliary_names:
+        components["auxiliary_current_depreciation"] = [
+            K03ComponentSheet(
+                role="auxiliary_current_depreciation",
+                sheet_name=name,
+                execution_path=EXECUTION_PATH_UNKNOWN,
+                template_type="auxiliary_current_depreciation",
+                evidence={"is_required_procedure_page": False},
+            )
+            for name in auxiliary_names
+        ]
+
+    lead_linkage = _build_k03_lead_linkage(lead)
+    primary = _select_primary_depreciation_path(components, lead_linkage)
+    evidence = _profile_evidence_completeness(components)
+    warnings = _profile_warnings(components, lead_linkage, primary)
+    return K03ExecutionProfile(
+        primary_depreciation_path=primary,
+        component_sheets=components,
+        evidence_completeness=evidence,
+        lead_linkage=lead_linkage,
+        warnings=warnings,
+    )
+
+
+def _component_role(dataset: K03SheetDataset) -> str | None:
+    if dataset.execution_path == EXECUTION_PATH_SAP_MEDIUM:
+        return "sap_medium"
+    if dataset.execution_path == EXECUTION_PATH_SAP_HIGH:
+        return "sap_high"
+    if dataset.execution_path == EXECUTION_PATH_TOD_BY_ITEM:
+        return "tod_by_item"
+    if dataset.execution_path == EXECUTION_PATH_TOD_SAMPLING:
+        if dataset.template_type == "tod_sampling_output":
+            return "tod_sampling_output"
+        return "tod_sampling"
+    if dataset.execution_path == EXECUTION_PATH_POLICY_REVIEW:
+        return "policy_review"
+    if dataset.k03_branch == K03_BRANCH_DEPRECIATION_TEST:
+        return "unknown_depreciation_test"
+    if dataset.k03_branch == K03_BRANCH_POLICY_REVIEW:
+        return "policy_review"
+    return None
+
+
+def _component_evidence(dataset: K03SheetDataset) -> dict[str, Any]:
+    summary = dataset.summary or {}
+    if dataset.execution_path in {EXECUTION_PATH_SAP_MEDIUM, EXECUTION_PATH_SAP_HIGH}:
+        return {
+            "has_parameter_area": bool(
+                summary.get("sap_entity_type")
+                or summary.get("sap_te")
+                or summary.get("sap_cra")
+            ),
+            "has_calculation_area": bool(summary.get("sap_deviation_rows")),
+            "has_deviation_threshold_area": bool(summary.get("sap_deviation_rows")),
+            "has_conclusion_area": bool(summary.get("sap_conclusion_text")),
+            "has_note_area": bool(summary.get("sap_note_text")),
+            "deviation_row_count": len(summary.get("sap_deviation_rows") or []),
+            "over_threshold_count": summary.get("sap_deviation_over_threshold_count"),
+        }
+    if dataset.template_type == "tod_sampling_output":
+        return {
+            "has_parameter_area": bool(
+                summary.get("sample_output_te")
+                or summary.get("sample_output_sampling_currency")
+            ),
+            "has_data_area": bool(summary.get("sample_output_summary_text")),
+            "has_sampling_currency": bool(summary.get("sample_output_sampling_currency")),
+            "is_required_for_tod_sampling_path": True,
+        }
+    if dataset.execution_path == EXECUTION_PATH_TOD_SAMPLING:
+        return {
+            "has_parameter_area": bool(
+                summary.get("tod_population_amount")
+                or summary.get("tod_breakdown_depreciation_amount")
+            ),
+            "has_data_area": bool(dataset.detail_table_range),
+            "has_conclusion_area": bool(summary.get("has_conclusion_area")),
+            "has_note_area": bool(summary.get("has_note_area")),
+            "sample_rows_count": summary.get("tod_sample_rows_count"),
+        }
+    if dataset.execution_path == EXECUTION_PATH_TOD_BY_ITEM:
+        return {
+            "has_header_area": bool(dataset.header_rows),
+            "has_data_area": bool(dataset.detail_table_range),
+            "has_conclusion_area": bool(summary.get("has_conclusion_area")),
+            "has_note_area": bool(summary.get("has_note_area")),
+            "detail_row_count": dataset.row_count,
+            "mapped_fields": summary.get("mapped_fields", []),
+        }
+    if dataset.execution_path == EXECUTION_PATH_POLICY_REVIEW:
+        return {
+            "has_policy_table": bool(summary.get("has_policy_table")),
+            "has_note_area": bool(summary.get("has_note_area")),
+            "policy_row_count": summary.get("policy_row_count"),
+            "is_independent_required_procedure": True,
+        }
+    return {
+        "has_header_area": bool(dataset.header_rows),
+        "has_data_area": bool(dataset.detail_table_range),
+        "has_conclusion_area": bool(summary.get("has_conclusion_area")),
+        "has_note_area": bool(summary.get("has_note_area")),
+    }
+
+
+def _auxiliary_current_depreciation_sheets(sheet_names: list[str]) -> list[str]:
+    result: list[str] = []
+    for name in sheet_names:
+        text = _norm(name)
+        if "本期计提" in text or "currentdepreciation" in text:
+            result.append(name)
+    return result
+
+
+def _build_k03_lead_linkage(lead: Any | None) -> K03LeadLinkage | None:
+    if lead is None or not getattr(lead, "cra_rows", None):
+        return None
+    row = _find_depreciation_assertion_row(getattr(lead, "cra_rows", []))
+    if row is None:
+        return None
+    sheet = getattr(lead, "source_sheet", "") or ""
+
+    def cell(col: int | None) -> str | None:
+        if not getattr(row, "source_row", None) or not col:
+            return None
+        return f"{sheet}!{get_column_letter(col)}{row.source_row}"
+
+    return K03LeadLinkage(
+        assertion=getattr(row, "assertion", None),
+        cra=getattr(row, "cra", None),
+        tt=getattr(row, "tt", None),
+        tt_overall=getattr(row, "tt_overall", None),
+        source_row=getattr(row, "source_row", None),
+        cra_cell=cell(getattr(row, "source_col_cra", None)),
+        tt_cell=cell(getattr(row, "source_col_tt", None)),
+        tt_overall_cell=cell(getattr(row, "source_col_tt_overall", None)),
+        source="lead_cra_rows",
+    )
+
+
+def _find_depreciation_assertion_row(cra_rows: list[Any]) -> Any | None:
+    for row in cra_rows:
+        assertion = _norm(getattr(row, "assertion", ""))
+        if (
+            "计价" in assertion
+            or "计量" in assertion
+            or "v/m" in assertion
+            or "valuation" in assertion
+            or "measurement" in assertion
+        ):
+            return row
+    return None
+
+
+def _select_primary_depreciation_path(
+    components: dict[str, list[K03ComponentSheet]],
+    lead_linkage: K03LeadLinkage | None,
+) -> str:
+    has_medium = bool(components.get("sap_medium"))
+    has_high = bool(components.get("sap_high"))
+    has_by_item = bool(components.get("tod_by_item"))
+    has_sampling = bool(components.get("tod_sampling"))
+    has_sampling_output = bool(components.get("tod_sampling_output"))
+    lead_cra = lead_linkage.cra if lead_linkage else None
+
+    if has_medium and (has_sampling or has_sampling_output) and not has_high:
+        if not _is_minimal_cra_value(lead_cra):
+            return EXECUTION_PATH_SAP_PLUS_TOD_SAMPLING
+    if has_high and not _is_minimal_cra_value(lead_cra):
+        return EXECUTION_PATH_SAP_HIGH
+    if has_medium and _is_minimal_cra_value(lead_cra):
+        return EXECUTION_PATH_SAP_MEDIUM
+    if has_high and not has_medium:
+        return EXECUTION_PATH_SAP_HIGH
+    if has_medium and not has_high:
+        return EXECUTION_PATH_SAP_MEDIUM
+    if has_by_item and not (has_sampling or has_sampling_output):
+        return EXECUTION_PATH_TOD_BY_ITEM
+    if has_sampling or has_sampling_output:
+        return EXECUTION_PATH_TOD_SAMPLING
+    if has_by_item:
+        return EXECUTION_PATH_TOD_BY_ITEM
+    return EXECUTION_PATH_UNKNOWN
+
+
+def _profile_evidence_completeness(
+    components: dict[str, list[K03ComponentSheet]],
+) -> dict[str, Any]:
+    sap_roles = ("sap_medium", "sap_high")
+    sap_items = [item for role in sap_roles for item in components.get(role, [])]
+    tod_sampling = components.get("tod_sampling", [])
+    tod_sampling_output = components.get("tod_sampling_output", [])
+    return {
+        "sap": [
+            {
+                "sheet_name": item.sheet_name,
+                "template_type": item.template_type,
+                **item.evidence,
+            }
+            for item in sap_items
+        ],
+        "tod_sampling": {
+            "has_test_sheet": bool(tod_sampling),
+            "has_sampling_output": bool(tod_sampling_output),
+        },
+        "tod_by_item": {
+            "has_test_sheet": bool(components.get("tod_by_item")),
+        },
+        "policy_review": {
+            "exists": bool(components.get("policy_review")),
+            "is_independent_required_procedure": True,
+        },
+        "auxiliary_current_depreciation": {
+            "exists": bool(components.get("auxiliary_current_depreciation")),
+            "is_required_procedure_page": False,
+        },
+    }
+
+
+def _profile_warnings(
+    components: dict[str, list[K03ComponentSheet]],
+    lead_linkage: K03LeadLinkage | None,
+    primary: str,
+) -> list[str]:
+    warnings: list[str] = []
+    has_medium = bool(components.get("sap_medium"))
+    has_high = bool(components.get("sap_high"))
+    has_sampling = bool(components.get("tod_sampling"))
+    has_sampling_output = bool(components.get("tod_sampling_output"))
+    has_by_item = bool(components.get("tod_by_item"))
+    has_policy = bool(components.get("policy_review"))
+    lead_cra = lead_linkage.cra if lead_linkage else None
+
+    if not lead_linkage:
+        warnings.append("k03_lead_depreciation_cra_tt_not_identified")
+    if has_medium and has_high and lead_cra is None:
+        warnings.append("k03_multiple_sap_paths_without_lead_cra")
+    if has_medium and not has_high and not _is_minimal_cra_value(lead_cra) and not (has_sampling or has_sampling_output):
+        warnings.append("k03_sap_medium_without_high_or_tod_for_non_minimal_cra")
+    if has_sampling and not has_sampling_output:
+        warnings.append("k03_tod_sampling_missing_sampling_output")
+    if has_sampling_output and not has_sampling:
+        warnings.append("k03_tod_sampling_output_without_test_sheet")
+    if not has_policy:
+        warnings.append("k03_policy_review_missing")
+    if primary == EXECUTION_PATH_UNKNOWN and components.get("auxiliary_current_depreciation"):
+        warnings.append("k03_only_auxiliary_current_depreciation_without_procedure_page")
+    if sum(bool(v) for v in (has_medium or has_high, has_by_item, has_sampling or has_sampling_output)) > 1:
+        warnings.append("k03_multiple_depreciation_test_components_detected")
+    return warnings
+
+
+def _is_minimal_cra_value(value: Any) -> bool:
+    text = _norm(_text(value))
+    return text in {"minimal", "最低", "最小", "极低"} or "minimal" in text
 
 
 def load_k03_detail_table(dataset: K03SheetDataset) -> K03DetailTable:

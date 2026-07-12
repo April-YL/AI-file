@@ -38,6 +38,8 @@ def find_case_library_dir(root: Path | None = None) -> Path | None:
 def should_skip_case_workbook(path: Path, *, max_mb: float = DEFAULT_MAX_WORKBOOK_MB) -> str | None:
     """返回跳过原因；可跑则返回 ``None``。"""
     name = path.name
+    if name.startswith("~$"):
+        return "excel_lock_file"
     for frag in SKIP_WORKBOOK_NAME_FRAGMENTS:
         if frag in name:
             return f"name_contains:{frag}"

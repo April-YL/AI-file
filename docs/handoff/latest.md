@@ -2,6 +2,34 @@
 
 > 每次收工前更新本文。新成员接手先读 `docs/ONBOARDING.md`，再读 `AGENTS.md` 和本文。
 
+
+## 2026-07-12 UI 精修通过版沉淀
+
+本轮 UI 精修已完成并提交、推送：`d758c6a Refine audit review UI workflow`，远端为 `origin/main`。
+
+- 页面定位已重新确认：`复核工作台` 展示当前待处理事项和下一步入口；`执行复核` 负责复核配置、上传底稿、执行质检和运行进度；`复核结果` 负责交付物、Findings 明细、质检点执行台账、基本信息摘录和运行耗时。
+- 结果页摘要区采用固定结构：Findings 汇总一行，质检点执行台账一行；不要把两类卡片混在同一行，也不要塞进 Tab 内容里。
+- Findings 汇总必须按原始 `severity` 事实统计：`FAIL`、`WARN`、`NEED_REVIEW`；不得用 UI 优先级分类替代 severity 数量。
+- Findings 明细和质检点执行台账采用“左表右详情”交互；右侧详情展示定位、说明、取数来源和系统取数证据，UI 只展示事实，不新增审计结论。
+- 本轮 UI 提交范围仅限 `src/report/ui_*`、`src/report/ui_pages/*`、`src/report/ui_components/*` 相关展示层和 `tests/report/test_ui_v33_contract.py`；未改 ingest、rules、pipeline、LLM、registry、execution_ledger 原始结构、Finding 字段、severity、JSON/HTML 报告或底稿标注逻辑。
+- 验证结果：`tests/report/test_ui_v33_contract.py` 为 `7 passed`；多次只读核对最新运行事实未变，示例为 15 条非 PASS，`FAIL 3 / WARN 5 / NEED_REVIEW 7`，`rule_execution_matrix=90`，`execution_ledger items=80`。
+- 当前本地仍有独立的 ingest/K03/artifacts 修改和若干未跟踪 docs/打包/资料文件；后续提交必须与 UI 修改分开处理，避免混提交。
+
+## 2026-07-12 K03 ingest 识别阶段闭环
+
+本轮只完成 K03 ingest 结构识别闭环，未新增或修改 K03 rules。
+
+- 已新增工作簿级 `K03ExecutionProfile`，并挂到 `WorkbookIngestContext` / `WorkbookQcContext`。
+- Profile 用于识别折旧测试路径、组件页、证据完整性、Lead V/M CRA/TT 关联和结构识别 warning。
+- 已识别组件包括 SAP 中精度、SAP 高精度、TOD by item、TOD 抽样、K03.2a 抽样输出、K03.3 折旧政策复核、以及本期计提等辅助页。
+- `K03.3` 作为独立必要程序处理，不并入 SAP/TOD 折旧测试四选一路径。
+- `本期计提` 仅作为辅助数据页，不作为 K03 必要程序页，也不作为已执行折旧测试的判断依据。
+- Lead CRA/TT 只关联折旧相关 V/M 认定；未识别 V/M 时不再默认取第一行 CRA，而是留空并输出 warning。
+- 案例库回归已跳过 `~$` 开头的 Excel 临时锁文件，并刷新 Lead/K01 regression artifact 以匹配当前本地案例库。
+- 已验收：K03 ingest 18 passed；K02 / Lead / K01 / workbook ingest 38 passed, 15 skipped；workspace hygiene 无测试产物；`src/rules/k03_*` 无 diff。
+- 测试证据口径：真实 SOP/J 底稿用于验证实际底稿呈现；人工构造用例只用于边界测试，不能作为真实底稿中各路径常见程度的证据。
+- 下一阶段可以进入 K03 rules，但 rules 应消费 `k03_execution_profile`，不得在 rules 层重新猜测底稿结构。
+
 ## 2026-07-09 K03 第一阶段与 checklist 口径同步
 
 - K.03 第一阶段已接入主流程：SAP 中精度、SAP 高精度、TOD 抽样、TOD by-item、折旧政策复核均可被识别，并进入对应规则或执行台账。

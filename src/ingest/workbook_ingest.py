@@ -22,7 +22,12 @@ from ingest.disposal_test_sheet import (
     load_disposal_sample_output_from_workbook,
     load_disposal_test_from_workbook,
 )
-from ingest.k03_sheet import K03SheetDataset, load_k03_sheets_from_workbook
+from ingest.k03_sheet import (
+    K03ExecutionProfile,
+    K03SheetDataset,
+    build_k03_execution_profile,
+    load_k03_sheets_from_workbook,
+)
 from ingest.lead_sheet import LeadSheetDataset, load_lead_from_workbook
 from ingest.models import SheetKind
 from ingest.reconciliation import ReconciliationCheck, run_workbook_reconciliations
@@ -35,6 +40,7 @@ from ingest.records import (
 from ingest.rollforward_sheet import RollforwardSheetDataset, load_rollforward_from_workbook
 from ingest.sheet_loader import load_asset_sheet_from_workbook
 from ingest.summary_sheet import SummarySheetDataset, load_summary_from_workbook
+from ingest.workbook_reader import list_workbook_sheet_titles
 from ingest.workbook_structure import WorkbookStructure, analyze_workbook_structure
 
 
@@ -59,6 +65,7 @@ class WorkbookIngestContext:
     disposal_sample_output: DisposalSampleOutputDataset | None = None
     disposal_execution_path: DisposalExecutionPathDataset | None = None
     k03_sheets: list[K03SheetDataset] = field(default_factory=list)
+    k03_execution_profile: K03ExecutionProfile | None = None
     summary: SummarySheetDataset | None = None
     lead: LeadSheetDataset | None = None
     reconciliations: list[ReconciliationCheck] = field(default_factory=list)
@@ -92,6 +99,11 @@ class WorkbookIngestContext:
                 else None
             ),
             "k03_sheets": [sheet.to_dict() for sheet in self.k03_sheets],
+            "k03_execution_profile": (
+                self.k03_execution_profile.to_dict()
+                if self.k03_execution_profile
+                else None
+            ),
             "summary": _summary_summary(self.summary),
             "lead": _lead_summary(self.lead),
             "reconciliations": [c.to_dict() for c in self.reconciliations],
@@ -470,6 +482,11 @@ def load_workbook_ingest(
         and not lead.cra_rows
     ):
         lead = None
+    k03_execution_profile = build_k03_execution_profile(
+        k03_sheets,
+        lead=lead,
+        workbook_sheet_names=list_workbook_sheet_titles(path),
+    )
 
     reconciliations = run_workbook_reconciliations(
         fa_list=fa_list,
@@ -509,6 +526,7 @@ def load_workbook_ingest(
         disposal_sample_output=disposal_sample_output,
         disposal_execution_path=disposal_execution_path,
         k03_sheets=k03_sheets,
+        k03_execution_profile=k03_execution_profile,
         summary=summary,
         lead=lead,
         reconciliations=reconciliations,

@@ -1,19 +1,19 @@
 {
-  "generated_at": "2026-05-21T11:32:14Z",
-  "case_dir": "D:\\AI file\\固定资产质检agent\\案例库",
+  "generated_at": "2026-07-11T18:11:04Z",
+  "case_dir": "E:\\AI file\\固定资产质检agent\\案例库",
   "max_mb": 20.0,
   "skipped": [
     {
-      "file": "K1 SWP 固定资产 20251231 A有限公司.xlsx",
-      "size_mb": 40.87,
-      "skip_reason": "name_contains:A有限公司"
+      "file": "~$K1 固定资产 20251231 J有限公司.xlsx",
+      "size_mb": 0.0,
+      "skip_reason": "excel_lock_file"
     }
   ],
   "rows": [
     {
       "file": "K1 SWP 固定资产 20251231 B医疗公司.xlsx",
       "label": "B",
-      "elapsed_s": 17.6,
+      "elapsed_s": 4.76,
       "error": null,
       "status": "ok",
       "lead_sheet": "K.00 Lead Sheet",
@@ -30,264 +30,48 @@
         "adjustment_summary"
       ],
       "overall_severity": "FAIL",
-      "issue_count": 18,
+      "issue_count": 7,
       "rule_severities": {
-        "lead_required_fields": "FAIL",
-        "lead_analysis_date_after_period_end": "FAIL",
+        "lead_required_fields": "PASS",
+        "lead_analysis_date_after_period_end": "PASS",
         "materiality_consistency": "NEED_REVIEW",
         "risk_threshold_consistency": "NEED_REVIEW",
         "lead_tt_overall_min": "PASS",
-        "lead_tt_gam_range": "WARN",
+        "lead_tt_gam_range": "PASS",
         "lead_expectation_analysis": "PASS",
+        "lead_expectation_basis_present": "NEED_REVIEW",
+        "lead_expectation_vs_movement_review": "PASS",
         "lead_volatility_threshold_link": "PASS",
-        "lead_movement_rows_complete": "WARN",
+        "lead_movement_rows_complete": "PASS",
         "lead_movement_consistency": "PASS",
         "lead_movement_notes_required": "PASS",
         "lead_check_with_a3_row": "FAIL",
         "unexpected_movement_investigation": "PASS",
-        "lead_rollforward_tb_reconciliation": "PASS"
-      },
-      "fail_rules": [
-        "lead_required_fields",
-        "lead_analysis_date_after_period_end",
-        "lead_check_with_a3_row"
-      ],
-      "warn_rules": [
-        "lead_tt_gam_range",
-        "lead_movement_rows_complete"
-      ],
-      "need_review_rules": [
-        "materiality_consistency",
-        "risk_threshold_consistency"
-      ],
-      "severity_counts": {
-        "FAIL": 3,
-        "NEED_REVIEW": 2,
-        "PASS": 7,
-        "WARN": 2
-      }
-    },
-    {
-      "file": "K1 SWP 固定资产 20251231 C新材料有限公司.xlsx",
-      "label": "C",
-      "elapsed_s": 31.96,
-      "error": null,
-      "status": "ok",
-      "lead_sheet": "K.00 Lead Sheet-24",
-      "layout_variant": null,
-      "cra_rows": 5,
-      "movement_rows": 4,
-      "expectations": 7,
-      "blocks_detected": [
-        "basic_info",
-        "cra_threshold",
-        "expectation",
-        "movement_table",
-        "fluctuation_notes"
-      ],
-      "overall_severity": "FAIL",
-      "issue_count": 8,
-      "rule_severities": {
-        "lead_required_fields": "FAIL",
-        "lead_analysis_date_after_period_end": "PASS",
-        "materiality_consistency": "NEED_REVIEW",
-        "risk_threshold_consistency": "NEED_REVIEW",
-        "lead_tt_overall_min": "PASS",
-        "lead_tt_gam_range": "PASS",
-        "lead_expectation_analysis": "PASS",
-        "lead_volatility_threshold_link": "PASS",
-        "lead_movement_rows_complete": "WARN",
-        "lead_movement_consistency": "PASS",
-        "lead_movement_notes_required": "PASS",
-        "lead_check_with_a3_row": "PASS",
-        "unexpected_movement_investigation": "PASS",
-        "lead_rollforward_tb_reconciliation": "PASS"
-      },
-      "fail_rules": [
-        "lead_required_fields"
-      ],
-      "warn_rules": [
-        "lead_movement_rows_complete"
-      ],
-      "need_review_rules": [
-        "materiality_consistency",
-        "risk_threshold_consistency"
-      ],
-      "severity_counts": {
-        "FAIL": 1,
-        "PASS": 10,
-        "NEED_REVIEW": 2,
-        "WARN": 1
-      }
-    },
-    {
-      "file": "K1 SWP 固定资产 20251231 D锂电科技有限公司.xlsx",
-      "label": "D",
-      "elapsed_s": 31.48,
-      "error": null,
-      "status": "ok",
-      "lead_sheet": "K.00 Lead Sheet-24",
-      "layout_variant": null,
-      "cra_rows": 5,
-      "movement_rows": 4,
-      "expectations": 7,
-      "blocks_detected": [
-        "basic_info",
-        "cra_threshold",
-        "expectation",
-        "movement_table",
-        "fluctuation_notes"
-      ],
-      "overall_severity": "FAIL",
-      "issue_count": 10,
-      "rule_severities": {
-        "lead_required_fields": "FAIL",
-        "lead_analysis_date_after_period_end": "PASS",
-        "materiality_consistency": "NEED_REVIEW",
-        "risk_threshold_consistency": "NEED_REVIEW",
-        "lead_tt_overall_min": "PASS",
-        "lead_tt_gam_range": "PASS",
-        "lead_expectation_analysis": "PASS",
-        "lead_volatility_threshold_link": "PASS",
-        "lead_movement_rows_complete": "WARN",
-        "lead_movement_consistency": "PASS",
-        "lead_movement_notes_required": "PASS",
-        "lead_check_with_a3_row": "PASS",
-        "unexpected_movement_investigation": "PASS",
+        "lead_fluctuation_notes_refs": "FAIL",
+        "lead_adjustment_internal_consistency": "PASS",
         "lead_rollforward_tb_reconciliation": "FAIL"
       },
       "fail_rules": [
-        "lead_required_fields",
+        "lead_check_with_a3_row",
+        "lead_fluctuation_notes_refs",
         "lead_rollforward_tb_reconciliation"
       ],
-      "warn_rules": [
-        "lead_movement_rows_complete"
-      ],
+      "warn_rules": [],
       "need_review_rules": [
         "materiality_consistency",
-        "risk_threshold_consistency"
+        "risk_threshold_consistency",
+        "lead_expectation_basis_present"
       ],
       "severity_counts": {
-        "FAIL": 2,
-        "PASS": 9,
-        "NEED_REVIEW": 2,
-        "WARN": 1
-      }
-    },
-    {
-      "file": "K1 SWP 固定资产 20251231 E锂原.xlsx",
-      "label": "E",
-      "elapsed_s": 25.54,
-      "error": null,
-      "status": "ok",
-      "lead_sheet": "K.00 Lead Sheet",
-      "layout_variant": null,
-      "cra_rows": 5,
-      "movement_rows": 4,
-      "expectations": 7,
-      "blocks_detected": [
-        "basic_info",
-        "cra_threshold",
-        "expectation",
-        "movement_table",
-        "fluctuation_notes",
-        "adjustment_summary"
-      ],
-      "overall_severity": "FAIL",
-      "issue_count": 8,
-      "rule_severities": {
-        "lead_required_fields": "FAIL",
-        "lead_analysis_date_after_period_end": "PASS",
-        "materiality_consistency": "NEED_REVIEW",
-        "risk_threshold_consistency": "NEED_REVIEW",
-        "lead_tt_overall_min": "PASS",
-        "lead_tt_gam_range": "PASS",
-        "lead_expectation_analysis": "PASS",
-        "lead_volatility_threshold_link": "PASS",
-        "lead_movement_rows_complete": "WARN",
-        "lead_movement_consistency": "PASS",
-        "lead_movement_notes_required": "PASS",
-        "lead_check_with_a3_row": "PASS",
-        "unexpected_movement_investigation": "PASS",
-        "lead_rollforward_tb_reconciliation": "PASS"
-      },
-      "fail_rules": [
-        "lead_required_fields"
-      ],
-      "warn_rules": [
-        "lead_movement_rows_complete"
-      ],
-      "need_review_rules": [
-        "materiality_consistency",
-        "risk_threshold_consistency"
-      ],
-      "severity_counts": {
-        "FAIL": 1,
-        "PASS": 10,
-        "NEED_REVIEW": 2,
-        "WARN": 1
-      }
-    },
-    {
-      "file": "K1 SWP 固定资产 20251231 F有限公司.xlsx",
-      "label": "F",
-      "elapsed_s": 39.97,
-      "error": null,
-      "status": "ok",
-      "lead_sheet": "K.00 Lead Sheet",
-      "layout_variant": null,
-      "cra_rows": 5,
-      "movement_rows": 4,
-      "expectations": 7,
-      "blocks_detected": [
-        "basic_info",
-        "cra_threshold",
-        "expectation",
-        "movement_table",
-        "fluctuation_notes",
-        "adjustment_summary"
-      ],
-      "overall_severity": "FAIL",
-      "issue_count": 15,
-      "rule_severities": {
-        "lead_required_fields": "FAIL",
-        "lead_analysis_date_after_period_end": "PASS",
-        "materiality_consistency": "NEED_REVIEW",
-        "risk_threshold_consistency": "NEED_REVIEW",
-        "lead_tt_overall_min": "PASS",
-        "lead_tt_gam_range": "PASS",
-        "lead_expectation_analysis": "PASS",
-        "lead_volatility_threshold_link": "PASS",
-        "lead_movement_rows_complete": "WARN",
-        "lead_movement_consistency": "PASS",
-        "lead_movement_notes_required": "PASS",
-        "lead_check_with_a3_row": "FAIL",
-        "unexpected_movement_investigation": "WARN",
-        "lead_rollforward_tb_reconciliation": "PASS"
-      },
-      "fail_rules": [
-        "lead_required_fields",
-        "lead_check_with_a3_row"
-      ],
-      "warn_rules": [
-        "lead_movement_rows_complete",
-        "unexpected_movement_investigation"
-      ],
-      "need_review_rules": [
-        "materiality_consistency",
-        "risk_threshold_consistency"
-      ],
-      "severity_counts": {
-        "FAIL": 2,
-        "PASS": 8,
-        "NEED_REVIEW": 2,
-        "WARN": 2
+        "PASS": 12,
+        "NEED_REVIEW": 3,
+        "FAIL": 3
       }
     },
     {
       "file": "K1 SWP 固定资产 20251231 G科技.xlsx",
       "label": "G",
-      "elapsed_s": 23.54,
+      "elapsed_s": 8.41,
       "error": null,
       "status": "ok",
       "lead_sheet": "K.00 Lead Sheet",
@@ -303,39 +87,200 @@
         "fluctuation_notes"
       ],
       "overall_severity": "FAIL",
-      "issue_count": 9,
+      "issue_count": 4,
       "rule_severities": {
-        "lead_required_fields": "FAIL",
+        "lead_required_fields": "PASS",
+        "lead_analysis_date_after_period_end": "PASS",
+        "materiality_consistency": "NEED_REVIEW",
+        "risk_threshold_consistency": "NEED_REVIEW",
+        "lead_tt_overall_min": "PASS",
+        "lead_tt_gam_range": "PASS",
+        "lead_expectation_analysis": "PASS",
+        "lead_expectation_basis_present": "PASS",
+        "lead_expectation_vs_movement_review": "PASS",
+        "lead_volatility_threshold_link": "PASS",
+        "lead_movement_rows_complete": "PASS",
+        "lead_movement_consistency": "PASS",
+        "lead_movement_notes_required": "PASS",
+        "lead_check_with_a3_row": "PASS",
+        "unexpected_movement_investigation": "PASS",
+        "lead_fluctuation_notes_refs": "FAIL",
+        "lead_adjustment_internal_consistency": "PASS",
+        "lead_rollforward_tb_reconciliation": "PASS"
+      },
+      "fail_rules": [
+        "lead_fluctuation_notes_refs"
+      ],
+      "warn_rules": [],
+      "need_review_rules": [
+        "materiality_consistency",
+        "risk_threshold_consistency"
+      ],
+      "severity_counts": {
+        "PASS": 15,
+        "NEED_REVIEW": 2,
+        "FAIL": 1
+      }
+    },
+    {
+      "file": "K1 固定资产 20251231 H调温器有限公司.xlsx",
+      "label": "K1 固定资产 2025",
+      "elapsed_s": 12.09,
+      "error": null,
+      "status": "ok",
+      "lead_sheet": "K.00 Lead Sheet",
+      "layout_variant": null,
+      "cra_rows": 5,
+      "movement_rows": 4,
+      "expectations": 7,
+      "blocks_detected": [
+        "basic_info",
+        "cra_threshold",
+        "expectation",
+        "movement_table",
+        "fluctuation_notes"
+      ],
+      "overall_severity": "FAIL",
+      "issue_count": 3,
+      "rule_severities": {
+        "lead_required_fields": "PASS",
         "lead_analysis_date_after_period_end": "FAIL",
         "materiality_consistency": "NEED_REVIEW",
         "risk_threshold_consistency": "NEED_REVIEW",
         "lead_tt_overall_min": "PASS",
         "lead_tt_gam_range": "PASS",
         "lead_expectation_analysis": "PASS",
+        "lead_expectation_basis_present": "PASS",
+        "lead_expectation_vs_movement_review": "PASS",
         "lead_volatility_threshold_link": "PASS",
-        "lead_movement_rows_complete": "WARN",
+        "lead_movement_rows_complete": "PASS",
         "lead_movement_consistency": "PASS",
         "lead_movement_notes_required": "PASS",
         "lead_check_with_a3_row": "PASS",
         "unexpected_movement_investigation": "PASS",
+        "lead_fluctuation_notes_refs": "PASS",
+        "lead_adjustment_internal_consistency": "PASS",
         "lead_rollforward_tb_reconciliation": "PASS"
       },
       "fail_rules": [
-        "lead_required_fields",
         "lead_analysis_date_after_period_end"
       ],
-      "warn_rules": [
-        "lead_movement_rows_complete"
-      ],
+      "warn_rules": [],
       "need_review_rules": [
         "materiality_consistency",
         "risk_threshold_consistency"
       ],
       "severity_counts": {
-        "FAIL": 2,
-        "NEED_REVIEW": 2,
-        "PASS": 9,
-        "WARN": 1
+        "PASS": 15,
+        "FAIL": 1,
+        "NEED_REVIEW": 2
+      }
+    },
+    {
+      "file": "K1 固定资产 20251231 J有限公司 - 副本.xlsx",
+      "label": "K1 固定资产 2025",
+      "elapsed_s": 17.26,
+      "error": null,
+      "status": "ok",
+      "lead_sheet": "K.00 Lead Sheet",
+      "layout_variant": null,
+      "cra_rows": 5,
+      "movement_rows": 4,
+      "expectations": 7,
+      "blocks_detected": [
+        "basic_info",
+        "cra_threshold",
+        "expectation",
+        "movement_table",
+        "adjustment_summary"
+      ],
+      "overall_severity": "NEED_REVIEW",
+      "issue_count": 2,
+      "rule_severities": {
+        "lead_required_fields": "PASS",
+        "lead_analysis_date_after_period_end": "PASS",
+        "materiality_consistency": "NEED_REVIEW",
+        "risk_threshold_consistency": "NEED_REVIEW",
+        "lead_tt_overall_min": "PASS",
+        "lead_tt_gam_range": "PASS",
+        "lead_expectation_analysis": "PASS",
+        "lead_expectation_basis_present": "PASS",
+        "lead_expectation_vs_movement_review": "PASS",
+        "lead_volatility_threshold_link": "PASS",
+        "lead_movement_rows_complete": "PASS",
+        "lead_movement_consistency": "PASS",
+        "lead_movement_notes_required": "PASS",
+        "lead_check_with_a3_row": "PASS",
+        "unexpected_movement_investigation": "PASS",
+        "lead_fluctuation_notes_refs": "PASS",
+        "lead_adjustment_internal_consistency": "PASS",
+        "lead_rollforward_tb_reconciliation": "PASS"
+      },
+      "fail_rules": [],
+      "warn_rules": [],
+      "need_review_rules": [
+        "materiality_consistency",
+        "risk_threshold_consistency"
+      ],
+      "severity_counts": {
+        "PASS": 16,
+        "NEED_REVIEW": 2
+      }
+    },
+    {
+      "file": "K1 固定资产 20251231 J有限公司.xlsx",
+      "label": "K1 固定资产 2025",
+      "elapsed_s": 16.06,
+      "error": null,
+      "status": "ok",
+      "lead_sheet": "K.00 Lead Sheet",
+      "layout_variant": null,
+      "cra_rows": 5,
+      "movement_rows": 4,
+      "expectations": 7,
+      "blocks_detected": [
+        "basic_info",
+        "cra_threshold",
+        "expectation",
+        "movement_table",
+        "adjustment_summary"
+      ],
+      "overall_severity": "FAIL",
+      "issue_count": 5,
+      "rule_severities": {
+        "lead_required_fields": "PASS",
+        "lead_analysis_date_after_period_end": "PASS",
+        "materiality_consistency": "NEED_REVIEW",
+        "risk_threshold_consistency": "NEED_REVIEW",
+        "lead_tt_overall_min": "PASS",
+        "lead_tt_gam_range": "PASS",
+        "lead_expectation_analysis": "PASS",
+        "lead_expectation_basis_present": "NEED_REVIEW",
+        "lead_expectation_vs_movement_review": "PASS",
+        "lead_volatility_threshold_link": "PASS",
+        "lead_movement_rows_complete": "PASS",
+        "lead_movement_consistency": "PASS",
+        "lead_movement_notes_required": "FAIL",
+        "lead_check_with_a3_row": "PASS",
+        "unexpected_movement_investigation": "PASS",
+        "lead_fluctuation_notes_refs": "FAIL",
+        "lead_adjustment_internal_consistency": "PASS",
+        "lead_rollforward_tb_reconciliation": "PASS"
+      },
+      "fail_rules": [
+        "lead_movement_notes_required",
+        "lead_fluctuation_notes_refs"
+      ],
+      "warn_rules": [],
+      "need_review_rules": [
+        "materiality_consistency",
+        "risk_threshold_consistency",
+        "lead_expectation_basis_present"
+      ],
+      "severity_counts": {
+        "PASS": 13,
+        "NEED_REVIEW": 3,
+        "FAIL": 2
       }
     }
   ]
