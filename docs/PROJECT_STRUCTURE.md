@@ -6,6 +6,7 @@
 
 | 路径 | 作用 |
 | --- | --- |
+| `README.md` | GitHub 仓库首页。面向阅读者说明项目定位、当前能力、快速启动、数据边界和其他科目扩展方式。 |
 | `AGENTS.md` | 项目级 Agent 总说明。记录目标、模块边界、质检结论枚举、数据安全和开发约定。新会话必须优先阅读。 |
 | `.gitignore` | Git 忽略规则。用于排除本地状态、密钥、日志、依赖目录和系统临时文件。 |
 | `docs/data-security.md` | **密钥与 `.env` 不进 Git** 的全局约定与提交前自检。 |
@@ -32,7 +33,8 @@
 | `docs/sheet-classification.md` | 工作表识别策略：名称变体 + 表头内容特征。 |
 | `docs/tasks.md` | 阶段性任务清单。记录待办事项、负责人和验收标准。 |
 | `docs/progress.md` | 项目里程碑进度。记录 M0、M1、M2 等阶段目标和当前状态。 |
-| `docs/handoff/latest.md` | 最新交接文档。记录当前进展、下一步、阻塞问题和相关文件。 |
+| `docs/handoff/latest.md` | 精简的最新交接文档。只记录当前基线、覆盖边界、已知风险和下一步。 |
+| `docs/handoff/archive/` | 历史阶段归档。用于追溯项目演进，不作为当前实现真源。 |
 | `docs/decisions/ADR-0001-mvp-scope.md` | 第一条架构决策记录。说明 MVP 范围和暂不做的内容。 |
 | `docs/decisions/ADR-0002-llm-agent-evolution.md` | 大模型 Agent 混合架构与分阶段演进决策。 |
 | `docs/llm-agent-roadmap.md` | M3/M4 路线图；**产品优先级**（规则 P0，llm-rules/checklist P1，报告叙述 P3）。 |
@@ -75,4 +77,4 @@
 
 - 聊天中形成的长期结论，必须沉淀到 `docs/`、`.cursor/rules/` 或 `.cursor/skills/`。
 - 模块职责变化时，优先更新 `docs/architecture.md` 和本文。
-- 新人加入先阅读 `docs/ONBOARDING.md`，再读 `AGENTS.md`、`docs/handoff/latest.md` 和本文。
+- 阅读仓库先看根目录 `README.md`，需要开发时再读 `docs/ONBOARDING.md`、`AGENTS.md`、`docs/handoff/latest.md` 和本文。

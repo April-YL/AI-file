@@ -1,39 +1,39 @@
 # 项目进度
 
-本文记录阶段性里程碑进展，适合给团队或管理者查看。更细的每日接续信息写入 `docs/handoff/latest.md`。
+本文给阅读仓库的开发者提供阶段性能力概览。当前接手事项见 [`handoff/latest.md`](handoff/latest.md)，具体可执行规则以 `src/rules/registry.py` 为准。
 
 ## 里程碑
 
-| 里程碑 | 目标 | 状态 |
+| 里程碑 | 目标 | 当前状态 |
 | --- | --- | --- |
-| M0：项目骨架 | 建立文档、Cursor 上下文、源码和测试目录 | 已完成 |
-| M0.5：业务资料沉淀 | 阅读资料库并沉淀 SOP、checklist、字段映射 | 已完成 |
-| M1：技术切片 | ingest、规则字典映射、3 条 `fa_list_*`、JSON 报告 | 已完成 |
-| M2a：Agent P1 | 整底稿流水线 + 报告/标注；规则优先汇总页与 K.01 | 进行中 |
-| M2b：程序扩展 | K.02 新增/处置、折旧与一致性检查 | 待开始 |
-| M3：LLM 挂质检点 + 规则语义 | `--llm-rules` / `--llm-checklist`（非报告摘要为主） | 待开始 |
-| M4：材料比对 | 影像、合同、发票等非结构化材料 | 待规划 |
+| M0–M1 | 项目骨架、资料沉淀、工作簿读取、规则注册表和报告骨架 | 已完成 |
+| M2a | 整本底稿流水线、汇总页、K.00 Lead、K.01、报告与标注首版 | 已完成首版并持续校准 |
+| M2b | K.02 新增与处置的读取、勾稽、选样和详细测试规则 | 已接入主流程，持续校准真实版式 |
+| M2c | K.03 路径识别、SAP/TOD/政策规则及执行台账 | 已接入主流程；SAP 阶段 2 已完成 |
+| M3a | 可配置 LLM 客户端、脱敏和报告叙述增强 | 已实现，可选且默认关闭 |
+| M3c | LLM 参与规则语义和 checklist 逐点辅助复核 | 规划中，不能替代确定性规则 |
+| M4 | 影像、合同、发票等非结构化材料 | 未开始 |
 
-## 当前进展
+## 当前可运行成品
 
-- 已建立项目级 Agent 上下文。
-- 已建立领域词典、架构说明、任务清单和交接模板。
-- 已建立 Cursor rules、Skill 和子 Agent 定义。
-- 已阅读资料库中的固定资产标准底稿、SOP、checklist 和程序执行资料。
-- 已沉淀 `docs/audit-workflow.md`、`docs/qc-checklist.md`、`docs/workpaper-fields.md`。
-- 已实现 `src/ingest/`、`src/rules/`（含 registry）、`src/report/`（JSON）及对应测试。
-- **M2a 已落地**：`fa-qc-run` / UI、汇总页 ingest + AE-003、`summary_sheet_section`。
-- **K.00 Lead ingest（2026-05-20）**：锚点 6 块、`LeadSheetDataset` 扩展、案例库版式回归；规则规划见 `docs/planning/lead-qc-rules.md`（含 FY26 SOP K1.00 对照与遗漏清单，2026-05-21）。
+- `fa-qc-run`：从底稿输入到 JSON/HTML 报告和标注副本的整本流水线。
+- `fa-qc-ui`：本地 Streamlit 复核界面，展示 findings、执行台账、取数证据和交付物。
+- `src/ingest/`：汇总页、Lead、K.01、K.02、K.03、FA list 等工作表识别和结构化读取。
+- `src/rules/`：汇总页、Lead、K.01、K.02 新增/处置、K.03 SAP/TOD/政策和 FA list 规则。
+- `src/report/`：结构化报告、HTML、UI 和 `*_qc_annotated.xlsx` 标注副本。
+- `src/llm/`：可选的 OpenAI 兼容接口与脱敏/辅助复核能力。
 
-## 下一阶段目标
+## 2026-07-13 基线
 
-**P0 — 质检点准确（规则，无 LLM）**
+- K.03 已使用工作簿级 `K03ExecutionProfile` 识别并分派 SAP 中精度、SAP 高精度、TOD by-item、TOD 抽样和折旧政策复核路径。
+- SAP 策略选择、SAP TE 与 Lead TE 一致性、高精度 SAP CRA 与 Lead V/M CRA 一致性已进入规则和执行台账。
+- 多张实际执行的 SAP 程序页分别检查并保留取数证据；缺少必要参数时记录 `DATA_INSUFFICIENT`，不适用路径记录 `NOT_APPLICABLE`。
+- 最近 K.03 SAP、runner、registry 和执行覆盖聚焦测试结果为 `32 passed`；这不是全仓测试结论。
 
-1. Lead 确定性规则（见 `docs/planning/lead-qc-rules.md`）。
-2. K.01 `rollforward_*`；Lead↔K.01 勾稽。
-3. 底稿批注 v0、案例库端到端回归。
+## 主要剩余事项
 
-**P1 — LLM 服务质检全过程（非报告摘要）**
-
-4. M3c：`--llm-rules`、`--llm-checklist`（见 `docs/llm-agent-roadmap.md`）。
-5. 层 4 `--llm` 维持可选，不作为验收重点。
+1. 按真实底稿版式持续校准 K.00–K.03 的读取准确性和规则误报/漏报。
+2. 完善正式 Excel 质检报告；当前结构化 JSON、HTML、UI 与标注副本已可用。
+3. 继续补齐 checklist 中仍为 `manual_only`、`planned` 或证据不足的检查点。
+4. K.03 的特别风险、实体类型选择和复杂证据充分性继续由人工复核，未作为已自动完成展示。
+5. LLM 规则语义和 checklist 辅助能力仍处规划阶段，确定性规则保持最终自动判定权。

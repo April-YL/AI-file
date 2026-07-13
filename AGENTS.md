@@ -16,8 +16,8 @@
 
 | 交付物 | 说明 | 状态 |
 | --- | --- | --- |
-| 质检报告 | 结构化 findings 清单 + 汇总（程序维度、资产/行维度） | 进行中（JSON 结构已通，正式报告与 Excel 待完善） |
-| 底稿标注 | `*_qc_annotated.xlsx`：双 Comments 表 + 单元格批注（见 [docs/workpaper-annotation.md](docs/workpaper-annotation.md)） | **M2a 首版已通** |
+| 质检报告 | 结构化 findings、程序汇总、执行台账和复核建议 | JSON、HTML、UI 已可运行；正式 Excel 汇总报告待完善 |
+| 底稿标注 | `*_qc_annotated.xlsx`：双 Comments 表 + 单元格批注（见 [docs/workpaper-annotation.md](docs/workpaper-annotation.md)） | 已有可运行首版，持续校准锚点 |
 
 ## 演进方向：大模型 Agent（M3+）
 
@@ -29,24 +29,25 @@
 2. **LLM 服务全过程**：ingest 映射、**规则语义**（`--llm-rules`）、**checklist 评估**（`--llm-checklist`）——不是报告摘要为主。
 3. **报告叙述**（`--llm` / `llm_enrichment`）已实现但**优先级最低**；不替代规则、不提升各检查点判定准确性。
 
-- **M2a（当前）**：规则引擎 + 整底稿流水线（Lead/K.01 规则为 P0）。
+- **M2a–M2c（当前）**：整底稿流水线已覆盖汇总页、Lead、K.01、K.02 与 K.03 的分层读取和规则；继续以准确性校准为主。
 - **M3c（高优先级）**：`src/llm/rule_review.py`、`checklist_assess.py` 等挂在具体质检点。
 - **原则**：金额勾稽、唯一性、必填等由 `rules` 判定；LLM **不得**单独将 FAIL 改为 PASS。默认 `FA_QC_LLM_ENABLED=false`。
 
 路线图：[docs/llm-agent-roadmap.md](docs/llm-agent-roadmap.md) · 决策：[docs/decisions/ADR-0002-llm-agent-evolution.md](docs/decisions/ADR-0002-llm-agent-evolution.md)
 
-## 当前阶段：M1 已完成切片 → **M2a 进行中**
+## 当前阶段：整底稿流水线已成形 → **K.00–K.03 持续校准**
 
 **M1（已完成的技术切片）**：ingest 诊断与字段映射、规则字典注册表、3 条资产台账类规则（`fa_list_*`，适用于标准底稿 FA list **或** 客户外挂台账）、JSON 报告骨架。
 
-**M2a（当前 Agent P1，非「FA list 优先」）**：整本底稿流水线 + 双必交付雏形，业务规则优先 **汇总页（PSP/拒绝理由）** 与 **K.01 后推表**：
+**当前基线（2026-07-13）**：整本底稿流水线 + 双必交付首版，业务规则已从汇总页和 K.01 扩展到 K.00–K.03：
 
 - 编排：`fa-qc-run`（底稿路径 → 多 sheet 解析 → 检查 → 报告 + 标注副本）。
 - 解析：整本 Excel 多 sheet 结构化（不限于 FA list）；客户台账为可选第二输入。
-- 规则：AE-003（PSP 执行/拒绝理由）、K.01 后推存在性与列完整性等（见 `docs/rule-dictionary-mapping.md`）。
-- 输出：程序维度质检报告 + 底稿单元格批注（`*_qc_annotated.xlsx`）。
+- 规则：汇总页/PSP、Lead、K.01、K.02 新增/处置、K.03 SAP/TOD/政策和 FA list 等规则（见 `src/rules/registry.py` 与 `docs/rule-dictionary-mapping.md`）。
+- 输出：JSON/HTML/UI、执行台账和底稿单元格批注（`*_qc_annotated.xlsx`）；正式 Excel 汇总报告仍待完善。
+- K.03：通过工作簿级 `K03ExecutionProfile` 分派 SAP 中/高精度、TOD by-item、TOD 抽样和政策复核；特别风险、实体类型及复杂证据充分性仍需人工复核。
 
-`fa_list_*` 规则保留复用，但 **不** 作为当前里程碑的主线。终态验收仍以「报告 + 底稿标注」为准。
+`fa_list_*` 规则保留复用，但 **不** 作为当前主线。checklist 尚未全部自动化，系统不得把 registry 外规划项展示为已执行。终态验收仍以「报告 + 底稿标注」为准。
 
 ## 推荐技术栈
 
@@ -144,7 +145,7 @@
 推荐模板：
 
 ```powershell
-$p = (Get-ChildItem -LiteralPath 'E:\AI file\固定资产质检agent\资料库' | Where-Object Name -eq 'K1 SWP 固定资产 202YMMDD XYZ公司.xlsx').FullName
+$p = (Get-ChildItem -LiteralPath '.\固定资产质检agent\资料库' | Where-Object Name -eq 'K1 SWP 固定资产 202YMMDD XYZ公司.xlsx').FullName
 & '.\.venv\Scripts\python.exe' .\scripts\inspect_workbook.py --path $p
 ```
 
