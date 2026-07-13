@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any
@@ -24,6 +25,8 @@ RULE_IDS: tuple[str, ...] = (
     "sap_te_consistency",
     "sap_high_cra_consistency",
     "sap_depreciation_difference",
+    "sap_medium_category_deviation_explanation",
+    "sap_high_category_deviation_explanation",
 )
 
 
@@ -56,11 +59,19 @@ def run_k03_sap_rules(
         profile=k03_execution_profile,
     )
     difference_issues = _check_depreciation_difference(dataset)
+    medium_issues, medium_ready = _check_category_deviation_explanation(
+        dataset, rule_id="sap_medium_category_deviation_explanation", summary_key="sap_medium_deviation_items"
+    )
+    high_issues, high_ready = _check_category_deviation_explanation(
+        dataset, rule_id="sap_high_category_deviation_explanation", summary_key="sap_high_deviation_items"
+    )
     issues = [
         *precision_issues,
         *te_issues,
         *high_cra_issues,
         *difference_issues,
+        *medium_issues,
+        *high_issues,
     ]
 
     _record_rule_result(
@@ -96,6 +107,24 @@ def run_k03_sap_rules(
         dataset,
         difference_issues,
         status="executed",
+        lead=lead,
+        profile=k03_execution_profile,
+    )
+    _record_rule_result(
+        recorder,
+        "sap_medium_category_deviation_explanation",
+        dataset,
+        medium_issues,
+        status=("executed" if medium_ready else "data_insufficient") if dataset.execution_path == EXECUTION_PATH_SAP_MEDIUM else "not_applicable",
+        lead=lead,
+        profile=k03_execution_profile,
+    )
+    _record_rule_result(
+        recorder,
+        "sap_high_category_deviation_explanation",
+        dataset,
+        high_issues,
+        status=("executed" if high_ready else "data_insufficient") if dataset.execution_path == EXECUTION_PATH_SAP_HIGH else "not_applicable",
         lead=lead,
         profile=k03_execution_profile,
     )
@@ -205,7 +234,8 @@ def _check_depreciation_difference(dataset: K03SheetDataset) -> list[QcIssue]:
             )
         )
         return issues
-
+    if summary.get("sap_medium_deviation_items") or summary.get("sap_high_deviation_items"):
+        return issues
     over_count = int(summary.get("sap_deviation_over_threshold_count") or 0)
     if over_count and not (summary.get("sap_note_text") or summary.get("sap_conclusion_text")):
         issues.append(
@@ -218,18 +248,79 @@ def _check_depreciation_difference(dataset: K03SheetDataset) -> list[QcIssue]:
                 "请针对超过阈值的折旧偏差补充原因分析、后续处理和总体结论。",
             )
         )
-    elif over_count:
-        issues.append(
-            _issue(
-                dataset,
-                "sap_depreciation_difference",
-                "sap_deviation_over_threshold",
-                Severity.NEED_REVIEW,
-                f"K.03.1 SAP 折旧测试存在 {over_count} 项偏差超过阈值，底稿已有说明或结论，需要复核充分性。",
-                "请复核差异说明是否覆盖所有超阈值项目，并判断是否需要调整或扩大测试。",
-            )
-        )
     return issues
+
+
+def _check_category_deviation_explanation(
+    dataset: K03SheetDataset,
+    *,
+    rule_id: str,
+    summary_key: str,
+) -> tuple[list[QcIssue], bool]:
+    items = list(dataset.summary.get(summary_key) or [])
+    if not items:
+        return [], False
+    issues: list[QcIssue] = []
+    ready = True
+    for item in items:
+        category = str(item.get("asset_category") or "未识别类别")
+        deviation = parse_amount(item.get("deviation_amount"))
+        threshold = parse_amount(item.get("threshold"))
+        if deviation is None or threshold is None:
+            ready = False
+            continue
+        computed_over = abs(deviation) > abs(threshold)
+        stated_text = str(item.get("over_threshold_stated") or "").strip()
+        if not stated_text:
+            ready = False
+            continue
+        stated_over = _looks_yes(stated_text)
+        if stated_over != computed_over:
+            issues.append(_issue(
+                dataset, rule_id, f"{category}:over_threshold", Severity.NEED_REVIEW,
+                f"{category} 的偏差金额与阈值比较结果，和底稿“是否超过阈值”标识不一致。",
+                "请核对偏差、阈值及“是否超过阈值”公式或人工判断。",
+                source_row=_item_source_row(item),
+            ))
+            continue
+        if not computed_over:
+            continue
+        note = item.get("matched_note") or {}
+        note_text = str(note.get("text") or "").strip()
+        if not _has_substantive_note(note_text):
+            issues.append(_issue(
+                dataset, rule_id, f"{category}:explanation", Severity.FAIL,
+                f"{category} 的折旧偏差超过阈值，但未识别到可追溯的对应说明。",
+                "请在 Notes 中补充该类别（或合计）超阈值偏差的原因与后续处理说明，并建立明确索引。",
+                source_row=_item_source_row(item),
+            ))
+        else:
+            issues.append(_issue(
+                dataset, rule_id, f"{category}:explanation", Severity.NEED_REVIEW,
+                f"{category} 的折旧偏差超过阈值，已识别到对应说明，需人工复核说明是否充分。",
+                "请复核该说明是否解释偏差原因、量化影响及是否需要调整或扩大测试。",
+                source_row=_item_source_row(item),
+            ))
+    return issues, ready
+
+
+def _item_source_row(item: dict[str, Any]) -> int | None:
+    cell = str(item.get("deviation_cell") or "")
+    match = re.search(r"(\d+)$", cell)
+    return int(match.group(1)) if match else None
+
+
+def _has_substantive_note(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", text).lower()
+    normalized = re.sub(r"^nb\d+[：:;；,，\-—]*", "", normalized)
+    if not normalized:
+        return False
+    return normalized not in {"nb1", "nb2", "nb3", "tbd", "todo", "na", "n/a", "待补", "待说明", "-", "--"}
+
+
+def _looks_yes(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    return text in {"是", "yes", "y", "true"} or text.startswith("是")
 
 
 def _record_rule_result(
@@ -308,6 +399,25 @@ def _sap_observation(
             ),
         ]
     )
+    category_key = {
+        "sap_medium_category_deviation_explanation": "sap_medium_deviation_items",
+        "sap_high_category_deviation_explanation": "sap_high_deviation_items",
+    }.get(rule_id)
+    if category_key:
+        category_items = summary.get(category_key) or []
+        values.append(_value("已识别逐类别项目数", len(category_items), None, None, "count"))
+        # Observation evidence is bounded by the recorder schema.  Findings
+        # themselves retain every affected category and its cell anchor.
+        for item in category_items[:2]:
+            values.extend(
+                [
+                    _value("资产类别", item.get("asset_category"), _item_source_row(item), None, "asset_category"),
+                    _value("偏差金额", item.get("deviation_amount"), _item_source_row(item), None, "amount"),
+                    _value("偏差阈值", item.get("threshold"), _item_source_row(item), None, "amount"),
+                    _value("底稿是否超过阈值", item.get("over_threshold_stated"), _item_source_row(item), None, "test_result"),
+                    _value("Notes 匹配标记", item.get("note_reference") or (item.get("matched_note") or {}).get("marker"), _item_source_row(item), None, "note_reference"),
+                ]
+            )
     missing: list[str] = []
     if rule_id == "sap_precision_selection":
         if not _profile_cra(profile):
@@ -329,6 +439,8 @@ def _sap_observation(
             missing.append("SAP 预期构建说明")
         if not summary.get("sap_deviation_rows"):
             missing.append("SAP 偏差测试结果")
+        if category_key and not summary.get(category_key):
+            missing.append("SAP 逐类别偏差、阈值或说明索引")
 
     return _observation(
         dataset,
@@ -338,7 +450,7 @@ def _sap_observation(
         missing_data=missing,
         logic=(
             "系统读取 K.03.1 SAP 路径和参数，并使用 K03 profile 已关联的 Lead 计价/计量 CRA，"
-            "逐条检查策略选择、TE、高精度 CRA 或偏差处理。"
+            "逐条检查策略选择、TE、高精度 CRA 或偏差处理；逐类别规则以偏差绝对值与底稿阈值比较，并核对对应 Notes。"
         ),
         expected="SAP 策略应匹配 Lead V/M CRA；TE 应与 Lead 一致；高精度页 CRA 应与 Lead V/M CRA 一致。",
         actual=f"本次识别执行路径={dataset.execution_path}，finding 数={sum(1 for item in issues if item.rule_id == rule_id)}。",

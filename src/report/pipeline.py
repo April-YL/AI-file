@@ -475,6 +475,7 @@ def run_workbook_qc(
             rollforward=ctx.rollforward,
             fa_list=ctx.fa_list,
             k03_execution_profile=ctx.k03_execution_profile,
+            summary=ctx.summary,
             recorder=recorder,
         )
     )

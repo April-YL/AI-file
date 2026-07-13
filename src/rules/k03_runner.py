@@ -18,7 +18,10 @@ from ingest.k03_sheet import (
 from ingest.lead_sheet import LeadSheetDataset
 from ingest.records import FaListDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset
+from ingest.summary_sheet import SummarySheetDataset
 from rules.execution_recorder import RuleExecutionRecorder
+from rules.k03_execution_control import RULE_IDS as K03_EXECUTION_CONTROL_RULE_IDS
+from rules.k03_execution_control import run_k03_execution_control
 from rules.k03_observations import (
     K03_LOW_RISK_HOW_RULE_IDS,
     build_k03_missing_dataset_observation,
@@ -33,12 +36,13 @@ from rules.k03_tod_by_item import RULE_IDS as K03_TOD_BY_ITEM_RULE_IDS
 from rules.k03_tod_by_item import run_k03_tod_by_item_rules
 from rules.models import QcIssue
 
-K03_RULE_IDS: tuple[str, ...] = (
+K03_COMPONENT_RULE_IDS: tuple[str, ...] = (
     *K03_SAP_RULE_IDS,
     *K03_TOD_SAMPLING_RULE_IDS,
     *K03_TOD_BY_ITEM_RULE_IDS,
     *K03_POLICY_REVIEW_RULE_IDS,
 )
+K03_RULE_IDS: tuple[str, ...] = (*K03_EXECUTION_CONTROL_RULE_IDS, *K03_COMPONENT_RULE_IDS)
 
 
 def run_k03_rules(
@@ -48,24 +52,26 @@ def run_k03_rules(
     rollforward: RollforwardSheetDataset | None = None,
     fa_list: FaListDataset | None = None,
     k03_execution_profile: K03ExecutionProfile | None = None,
+    summary: SummarySheetDataset | None = None,
     recorder: RuleExecutionRecorder | None = None,
 ) -> list[QcIssue]:
     recorder = recorder or RuleExecutionRecorder()
+    issues = run_k03_execution_control(summary, k03_execution_profile, recorder=recorder)
     if k03_execution_profile is not None:
-        return _run_k03_rules_from_profile(
+        issues.extend(_run_k03_rules_from_profile(
             k03_sheets or [],
             k03_execution_profile,
             lead=lead,
             rollforward=rollforward,
             fa_list=fa_list,
             recorder=recorder,
-        )
+        ))
+        return issues
 
-    issues: list[QcIssue] = []
     datasets = k03_sheets or []
     if not datasets:
         note = "未识别 K.03 折旧测试或折旧政策复核工作表"
-        for rule_id in K03_RULE_IDS:
+        for rule_id in K03_COMPONENT_RULE_IDS:
             recorder.record_data_insufficient(rule_id, note)
             _attach_missing_observation(recorder, rule_id, note)
         return issues

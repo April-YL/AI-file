@@ -2056,11 +2056,18 @@ def _extract_sap_summary(rows: list[tuple[Any, ...]]) -> dict[str, Any]:
     summary["sap_decomposition_text"] = _collect_rows_after_tokens(rows, ("细分", "分解", "decomposition"), max_rows=8)
     summary["sap_note_text"] = _collect_rows_after_tokens(rows, ("说明", "note", "备注"), max_rows=8)
     summary["sap_conclusion_text"] = _collect_rows_after_tokens(rows, ("结论", "conclusion"), max_rows=8)
+    note_blocks = _extract_sap_note_blocks(rows)
     deviation_rows = _extract_sap_deviation_rows(rows)
     summary["sap_deviation_rows"] = deviation_rows
     summary["sap_deviation_over_threshold_count"] = sum(
         1 for item in deviation_rows if _looks_yes(item.get("over_threshold"))
     )
+    # Keep precision-specific layouts separate.  The legacy rows remain for the
+    # broad SAP completeness rule; the category items are the auditable input to
+    # the two explanation-coverage rules.
+    summary["sap_note_blocks"] = note_blocks
+    summary["sap_medium_deviation_items"] = _extract_sap_medium_deviation_items(rows, note_blocks)
+    summary["sap_high_deviation_items"] = _extract_sap_high_deviation_items(rows, note_blocks)
     return summary
 
 
@@ -2420,6 +2427,170 @@ def _extract_sap_deviation_rows(rows: list[tuple[Any, ...]]) -> list[dict[str, A
             }
         )
     return result[:20]
+
+
+def _cell_ref(row_no: int, col_no: int) -> str:
+    return f"{get_column_letter(col_no)}{row_no}"
+
+
+def _marker_key(value: Any) -> str | None:
+    match = re.search(r"\b(NB\s*\d+)\b", _text(value), flags=re.IGNORECASE)
+    if not match:
+        return None
+    return re.sub(r"\s+", "", match.group(1)).upper()
+
+
+def _extract_sap_note_blocks(rows: list[tuple[Any, ...]]) -> dict[str, dict[str, Any]]:
+    """Return explicitly numbered SAP Notes blocks without treating a global note as coverage."""
+    note_start = next(
+        (
+            row_no
+            for row_no, row in enumerate(rows, start=1)
+            if any(_norm(_text(value)).startswith("notes") or _norm(_text(value)) in {"说明", "备注"} for value in row)
+        ),
+        None,
+    )
+    if note_start is None:
+        return {}
+    blocks: dict[str, dict[str, Any]] = {}
+    active: str | None = None
+    for row_no in range(note_start + 1, len(rows) + 1):
+        row = rows[row_no - 1]
+        row_text = " ".join(_text(value).strip() for value in row if _text(value).strip())
+        if not row_text:
+            continue
+        marker = next((_marker_key(value) for value in row if _marker_key(value)), None)
+        if marker:
+            active = marker
+            blocks[marker] = {
+                "marker": marker,
+                "text": row_text,
+                "row_start": row_no,
+                "row_end": row_no,
+                "cell": next((_cell_ref(row_no, col_no) for col_no, value in enumerate(row, start=1) if _marker_key(value) == marker), None),
+            }
+        elif active:
+            blocks[active]["text"] = f"{blocks[active]['text']} {row_text}"
+            blocks[active]["row_end"] = row_no
+    return blocks
+
+
+def _find_sap_row(rows: list[tuple[Any, ...]], *, include: tuple[str, ...], exclude: tuple[str, ...] = ()) -> int | None:
+    for row_no, row in enumerate(rows, start=1):
+        text = _norm(" ".join(_text(value) for value in row))
+        if all(_norm(token) in text for token in include) and not any(_norm(token) in text for token in exclude):
+            return row_no
+    return None
+
+
+def _extract_sap_medium_deviation_items(
+    rows: list[tuple[Any, ...]], note_blocks: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    threshold_row = _find_sap_row(rows, include=("偏差阈值",), exclude=("是否",))
+    deviation_row = _find_sap_row(rows, include=("偏差金额",))
+    decision_row = _find_sap_row(rows, include=("偏差是否超过阈值",))
+    if not all((threshold_row, deviation_row, decision_row)):
+        return []
+    category_row = None
+    for row_no in range(threshold_row - 1, max(0, threshold_row - 16), -1):
+        row = rows[row_no - 1]
+        text = _norm(" ".join(_text(value) for value in row))
+        if "资产类别" in text or ("total" in text and sum(bool(_text(value).strip()) for value in row) >= 3):
+            category_row = row_no
+            break
+    if category_row is None:
+        return []
+    category_values = rows[category_row - 1]
+    items: list[dict[str, Any]] = []
+    for col_no, category in enumerate(category_values, start=1):
+        label = _text(category).strip()
+        if not label or _norm(label) in {"资产类别", "类别"}:
+            continue
+        threshold = _cell_value(rows[threshold_row - 1], col_no)
+        deviation = _cell_value(rows[deviation_row - 1], col_no)
+        stated = _cell_value(rows[decision_row - 1], col_no)
+        if not any(_text(value).strip() for value in (threshold, deviation, stated)):
+            continue
+        marker = None
+        marker_cell = None
+        for marker_row in range(decision_row + 1, min(decision_row + 3, len(rows)) + 1):
+            value = _cell_value(rows[marker_row - 1], col_no)
+            marker = _marker_key(value)
+            if marker:
+                marker_cell = _cell_ref(marker_row, col_no)
+                break
+        items.append({
+            "scope": "total" if _norm(label) in {"total", "合计", "总计"} else "category",
+            "asset_category": label,
+            "category_cell": _cell_ref(category_row, col_no),
+            "threshold": threshold,
+            "threshold_cell": _cell_ref(threshold_row, col_no),
+            "deviation_amount": deviation,
+            "deviation_cell": _cell_ref(deviation_row, col_no),
+            "over_threshold_stated": stated,
+            "over_threshold_cell": _cell_ref(decision_row, col_no),
+            "note_reference": marker,
+            "note_reference_cell": marker_cell,
+            "matched_note": note_blocks.get(marker) if marker else None,
+        })
+    return items
+
+
+def _extract_sap_high_deviation_items(
+    rows: list[tuple[Any, ...]], note_blocks: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    header_row = _find_sap_row(rows, include=("是否超过", "已分配偏差阈值"))
+    if header_row is None:
+        return []
+    columns: dict[str, int] = {}
+    for col_no, value in enumerate(rows[header_row - 1], start=1):
+        text = _norm(_text(value))
+        if "资产类别" in text:
+            columns["category"] = col_no
+        elif text == "差异" or text == "差异=":
+            columns["deviation"] = col_no
+        elif "已分配偏差阈值" in text and "是否" not in text:
+            columns["threshold"] = col_no
+        elif "是否超过" in text:
+            columns["stated"] = col_no
+    if not {"category", "deviation", "threshold", "stated"}.issubset(columns):
+        return []
+    items: list[dict[str, Any]] = []
+    for row_no in range(header_row + 1, min(header_row + 100, len(rows)) + 1):
+        row = rows[row_no - 1]
+        category = _text(_cell_value(row, columns["category"])).strip()
+        if not category:
+            continue
+        if _norm(category) in {"notes", "说明", "备注"}:
+            break
+        if _norm(category) in {"资产类别", "类别"}:
+            continue
+        deviation = _cell_value(row, columns["deviation"])
+        threshold = _cell_value(row, columns["threshold"])
+        stated = _cell_value(row, columns["stated"])
+        if not any(_text(value).strip() for value in (deviation, threshold, stated)):
+            continue
+        marker = next((_marker_key(value) for value in row if _marker_key(value)), None)
+        matched_note = note_blocks.get(marker) if marker else None
+        if matched_note is None:
+            category_key = _norm(category)
+            matches = [block for block in note_blocks.values() if category_key and category_key in _norm(block["text"])]
+            if len(matches) == 1:
+                matched_note = {**matches[0], "match_basis": "category_mention"}
+        items.append({
+            "scope": "total" if _norm(category) in {"total", "合计", "总计"} else "category",
+            "asset_category": category,
+            "category_cell": _cell_ref(row_no, columns["category"]),
+            "threshold": threshold,
+            "threshold_cell": _cell_ref(row_no, columns["threshold"]),
+            "deviation_amount": deviation,
+            "deviation_cell": _cell_ref(row_no, columns["deviation"]),
+            "over_threshold_stated": stated,
+            "over_threshold_cell": _cell_ref(row_no, columns["stated"]),
+            "note_reference": marker,
+            "matched_note": matched_note,
+        })
+    return items
 
 
 def _looks_yes(value: Any) -> bool:

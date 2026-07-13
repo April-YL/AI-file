@@ -305,3 +305,198 @@ def test_sap_deviation_over_threshold_without_note_fails(tmp_path: Path):
         and issue.severity == Severity.FAIL
         for issue in issues
     )
+
+
+def _save_medium_category_workbook(
+    path: Path, *, include_total_note: bool = True, machine_note: str = "机器设备本期新增较多，已完成进一步量化。"
+) -> Path:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.03.1 SAP-中精确度"
+    ws.append(["CRA", "Minimal"])
+    ws.append(["预期", "按类别建立折旧预期"])
+    ws.append([])
+    ws.append(["资产类别", "房屋及建筑物", "机器设备", "total"])
+    ws.append([])
+    ws.append(["偏差阈值 c", 10, 10, 20])
+    ws.append([])
+    ws.append([])
+    ws.append(["偏差金额 h=g-f", 5, -15, 25])
+    ws.append([])
+    ws.append(["偏差是否超过阈值 h vs c", "否", "是", "是"])
+    ws.append([None, None, "NB1", "NB10"])
+    ws.append([])
+    ws.append(["Notes"])
+    ws.append(["NB1", machine_note])
+    if include_total_note:
+        ws.append(["NB10", "合计偏差主要来自机器设备，已完成进一步量化。"])
+    wb.save(path)
+    wb.close()
+    return path
+
+
+def test_sap_medium_category_and_total_require_their_own_notes(tmp_path: Path):
+    dataset = load_k03_sheets_from_workbook(
+        _save_medium_category_workbook(tmp_path / "sap_medium_categories.xlsx")
+    )[0]
+
+    issues = run_k03_sap_rules(
+        dataset,
+        lead=_lead(),
+        k03_execution_profile=_profile(dataset, cra="Minimal"),
+    )
+
+    category_issues = [
+        issue for issue in issues if issue.rule_id == "sap_medium_category_deviation_explanation"
+    ]
+    assert len(category_issues) == 2
+    assert all(issue.severity == Severity.NEED_REVIEW for issue in category_issues)
+    assert any("机器设备" in issue.message for issue in category_issues)
+    assert any("total" in issue.message for issue in category_issues)
+
+
+def test_sap_medium_total_without_its_own_note_fails(tmp_path: Path):
+    dataset = load_k03_sheets_from_workbook(
+        _save_medium_category_workbook(tmp_path / "sap_medium_missing_total_note.xlsx", include_total_note=False)
+    )[0]
+
+    issues = run_k03_sap_rules(
+        dataset,
+        lead=_lead(),
+        k03_execution_profile=_profile(dataset, cra="Minimal"),
+    )
+
+    assert any(
+        issue.rule_id == "sap_medium_category_deviation_explanation"
+        and issue.severity == Severity.FAIL
+        and "total" in issue.message
+        for issue in issues
+    )
+
+
+def test_sap_medium_placeholder_note_is_not_an_explanation(tmp_path: Path):
+    dataset = load_k03_sheets_from_workbook(
+        _save_medium_category_workbook(
+            tmp_path / "sap_medium_placeholder_note.xlsx", machine_note="待补"
+        )
+    )[0]
+    issues = run_k03_sap_rules(
+        dataset, lead=_lead(), k03_execution_profile=_profile(dataset, cra="Minimal")
+    )
+
+    assert any(
+        issue.rule_id == "sap_medium_category_deviation_explanation"
+        and issue.severity == Severity.FAIL
+        and "机器设备" in issue.message
+        for issue in issues
+    )
+
+
+def test_sap_high_note_references_match_exact_marker_not_prefix(tmp_path: Path):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.03.1 SAP-高精确度"
+    ws.append(["CRA", "Moderate"])
+    ws.append(["预期", "按类别建立折旧预期"])
+    ws.append([])
+    ws.append(["资产类别", "差异", "已分配偏差阈值", "差异是否超过已分配偏差阈值", "说明索引"])
+    ws.append(["机器设备", -15, 10, "是", "NB1"])
+    ws.append(["电子设备", 20, 10, "是", "NB10"])
+    ws.append(["Notes"])
+    ws.append(["NB1", "机器设备差异已完成进一步量化。"])
+    ws.append(["NB10", "电子设备差异已完成进一步量化。"])
+    path = tmp_path / "sap_high_markers.xlsx"
+    wb.save(path)
+    wb.close()
+    dataset = load_k03_sheets_from_workbook(path)[0]
+    items = dataset.summary["sap_high_deviation_items"]
+    assert items[0]["note_reference"] == "NB1"
+    assert items[0]["matched_note"]["marker"] == "NB1"
+    assert items[1]["note_reference"] == "NB10"
+    assert items[1]["matched_note"]["marker"] == "NB10"
+
+    issues = run_k03_sap_rules(
+        dataset,
+        lead=_lead(cra="Moderate"),
+        k03_execution_profile=_profile(dataset, cra="Moderate"),
+    )
+
+    category_issues = [
+        issue for issue in issues if issue.rule_id == "sap_high_category_deviation_explanation"
+    ]
+    assert len(category_issues) == 2
+    assert all(issue.severity == Severity.NEED_REVIEW for issue in category_issues)
+
+
+def test_sap_high_missing_threshold_is_data_insufficient(tmp_path: Path):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.03.1 SAP-高精确度"
+    ws.append(["CRA", "Moderate"])
+    ws.append(["预期", "按类别建立折旧预期"])
+    ws.append(["资产类别", "差异", "差异是否超过已分配偏差阈值"])
+    ws.append(["机器设备", "=20-5", "是"])
+    path = tmp_path / "sap_high_missing_threshold.xlsx"
+    wb.save(path)
+    wb.close()
+    dataset = load_k03_sheets_from_workbook(path)[0]
+    recorder = RuleExecutionRecorder()
+
+    run_k03_sap_rules(
+        dataset,
+        lead=_lead(cra="Moderate"),
+        k03_execution_profile=_profile(dataset, cra="Moderate"),
+        recorder=recorder,
+    )
+
+    assert _ledger_items(recorder)["sap_high_category_deviation_explanation"]["status"] == STATUS_DATA_INSUFFICIENT
+
+
+def test_sap_high_uncalculated_formula_threshold_is_data_insufficient(tmp_path: Path):
+    """openpyxl data_only reads an uncalculated Excel formula as None, never as zero."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.03.1 SAP-高精确度"
+    ws.append(["CRA", "Moderate"])
+    ws.append(["预期", "按类别建立折旧预期"])
+    ws.append(["资产类别", "差异", "已分配偏差阈值", "差异是否超过已分配偏差阈值"])
+    ws.append(["机器设备", 20, "=10", "是"])
+    path = tmp_path / "sap_high_uncalculated_formula.xlsx"
+    wb.save(path)
+    wb.close()
+    dataset = load_k03_sheets_from_workbook(path)[0]
+    recorder = RuleExecutionRecorder()
+
+    run_k03_sap_rules(
+        dataset,
+        lead=_lead(cra="Moderate"),
+        k03_execution_profile=_profile(dataset, cra="Moderate"),
+        recorder=recorder,
+    )
+
+    assert _ledger_items(recorder)["sap_high_category_deviation_explanation"]["status"] == STATUS_DATA_INSUFFICIENT
+
+
+def test_sap_high_blank_over_threshold_flag_is_data_insufficient(tmp_path: Path):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "K.03.1 SAP-高精确度"
+    ws.append(["CRA", "Moderate"])
+    ws.append(["预期", "按类别建立折旧预期"])
+    ws.append(["资产类别", "差异", "已分配偏差阈值", "差异是否超过已分配偏差阈值"])
+    ws.append(["机器设备", 20, 10, None])
+    path = tmp_path / "sap_high_blank_flag.xlsx"
+    wb.save(path)
+    wb.close()
+    dataset = load_k03_sheets_from_workbook(path)[0]
+    recorder = RuleExecutionRecorder()
+
+    issues = run_k03_sap_rules(
+        dataset,
+        lead=_lead(cra="Moderate"),
+        k03_execution_profile=_profile(dataset, cra="Moderate"),
+        recorder=recorder,
+    )
+
+    assert not any(issue.rule_id == "sap_high_category_deviation_explanation" for issue in issues)
+    assert _ledger_items(recorder)["sap_high_category_deviation_explanation"]["status"] == STATUS_DATA_INSUFFICIENT

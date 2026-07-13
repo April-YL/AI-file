@@ -82,11 +82,16 @@
 | DT-003 | disposal_special_nature_testing | 特殊性质减少测试 | K.02.2 | P4 | REVIEW | manual_only |
 | DT-004 | disposal_exception_followup | 例外情况跟进记录 | K.02.2 | P3 | REVIEW | planned |
 | DP-001 | depreciation_policy_change | 折旧政策变化识别 | K.03.3 | P4 | REVIEW | manual_only |
+| DP-CTRL-001 | k03_program_execution_consistency | K.03 汇总勾选与实际执行一致性 | K.03 | P1 | REVIEW | **implemented**（逐项比较 K.03.1/K.03.2/K.03.3；政策独立，不以 SAP/TOD 替代） |
+| DP-CTRL-002 | k03_depreciation_path_identified | K.03 折旧测试执行路径已识别 | K.03 | P1 | REVIEW | **implemented**（汇总选择执行时，只认状态为 `EXECUTED` 的 SAP/TOD 主程序组件） |
+| DP-CTRL-003 | k03_path_combination_consistency | K.03 折旧测试路径组合一致性 | K.03 | P1 | REVIEW | **implemented**（允许一条 SAP + 一条 TOD；双 SAP、双 TOD、同角色重复执行转人工复核） |
 | DP-002 | depreciation_policy_list_consistency | 折旧政策与清单一致性 | K.03.3 | P3 | REVIEW | planned |
 | DP-003 | sap_precision_selection | 折旧测试策略恰当性 | K.03.1 | P3 | REVIEW | **implemented**（部分覆盖：CRA/TE/中高精度路径/TOD补充识别；证据充分性仍需人工判断） |
 | DP-SAP-001 | sap_te_consistency | SAP 可容忍误差与 Lead 一致性 | K.03.1 | P3 | AUTO_FAIL | **implemented**（DP-003 的 Agent 可执行子规则；SAP TE 与 Lead TE 明确不一致时 FAIL） |
 | DP-SAP-002 | sap_high_cra_consistency | 高精度 SAP CRA 与 Lead V/M 一致性 | K.03.1 | P3 | AUTO_FAIL | **implemented**（DP-003 的 Agent 可执行子规则；仅适用于高精度 SAP，明确不一致时 FAIL） |
-| DP-004 | sap_depreciation_difference | SAP折旧测试差异处理 | K.03.1 | P3 | REVIEW | **implemented**（部分覆盖：偏差阈值、超阈值判断、说明/结论是否存在；说明充分性仍需人工判断） |
+| DP-004 | sap_depreciation_difference | SAP折旧测试差异处理（基础） | K.03.1 | P3 | REVIEW | **implemented**（识别预期构建说明和偏差测试区域；逐类别偏差说明见 DP-SAP-003/004） |
+| DP-SAP-003 | sap_medium_category_deviation_explanation | 中精度 SAP 类别及合计偏差说明 | K.03.1 | P3 | REVIEW | **implemented**（逐类别及合计比较偏差阈值；超阈值时检查同列 Notes 索引和正文，充分性人工复核） |
+| DP-SAP-004 | sap_high_category_deviation_explanation | 高精度 SAP 类别偏差说明 | K.03.1 | P3 | REVIEW | **implemented**（逐类别比较差异和已分配偏差阈值；超阈值时检查对应 Notes 正文，充分性人工复核） |
 | DP-005 | depreciation_by_item_sad | By Item折旧测试差异 | K.03.2 | P3 | AUTO_WARN | planned |
 | DP-006 | depreciation_tod_sampling | TOD抽样折旧测试抽样过程 | K.03.2 | P3 | REVIEW | **implemented**（部分覆盖：总体、关键项目、K.03.2a选样输出参数；抽样设计充分性仍需人工判断） |
 | DP-007 | depreciation_tod_difference | TOD抽样折旧测试差异 | K.03.2 | P3 | REVIEW | **implemented**（部分覆盖：样本明细和结论是否存在；差异调查质量仍需人工判断） |
@@ -122,7 +127,7 @@ JSON 报告 `to_dict()` 仅输出非空扩展字段。
 
 1. **增行**：`FA-RC-001`～`007` 与上表一致，避免 Agent 规则无字典编号。
 2. **AT-002 / DT-002**：判定条件与 K1（12/5）同步——合同/控制权转移单据**不强制编号**。
-3. **K.03 映射维护**：`DP-003`、`DP-004`、`DP-006`、`DP-007` 已纳入主 runner，但仍应在映射表中标注“部分覆盖 + 人工复核边界”，不得写成审计判断全自动通过。`DP-SAP-001`、`DP-SAP-002` 是从 `DP-003` 拆出的 Agent 可执行子规则，不作为原始 35 条来源字典的新行写入脱敏 CSV。
+3. **K.03 映射维护**：`DP-CTRL-001`～`DP-CTRL-003` 负责执行路径与程序总控，只读取汇总页与 `K03ExecutionProfile`，不得重新扫描工作表或把模板页视为已执行。`DP-003`、`DP-004`、`DP-006`、`DP-007` 已纳入主 runner，但仍应标注“部分覆盖 + 人工复核边界”，不得写成审计判断全自动通过。`DP-SAP-001`～`DP-SAP-004` 是从 `DP-003/DP-004` 拆出的 Agent 可执行子规则，不作为原始 35 条来源字典的新行写入脱敏 CSV。
 4. **检查字段/单元格**：改为语义字段（`te`、`sad`），避免写死 `B5:B6`。
 
 ## 开发用法

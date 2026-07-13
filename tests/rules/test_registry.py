@@ -54,6 +54,8 @@ def test_k03_sap_parameter_rules_are_registered():
     expected = {
         "sap_te_consistency": "DP-SAP-001",
         "sap_high_cra_consistency": "DP-SAP-002",
+        "sap_medium_category_deviation_explanation": "DP-SAP-003",
+        "sap_high_category_deviation_explanation": "DP-SAP-004",
     }
     for rule_id, dict_code in expected.items():
         spec = get_by_rule_id(rule_id)
@@ -93,6 +95,9 @@ def test_integration_report_issues_have_dict_metadata():
 def test_registry_contains_current_k03_and_addition_semantic_rule_codes():
     expected = {
         "addition_semantic_review": "AT-LLM-001",
+        "k03_program_execution_consistency": "DP-CTRL-001",
+        "k03_depreciation_path_identified": "DP-CTRL-002",
+        "k03_path_combination_consistency": "DP-CTRL-003",
         "k03_tod_by_item_detail_unreadable": "DP-BI-PRE-001",
         "k03_tod_by_item_required_fields": "DP-BI-PRE-002",
         "k03_tod_by_item_difference_column": "DP-BI-PRE-003",

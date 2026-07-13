@@ -89,7 +89,17 @@ Agent 规则化建议：
 | 处置完整性 | 应考虑重大经营变化是否导致资产报废或处置 | `REVIEW` | `disposal_completeness_review` |
 | 总体同质性 | 出售/报废减少与其他减少方式应区分总体 | `REVIEW` | `disposal_population_homogeneity` |
 
-## 七、K.03.1 折旧 SAP
+## 七、K.03 执行路径与程序总控
+
+> 总控只使用汇总页程序状态和工作簿级 `K03ExecutionProfile`（K.03 执行画像），不重新扫描工作表内容。实际执行只认组件状态为 `EXECUTED`；模板页、未完成页和选样输出辅助页不得单独视为已执行路径。K.03.3 折旧政策与 SAP/TOD 独立比较。
+
+| 检查点 | 检查描述 | 自动化等级 | 建议规则 ID |
+| --- | --- | --- | --- |
+| 汇总与实际执行一致 | K.03.1、K.03.2、K.03.3 的汇总勾选应分别与实际执行组件一致；重复行勾选冲突或实际已执行但汇总缺行时转人工复核 | `REVIEW` | `k03_program_execution_consistency` |
+| 折旧测试路径已识别 | 汇总选择执行 SAP 或 TOD 时，应至少识别一条状态为 `EXECUTED` 的折旧测试路径 | `REVIEW` | `k03_depreciation_path_identified` |
+| 路径组合一致 | 允许一条 SAP 与一条 TOD 作为补充组合；中/高精度 SAP 同时执行、by-item/抽样同时执行或同角色重复执行时转人工复核 | `REVIEW` | `k03_path_combination_consistency` |
+
+## 八、K.03.1 折旧 SAP
 
 > 执行路径口径：折旧测试通常四选一（SAP 中精度、SAP 高精度、TOD by-item、TOD 抽样）；如底稿实际执行多条路径，应逐条检查。SAP 中精度在 Lead 计价/计量认定 CRA 为 Minimal 时可单独采用；CRA 不低于 Low 时，只有同时实际执行 TOD by-item 或 TOD 抽样作为补充程序才可接受。SAP 高精度同样存在已分配偏差阈值，规则读取底稿阈值及超阈值判断，不自行套用未经底稿支持的替代公式。K.03.3 折旧政策复核另行独立检查。
 
@@ -97,13 +107,15 @@ Agent 规则化建议：
 | --- | --- | --- | --- |
 | SAP 类型选择 | `CRA = Minimal` 可使用中精度；`CRA >= Low` 通常使用高精度，中精度仅在实际执行 TOD 补充程序时可接受 | `REVIEW` | `sap_precision_selection` |
 | TE 一致 | SAP 页使用的 TE 应与 Lead TE 一致 | `AUTO_FAIL` | `sap_te_consistency` |
-| SAP 差异处理 | SAP 测试差异应小于偏差阈值；如超过阈值，应有进一步跟进、调查和结论记录 | `REVIEW` | `sap_depreciation_difference` |
+| SAP 差异处理（基础） | SAP 测试页应识别预期构建说明和偏差测试区域 | `REVIEW` | `sap_depreciation_difference` |
+| 中精度类别/合计偏差说明 | 各资产类别及合计的偏差应不超过各自偏差阈值；超阈值时应有同列可追溯的 Notes 说明 | `REVIEW` | `sap_medium_category_deviation_explanation` |
+| 高精度类别偏差说明 | 各资产类别的差异应不超过已分配偏差阈值；超阈值时应有该类别可追溯的 Notes 说明 | `REVIEW` | `sap_high_category_deviation_explanation` |
 | 高精度 CRA 一致 | 高精度 SAP 页内 CRA 应与 Lead 计价/计量认定 CRA 一致 | `AUTO_FAIL` | `sap_high_cra_consistency` |
 | 实体类型 | 实体类型选择应与非复杂方法或抽样判断一致 | `REVIEW` | `sap_entity_type_consistency` |
 | 特别风险 | 存在特别风险且不依赖控制或控制无效时，应执行 TOD | `REVIEW` | `sap_special_risk_tod_required` |
 | SAP 证据不足 | SAP 证据不足时应补充详细测试 | `REVIEW` | `sap_insufficient_evidence` |
 
-## 八、K.03.2 折旧 TOD / By Item
+## 九、K.03.2 折旧 TOD / By Item
 
 | 检查点 | 检查描述 | 自动化等级 | 建议规则 ID |
 | --- | --- | --- | --- |
@@ -117,9 +129,9 @@ Agent 规则化建议：
 
 TOD 抽样阶段 3A 的执行子规则：选样输出配套、抽样货币单元、TE 一致性、总体与 K.01 勾稽、样本数量、样本编号、测试属性、差异跟进及文档结论。所有表格均按语义锚点、表头字段组合和数据形态动态识别；禁止使用固定行列或固定 sheet 顺序。SAD 缺失时总体勾稽记录 `DATA_INSUFFICIENT`，不得套用替代比例。替换样本只作为候补池，实际使用时进入人工复核。
 
-> K.03 当前自动化边界：`sap_precision_selection`、`sap_te_consistency`、`sap_high_cra_consistency`、`sap_depreciation_difference`、`depreciation_tod_sampling`、`depreciation_tod_difference` 已纳入主 runner。系统检查路径、参数、差异结果、说明/结论是否存在或明显异常；证据是否充分恰当、差异说明是否足够支持审计结论，仍由质检人员复核。特别风险下是否必须执行 TOD 尚未纳入本阶段自动规则。
+> K.03 当前自动化边界：三条执行总控规则及 `sap_precision_selection`、`sap_te_consistency`、`sap_high_cra_consistency`、`sap_depreciation_difference`、`depreciation_tod_sampling`、`depreciation_tod_difference` 已纳入主 runner。系统检查路径、参数、差异结果、说明/结论是否存在或明显异常；证据是否充分恰当、差异说明是否足够支持审计结论，仍由质检人员复核。特别风险下是否必须执行 TOD 尚未纳入本阶段自动规则。
 
-## 九、K.03.3 折旧政策复核
+## 十、K.03.3 折旧政策复核
 
 | 检查点 | 检查描述 | 自动化等级 | 建议规则 ID |
 | --- | --- | --- | --- |

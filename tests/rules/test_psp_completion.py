@@ -781,12 +781,9 @@ def test_dep_sap_tod_either_or_allows_tod_evidence_by_number_semantic_content(tm
         waiver_reason_reviewer=reviewer,
     )
     assert not any(i.field == "waiver_reason" and i.source_row in (18, 19) for i in issues)
-    assert any(
-        i.field == "execution_status_consistency"
-        and i.severity == Severity.NEED_REVIEW
-        and i.source_row == 19
-        for i in issues
-    )
+    # K.03 summary-versus-actual consistency is owned by the K.03 execution
+    # control rules; PSP retains only the SAP/TOD alternative waiver behavior.
+    assert not any(i.field == "execution_status_consistency" for i in issues)
 
 
 def test_dep_tod_name_only_without_content_does_not_count_as_executed(tmp_path):

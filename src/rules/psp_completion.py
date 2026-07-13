@@ -466,15 +466,6 @@ def check_psp_completion(
     targets = programs
     inherited_status = _infer_merged_execution_status(targets)
     inherited_status_sources = _infer_merged_execution_status_sources(targets)
-    issues.extend(
-        _dep_alt_selection_consistency_issues(
-            targets,
-            source_sheet=dataset.source_sheet or "汇总",
-            inherited_status=inherited_status,
-            workbook_sheet_titles=workbook_sheet_titles,
-            workbook_path=workbook_path,
-        )
-    )
     skip_waiver_row_ids = _rows_skip_waiver_by_dep_alt(
         targets,
         inherited_status=inherited_status,
