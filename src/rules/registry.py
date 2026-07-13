@@ -1663,6 +1663,36 @@ def _specs() -> list[RuleSpec]:
             agent_priority=AgentPriority.P3,
             implementation=ImplementationStatus.IMPLEMENTED,
         ),
+        *[
+            RuleSpec(
+                dict_code=dict_code,
+                rule_id=rule_id,
+                rule_name=rule_name,
+                procedure_code="K.03.2",
+                sheet_hints=("K.03.2 TOD", "K.03.2a 折旧选样输出"),
+                sheet_kinds=("depreciation_tod",),
+                automation=automation,
+                default_severity=severity,
+                problem_category="基础程序" if automation == AutomationLevel.REVIEW else "错报",
+                reviewer_role="preparer",
+                qc_checkpoint="Y-错报风险-假设不是所有底稿都涉及",
+                k1_ref="K1 CheckList 第38条",
+                agent_priority=AgentPriority.P3,
+                implementation=ImplementationStatus.IMPLEMENTED,
+                notes="DP-006/DP-007 的 TOD 抽样 Agent 可执行子规则。",
+            )
+            for dict_code, rule_id, rule_name, automation, severity in (
+                ("DP-TOD-PRE-001", "k03_tod_sampling_output_required", "TOD 抽样选样输出配套", AutomationLevel.REVIEW, Severity.NEED_REVIEW),
+                ("DP-TOD-001", "k03_tod_sampling_currency", "TOD 抽样货币单元", AutomationLevel.AUTO_FAIL, Severity.FAIL),
+                ("DP-TOD-002", "k03_tod_sampling_te_consistency", "TOD 选样 TE 与 Lead 一致性", AutomationLevel.AUTO_FAIL, Severity.FAIL),
+                ("DP-TOD-003", "k03_tod_sampling_population_reconciliation", "TOD 抽样总体与 K.01 勾稽", AutomationLevel.AUTO_FAIL, Severity.FAIL),
+                ("DP-TOD-004", "k03_tod_sampling_count_consistency", "TOD 选样数量一致性", AutomationLevel.AUTO_FAIL, Severity.FAIL),
+                ("DP-TOD-005", "k03_tod_sampling_identity_consistency", "TOD 样本编号一致性", AutomationLevel.AUTO_FAIL, Severity.FAIL),
+                ("DP-TOD-006", "k03_tod_sampling_attributes", "TOD 样本测试属性完整性", AutomationLevel.REVIEW, Severity.NEED_REVIEW),
+                ("DP-TOD-007", "k03_tod_sampling_difference_followup", "TOD 样本差异跟进", AutomationLevel.AUTO_FAIL, Severity.FAIL),
+                ("DP-TOD-008", "k03_tod_sampling_documentation", "TOD 关键项目依据与测试结论", AutomationLevel.REVIEW, Severity.NEED_REVIEW),
+            )
+        ],
         RuleSpec(
             dict_code="DP-BI-PRE-001",
             rule_id="k03_tod_by_item_detail_unreadable",

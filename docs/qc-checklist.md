@@ -115,6 +115,8 @@ Agent 规则化建议：
 | TOD 抽样过程 | TOD-抽样折旧测试应能追溯总体、关键项目、选样输出参数和样本生成过程 | `REVIEW` | `depreciation_tod_sampling` |
 | TOD 抽样差异 | TOD-抽样折旧测试应保留样本明细、差异跟进和测试结论 | `REVIEW` | `depreciation_tod_difference` |
 
+TOD 抽样阶段 3A 的执行子规则：选样输出配套、抽样货币单元、TE 一致性、总体与 K.01 勾稽、样本数量、样本编号、测试属性、差异跟进及文档结论。所有表格均按语义锚点、表头字段组合和数据形态动态识别；禁止使用固定行列或固定 sheet 顺序。SAD 缺失时总体勾稽记录 `DATA_INSUFFICIENT`，不得套用替代比例。替换样本只作为候补池，实际使用时进入人工复核。
+
 > K.03 当前自动化边界：`sap_precision_selection`、`sap_te_consistency`、`sap_high_cra_consistency`、`sap_depreciation_difference`、`depreciation_tod_sampling`、`depreciation_tod_difference` 已纳入主 runner。系统检查路径、参数、差异结果、说明/结论是否存在或明显异常；证据是否充分恰当、差异说明是否足够支持审计结论，仍由质检人员复核。特别风险下是否必须执行 TOD 尚未纳入本阶段自动规则。
 
 ## 九、K.03.3 折旧政策复核

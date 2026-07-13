@@ -273,6 +273,48 @@ class K03SheetDataset:
 
 
 @dataclass
+class K03SamplingRow:
+    source_row: int
+    sample_type: str | None = None
+    asset_id: str | None = None
+    values: dict[str, Any] = field(default_factory=dict)
+    cell_refs: dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_row": self.source_row,
+            "sample_type": self.sample_type,
+            "asset_id": self.asset_id,
+            "values": self.values,
+            "cell_refs": self.cell_refs,
+        }
+
+
+@dataclass
+class K03RoleEvidence:
+    role: str
+    status: str
+    required_hits: list[str] = field(default_factory=list)
+    supporting_hits: list[str] = field(default_factory=list)
+    missing_required: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+    matched_header_fields: list[str] = field(default_factory=list)
+    matched_rows: list[int] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "role": self.role,
+            "status": self.status,
+            "required_hits": self.required_hits,
+            "supporting_hits": self.supporting_hits,
+            "missing_required": self.missing_required,
+            "conflicts": self.conflicts,
+            "matched_header_fields": self.matched_header_fields,
+            "matched_rows": self.matched_rows,
+        }
+
+
+@dataclass
 class K03ComponentSheet:
     role: str
     sheet_name: str
@@ -355,8 +397,18 @@ def load_k03_sheets_from_workbook(
         for ws in wb.worksheets:
             preview_rows = read_worksheet_rows(ws, max_rows=max_rows or 200)
             kind, confidence, *_ = classify_sheet(ws.title, preview_rows)
-            if kind not in _K03_KINDS and not _looks_like_k03_sheet(ws.title):
+            dynamic_tod = _looks_like_dynamic_tod(preview_rows)
+            auxiliary_depreciation = (
+                any(token in _norm(ws.title) for token in ("本期计提", "currentdepreciation"))
+                and not _looks_like_k03_sheet(ws.title)
+            )
+            if auxiliary_depreciation:
                 continue
+            if kind not in _K03_KINDS and not _looks_like_k03_sheet(ws.title) and not dynamic_tod:
+                continue
+            if dynamic_tod and kind not in _K03_KINDS:
+                kind = SheetKind.DEPRECIATION_TOD_SAMPLE
+                confidence = 0.8
             rows = read_worksheet_rows(ws, max_rows=None)
             datasets.append(
                 _parse_k03_sheet(
@@ -370,6 +422,205 @@ def load_k03_sheets_from_workbook(
     finally:
         wb.close()
     return datasets
+
+
+def _looks_like_dynamic_tod(rows: list[tuple[Any, ...]]) -> bool:
+    evidences = [
+        evaluate_tod_sampling_main(rows, ""),
+        evaluate_tod_sampling_output(rows, ""),
+        evaluate_tod_by_item(rows, ""),
+    ]
+    if resolve_tod_role(rows, "").status == "FOUND":
+        return True
+    # Keep sufficiently evidenced incomplete/ambiguous K.03 candidates so the
+    # parser can record DATA_INSUFFICIENT instead of silently dropping them.
+    # Requiring three independent semantic requirements prevents generic asset
+    # tables with only a sample-like header from entering the K.03 pipeline.
+    return max((len(item.required_hits) for item in evidences), default=0) >= 3
+
+
+def evaluate_tod_sampling_main(rows: list[tuple[Any, ...]], sheet_name: str = "") -> K03RoleEvidence:
+    header_row, detail_rows, table_state = _detect_sampling_detail_table(rows)
+    fields = set((detail_rows[0].values or {}).keys()) if detail_rows else set()
+    text = _norm(" ".join(_text(value) for row in rows for value in row if _text(value)))
+    population, population_row, _, population_state = _find_unique_parameter(
+        rows, ("折旧费用总体", "depreciation population", "population amount"), end_row=header_row
+    )
+    requirements = {
+        "sampling_detail_table": table_state == "FOUND",
+        "sample_type_and_asset_id": {"sample_type", "asset_id"}.issubset(fields),
+        "depreciation_calculation_fields": {
+            "current_depreciation", "recalculated_depreciation", "depreciation_difference"
+        }.issubset(fields),
+        "sampling_population_section": population_state == "FOUND" and _looks_numeric_parameter(population),
+    }
+    hits = [name for name, matched in requirements.items() if matched]
+    missing = [name for name, matched in requirements.items() if not matched]
+    status = "FOUND" if not missing else ("INCOMPLETE" if len(hits) >= 2 else "UNKNOWN")
+    supporting = []
+    normalized_name = _norm(sheet_name)
+    if "抽样" in normalized_name or "sampling" in normalized_name:
+        supporting.append("sheet_name_sampling_hint")
+    if "关键项目" in text or "keyitem" in text:
+        supporting.append("key_item_section")
+    return K03RoleEvidence(
+        role="tod_sampling",
+        status=status,
+        required_hits=hits,
+        supporting_hits=supporting,
+        missing_required=missing,
+        matched_header_fields=sorted(fields),
+        matched_rows=[row for row in (population_row, header_row) if row],
+    )
+
+
+def evaluate_tod_sampling_output(rows: list[tuple[Any, ...]], sheet_name: str = "") -> K03RoleEvidence:
+    header_row, detail_rows, table_state = _detect_sampling_detail_table(rows)
+    fields = set((detail_rows[0].values or {}).keys()) if detail_rows else set()
+    parameter_hits = _sampling_parameter_hits(rows, header_row)
+    parameter_conflicts = _sampling_parameter_conflicts(rows, header_row)
+    key_count, key_count_row, _, key_count_state = _find_unique_parameter(
+        rows, ("关键项目数量", "key item quantity"), end_row=header_row
+    )
+    representative_count, representative_row, _, representative_state = _find_unique_parameter(
+        rows, ("代表性样本量", "representative sample quantity"), end_row=header_row
+    )
+    requirements = {
+        "selected_sample_table": table_state == "FOUND",
+        "sample_type_and_asset_id": {"sample_type", "asset_id"}.issubset(fields),
+        "sampling_parameter_cluster": len(parameter_hits) >= 3,
+        "sample_summary": _has_parameter_label(
+            rows,
+            ("关键项目数量", "代表性样本量", "key item quantity", "representative sample quantity"),
+            end_row=header_row,
+        ),
+    }
+    hits = [name for name, matched in requirements.items() if matched]
+    missing = [name for name, matched in requirements.items() if not matched]
+    status = "FOUND" if not missing and not parameter_conflicts else ("INCOMPLETE" if len(hits) >= 2 else "UNKNOWN")
+    supporting = []
+    normalized_name = _norm(sheet_name)
+    if "选样输出" in normalized_name or "sampleoutput" in normalized_name:
+        supporting.append("sheet_name_output_hint")
+    return K03RoleEvidence(
+        role="tod_sampling_output",
+        status=status,
+        required_hits=hits,
+        supporting_hits=supporting,
+        missing_required=missing,
+        conflicts=parameter_conflicts,
+        matched_header_fields=sorted(fields),
+        matched_rows=[row for row in (key_count_row, representative_row, header_row) if row],
+    )
+
+
+def _sampling_parameter_hits(rows: list[tuple[Any, ...]], header_row: int | None) -> list[str]:
+    labels = {
+        "te": ("可容忍误差", "TE"),
+        "sampling_currency": ("抽样单位货币列", "抽样货币单元", "sampling currency"),
+        "sampling_method": ("抽样方法", "sampling method"),
+        "sample_pool": ("样本池总体金额", "样本池", "sample pool"),
+    }
+    hits: list[str] = []
+    validators = {
+        "te": _looks_numeric_parameter,
+        "sampling_currency": lambda value: "折旧" in _norm(_text(value)) or "depreciation" in _norm(_text(value)),
+        "sampling_method": lambda value: bool(_text(value)) and not _looks_like_parameter_label(value),
+        "sample_pool": _looks_numeric_parameter,
+    }
+    for name, aliases in labels.items():
+        value, _, _, state = _find_unique_parameter(rows, aliases, end_row=header_row)
+        if state == "FOUND" and validators[name](value):
+            hits.append(name)
+    return hits
+
+
+def _sampling_parameter_conflicts(rows: list[tuple[Any, ...]], header_row: int | None) -> list[str]:
+    conflicts: list[str] = []
+    for name, aliases in (
+        ("te", ("可容忍误差", "TE")),
+        ("sampling_currency", ("抽样单位货币列", "抽样货币单元", "sampling currency")),
+    ):
+        _, _, _, state = _find_unique_parameter(rows, aliases, end_row=header_row)
+        if state == "AMBIGUOUS":
+            conflicts.append(f"ambiguous_{name}")
+    return conflicts
+
+
+def _looks_numeric_parameter(value: Any) -> bool:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return True
+    text = _text(value).strip().replace(",", "").replace("，", "")
+    if text.endswith("%"):
+        text = text[:-1]
+    return bool(re.fullmatch(r"[-+]?\d+(?:\.\d+)?", text))
+
+
+def _looks_like_parameter_label(value: Any) -> bool:
+    text = _norm(_text(value))
+    labels = (
+        "可容忍误差", "抽样单位货币列", "抽样货币单元", "抽样方法",
+        "样本池", "关键项目数量", "代表性样本量",
+    )
+    return any(text == _norm(label) or text.startswith(_norm(label)) for label in labels)
+
+
+def evaluate_tod_by_item(rows: list[tuple[Any, ...]], sheet_name: str = "") -> K03RoleEvidence:
+    header_row, header_cells, _ = scan_rows_for_headers(rows, sheet_kind=SheetKind.DEPRECIATION_TOD)
+    mapped_fields, _ = _map_k03_headers(header_cells)
+    normalized = {item.standard_field: item for item in mapped_fields}
+    score = _by_item_score(normalized)
+    sampling = evaluate_tod_sampling_main(rows, sheet_name)
+    requirements = {
+        "detailed_depreciation_fields": score >= 6,
+        "no_sampling_structure": sampling.status not in {"FOUND", "INCOMPLETE"},
+    }
+    hits = [name for name, matched in requirements.items() if matched]
+    missing = [name for name, matched in requirements.items() if not matched]
+    status = "FOUND" if not missing else ("INCOMPLETE" if score >= 4 and requirements["no_sampling_structure"] else "UNKNOWN")
+    supporting = []
+    normalized_name = _norm(sheet_name)
+    if "byitem" in normalized_name or "逐项" in normalized_name:
+        supporting.append("sheet_name_by_item_hint")
+    return K03RoleEvidence(
+        role="tod_by_item",
+        status=status,
+        required_hits=hits,
+        supporting_hits=supporting,
+        missing_required=missing,
+        matched_header_fields=sorted(normalized),
+        matched_rows=[header_row] if header_row else [],
+    )
+
+
+def resolve_tod_role(rows: list[tuple[Any, ...]], sheet_name: str) -> K03RoleEvidence:
+    candidates = [
+        evaluate_tod_sampling_main(rows, sheet_name),
+        evaluate_tod_sampling_output(rows, sheet_name),
+        evaluate_tod_by_item(rows, sheet_name),
+    ]
+    found = [item for item in candidates if item.status == "FOUND"]
+    if len(found) == 1:
+        return found[0]
+    if len(found) > 1:
+        return K03RoleEvidence(
+            role="unknown",
+            status="AMBIGUOUS",
+            conflicts=[item.role for item in found],
+            supporting_hits=[hint for item in found for hint in item.supporting_hits],
+            matched_header_fields=sorted({field for item in found for field in item.matched_header_fields}),
+            matched_rows=sorted({row for item in found for row in item.matched_rows}),
+        )
+    incomplete = [item for item in candidates if item.status == "INCOMPLETE"]
+    if len(incomplete) == 1:
+        return incomplete[0]
+    if len(incomplete) > 1:
+        return K03RoleEvidence(
+            role="unknown",
+            status="AMBIGUOUS",
+            conflicts=[item.role for item in incomplete],
+        )
+    return K03RoleEvidence(role="unknown", status="UNKNOWN")
 
 
 def build_k03_execution_profile(
@@ -1305,6 +1556,10 @@ def _match_k03_extra_field(text: str) -> str | None:
     if not n:
         return None
     checks = (
+        ("sample_type", ("样本类型", "sample type")),
+        ("evidence_description", ("获得的证据", "支持的描述", "evidence description")),
+        ("test_attribute_1", ("测试属性1", "属性1", "attribute 1")),
+        ("test_attribute_2", ("测试属性2", "属性2", "attribute 2")),
         ("management_depreciation", ("管理层计算折旧", "管理层测算折旧", "客户计算折旧", "账面折旧")),
         (
             "audit_recalculated_depreciation",
@@ -1587,40 +1842,26 @@ def _parse_tod_sheet(
         )
         for col, text in header_cells
     ]
-    by_item_score = _by_item_score(normalized)
-    sample_score = _sample_score(sheet_name, rows, header_cells)
-    sheet_text = _norm(sheet_name)
-    is_sampling_sheet = "抽样" in sheet_text or "sampling" in sheet_text
-    is_sample_output_sheet = "选样输出" in sheet_text or "sampleoutput" in sheet_text
+    role_evidence = resolve_tod_role(rows, sheet_name)
     warnings: list[str] = []
 
-    if is_sample_output_sheet:
+    if role_evidence.status == "FOUND" and role_evidence.role == "tod_sampling_output":
         execution_path = EXECUTION_PATH_TOD_SAMPLING
         ingest_depth = INGEST_DEPTH_LIGHTWEIGHT
         template_type = "tod_sampling_output"
-    elif is_sampling_sheet:
+    elif role_evidence.status == "FOUND" and role_evidence.role == "tod_sampling":
         execution_path = EXECUTION_PATH_TOD_SAMPLING
         ingest_depth = INGEST_DEPTH_LIGHTWEIGHT
         template_type = "tod_sampling"
-    elif by_item_score >= 6 and sample_score < 3:
+    elif role_evidence.status == "FOUND" and role_evidence.role == "tod_by_item":
         execution_path = EXECUTION_PATH_TOD_BY_ITEM
         ingest_depth = INGEST_DEPTH_DETAILED
         template_type = "tod_by_item"
-    elif by_item_score >= 7:
-        execution_path = EXECUTION_PATH_TOD_BY_ITEM
-        ingest_depth = INGEST_DEPTH_DETAILED
-        template_type = "tod_by_item"
-    elif sample_score >= 2 or (
-        classified_kind == SheetKind.DEPRECIATION_TOD_SAMPLE and bool(header_cells)
-    ):
-        execution_path = EXECUTION_PATH_TOD_SAMPLING
-        ingest_depth = INGEST_DEPTH_LIGHTWEIGHT
-        template_type = "tod_sampling"
     else:
         execution_path = EXECUTION_PATH_UNKNOWN
         ingest_depth = INGEST_DEPTH_LIGHTWEIGHT
-        template_type = "tod_unknown"
-        warnings.append("k03_tod_execution_path_not_identified")
+        template_type = "tod_ambiguous" if role_evidence.status == "AMBIGUOUS" else "tod_incomplete"
+        warnings.append("k03_tod_role_ambiguous" if role_evidence.status == "AMBIGUOUS" else "k03_tod_execution_path_not_identified")
 
     detail_rows, detail_range, total_rows = _extract_detail_rows(
         rows,
@@ -1712,6 +1953,7 @@ def _parse_tod_sheet(
         summary={
             **field_summary,
             **sampling_summary,
+            "role_evidence": role_evidence.to_dict(),
             "total_row_count": len(total_rows),
             "has_conclusion_area": conclusion is not None,
             "has_note_area": note is not None,
@@ -1773,27 +2015,39 @@ def _extract_tod_sampling_summary(
         "tod_conclusion_text": _collect_rows_after_tokens(rows, ("结论", "conclusion"), max_rows=8),
         "tod_sample_rows_count": len(detail_rows),
     }
+    _, sampling_rows, sampling_state = _detect_sampling_detail_table(rows)
+    summary["tod_sampling_detail_state"] = sampling_state
+    summary["tod_sampling_rows"] = [item.to_dict() for item in sampling_rows]
     if detail_rows:
         summary["tod_sample_preview"] = [row.to_dict() for row in detail_rows[:5]]
     return summary
 
 
 def _extract_tod_sampling_output_summary(rows: list[tuple[Any, ...]]) -> dict[str, Any]:
+    header_row, sampling_rows, table_state = _detect_sampling_detail_table(rows)
     sample_type_counts = {"key": 0, "representative": 0, "replacement": 0}
-    for row in rows:
-        row_text = " ".join(_text(value) for value in row if _text(value))
-        normalized = _norm(row_text)
-        if "关键项" in normalized or "keyitem" in normalized:
-            sample_type_counts["key"] += 1
-        elif "代表性样本" in normalized or "representativesample" in normalized:
-            sample_type_counts["representative"] += 1
-        elif "替换样本" in normalized or "replacementsample" in normalized:
-            sample_type_counts["replacement"] += 1
+    for item in sampling_rows:
+        if item.sample_type in sample_type_counts:
+            sample_type_counts[item.sample_type] += 1
+    te, te_row, te_col, te_state = _find_unique_parameter(
+        rows, ("可容忍误差", "TE"), end_row=header_row
+    )
+    currency, currency_row, currency_col, currency_state = _find_unique_parameter(
+        rows, ("抽样单位货币列", "抽样货币单元", "sampling currency"), end_row=header_row
+    )
     return {
-        "sample_output_te": _find_label_value(rows, ("可容忍误差", "TE"), max_offset=12)[0],
-        "sample_output_sampling_currency": _find_label_value(rows, ("抽样货币单元", "sampling currency"), max_offset=12)[0],
+        "sample_output_te": te,
+        "sample_output_te_row": te_row,
+        "sample_output_te_col": te_col,
+        "sample_output_te_state": te_state,
+        "sample_output_sampling_currency": currency,
+        "sample_output_sampling_currency_row": currency_row,
+        "sample_output_sampling_currency_col": currency_col,
+        "sample_output_sampling_currency_state": currency_state,
         "sample_output_population_amount": _find_label_value(rows, ("总体金额", "population amount"), max_offset=12)[0],
         "sample_output_key_item_count": _find_label_value(rows, ("关键项目数量", "key item quantity"))[0],
+        "sample_output_representative_count": _find_label_value(rows, ("代表性样本量", "representative sample quantity"))[0],
+        "sample_output_selected_count": _find_label_value(rows, ("代表性样本与关键项数量合计", "selected sample total"))[0],
         "sample_output_key_item_amount": _find_label_value(rows, ("关键项目金额", "key item amount"))[0],
         "sample_output_dual_purpose": _find_label_value(rows, ("双重目的", "dual purpose"))[0],
         "sample_output_overstatement": _find_label_value(rows, ("高估", "overstatement"))[0],
@@ -1805,8 +2059,190 @@ def _extract_tod_sampling_output_summary(rows: list[tuple[Any, ...]]) -> dict[st
         "sample_output_representative_rows_count": sample_type_counts["representative"],
         "sample_output_replacement_rows_count": sample_type_counts["replacement"],
         "sample_output_selected_rows_count": sample_type_counts["key"] + sample_type_counts["representative"],
+        "sample_output_detail_header_row": header_row,
+        "sample_output_detail_state": table_state,
+        "sample_output_rows": [item.to_dict() for item in sampling_rows],
         "sample_output_summary_text": _collect_rows_after_tokens(rows, ("样本", "sample"), max_rows=10),
     }
+
+
+def _sampling_output_parameter_score(rows: list[tuple[Any, ...]]) -> int:
+    tokens = ("可容忍误差", "抽样货币单元", "抽样单位货币列", "抽样方法", "样本池")
+    text = _norm(" ".join(_text(value) for row in rows for value in row if _text(value)))
+    return sum(1 for token in tokens if _norm(token) in text)
+
+
+def _sampling_header_field(value: Any) -> str | None:
+    text = _norm(_text(value))
+    aliases = {
+        "sample_type": ("样本类型", "sampletype"),
+        "asset_id": ("固定资产编号", "资产编号", "assetid", "fano"),
+        "asset_name": ("固定资产名称", "资产名称", "assetname"),
+        "current_depreciation": ("本期计提折旧", "账面计提折旧费用", "bookdepreciation"),
+        "recalculated_depreciation": ("重新计算折旧费用", "重新计算折旧", "重算折旧", "recalculateddepreciation"),
+        "depreciation_difference": ("差异", "折旧差异", "difference"),
+        "evidence_description": ("获得的证据/支持的描述", "获得的证据支持的描述", "获得的证据", "支持的描述", "evidencedescription"),
+        "note": ("notes", "note", "差异说明", "异常说明", "跟进说明"),
+    }
+    for field, names in aliases.items():
+        if any(
+            text == _norm(name) or (len(_norm(name)) >= 4 and _norm(name) in text)
+            for name in names
+        ):
+            return field
+    return None
+
+
+def _normalize_sample_type(value: Any) -> str | None:
+    text = _norm(_text(value))
+    if "替换样本" in text or "replacementsample" in text:
+        return "replacement"
+    if "代表性样本" in text or "representativesample" in text:
+        return "representative"
+    if "关键项" in text or "keyitem" in text:
+        return "key"
+    return None
+
+
+def _normalize_asset_id(value: Any) -> str | None:
+    text = _text(value).strip()
+    if not text:
+        return None
+    if text.endswith(".0") and text[:-2].isdigit():
+        text = text[:-2]
+    return text.replace(" ", "").upper()
+
+
+def _detect_sampling_detail_table(
+    rows: list[tuple[Any, ...]],
+) -> tuple[int | None, list[K03SamplingRow], str]:
+    candidates: list[tuple[int, dict[int, str]]] = []
+    for row_no, row in enumerate(rows, start=1):
+        current_fields = {
+            col: field for col, value in enumerate(row, start=1)
+            if (field := _sampling_header_field(value))
+        }
+        if len(current_fields) < 2 and _header_fragment_count(row) < 2:
+            continue
+        fields = dict(current_fields)
+        combined_values = _combined_header_values(rows, row_no)
+        for col, value in enumerate(combined_values, start=1):
+            if col not in fields and (field := _sampling_header_field(value)):
+                fields[col] = field
+        if {"current_depreciation", "recalculated_depreciation", "depreciation_difference"}.issubset(fields.values()):
+            numeric_cols = [col for col, value in enumerate(row, start=1) if _norm(_text(value)) in {"1", "2"}]
+            if numeric_cols:
+                fields[numeric_cols[0]] = "test_attribute_1"
+            if len(numeric_cols) > 1:
+                fields[numeric_cols[1]] = "test_attribute_2"
+        if {"sample_type", "asset_id"}.issubset(fields.values()) and len(fields) >= 3:
+            candidates.append((row_no, fields))
+    if not candidates:
+        return None, [], "MISSING"
+    if len(candidates) > 1:
+        return None, [], "AMBIGUOUS"
+    header_row, fields = candidates[0]
+    result: list[K03SamplingRow] = []
+    blank_streak = 0
+    for row_no in range(header_row + 1, len(rows) + 1):
+        row = rows[row_no - 1]
+        values = {field: _cell_value(row, col) for col, field in fields.items()}
+        sample_type = _normalize_sample_type(values.get("sample_type"))
+        asset_id = _normalize_asset_id(values.get("asset_id"))
+        if not sample_type and not asset_id:
+            blank_streak += 1
+            if result and blank_streak >= 2:
+                break
+            continue
+        blank_streak = 0
+        result.append(K03SamplingRow(
+            source_row=row_no,
+            sample_type=sample_type,
+            asset_id=asset_id,
+            values=values,
+            cell_refs={field: f"{get_column_letter(col)}{row_no}" for col, field in fields.items()},
+        ))
+    return header_row, result, "FOUND" if result else "INCOMPLETE"
+
+
+def _combined_header_values(rows: list[tuple[Any, ...]], row_no: int) -> list[str]:
+    current = rows[row_no - 1]
+    width = len(current)
+    result: list[str] = []
+    for col in range(1, width + 1):
+        parts: list[str] = []
+        for candidate_row in range(max(1, row_no - 2), row_no + 1):
+            source = rows[candidate_row - 1]
+            if candidate_row < row_no and _header_fragment_count(source) < 2:
+                continue
+            value = _cell_value(source, col)
+            if not _text(value) and candidate_row < row_no:
+                for prior_col in range(col - 1, max(0, col - 4), -1):
+                    carried = _cell_value(source, prior_col)
+                    if _text(carried):
+                        value = carried
+                        break
+            if _text(value):
+                parts.append(_text(value))
+        result.append(" ".join(dict.fromkeys(parts)))
+    return result
+
+
+def _header_fragment_count(row: tuple[Any, ...]) -> int:
+    fragments = ("样本", "类型", "固定资产", "资产", "编号", "名称", "折旧", "差异", "证据", "属性",
+                 "sample", "type", "asset", "id", "name", "depreciation", "difference", "evidence")
+    return sum(
+        1 for value in row
+        if any(_norm(fragment) == _norm(_text(value)) for fragment in fragments)
+    )
+
+
+def _find_unique_parameter(
+    rows: list[tuple[Any, ...]], labels: tuple[str, ...], *, end_row: int | None = None
+) -> tuple[Any, int | None, int | None, str]:
+    normalized_labels = tuple(_norm(label) for label in labels)
+    matches: list[tuple[Any, int, int]] = []
+    for row_no, row in enumerate(rows, start=1):
+        if end_row is not None and row_no >= end_row:
+            break
+        for col_no, value in enumerate(row, start=1):
+            text = _norm(_text(value))
+            if not text or not any(
+                text == label or (len(label) >= 4 and label in text)
+                for label in normalized_labels
+            ):
+                continue
+            for offset in range(1, min(12, len(row) - col_no) + 1):
+                candidate = _cell_value(row, col_no + offset)
+                if _text(candidate):
+                    matches.append((candidate, row_no, col_no + offset))
+                    break
+    unique: dict[str, tuple[Any, int, int]] = {}
+    for value, row, col in matches:
+        unique.setdefault(_norm(str(value)), (value, row, col))
+    if not unique:
+        return None, None, None, "MISSING"
+    if len(unique) > 1:
+        return None, None, None, "AMBIGUOUS"
+    value, row, col = next(iter(unique.values()))
+    return value, row, col, "FOUND"
+
+
+def _has_parameter_label(
+    rows: list[tuple[Any, ...]], labels: tuple[str, ...], *, end_row: int | None = None
+) -> bool:
+    normalized_labels = tuple(_norm(label) for label in labels)
+    for row_no, row in enumerate(rows, start=1):
+        if end_row is not None and row_no >= end_row:
+            break
+        for value in row:
+            text = _norm(_text(value))
+            if text and any(
+                text == label or (len(label) >= 4 and label in text)
+                for label in normalized_labels
+            ):
+                return True
+    return False
 
 
 def _find_label_value(

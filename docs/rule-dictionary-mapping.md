@@ -90,6 +90,15 @@
 | DP-005 | depreciation_by_item_sad | By Item折旧测试差异 | K.03.2 | P3 | AUTO_WARN | planned |
 | DP-006 | depreciation_tod_sampling | TOD抽样折旧测试抽样过程 | K.03.2 | P3 | REVIEW | **implemented**（部分覆盖：总体、关键项目、K.03.2a选样输出参数；抽样设计充分性仍需人工判断） |
 | DP-007 | depreciation_tod_difference | TOD抽样折旧测试差异 | K.03.2 | P3 | REVIEW | **implemented**（部分覆盖：样本明细和结论是否存在；差异调查质量仍需人工判断） |
+| DP-TOD-PRE-001 | k03_tod_sampling_output_required | TOD抽样选样输出配套 | K.03.2 | P3 | REVIEW | **implemented**（DP-006 子规则） |
+| DP-TOD-001 | k03_tod_sampling_currency | TOD抽样货币单元 | K.03.2 | P3 | AUTO_FAIL | **implemented**（DP-006 子规则） |
+| DP-TOD-002 | k03_tod_sampling_te_consistency | TOD选样TE与Lead一致性 | K.03.2 | P3 | AUTO_FAIL | **implemented**（DP-006 子规则） |
+| DP-TOD-003 | k03_tod_sampling_population_reconciliation | TOD总体与K.01勾稽 | K.03.2 | P3 | AUTO_FAIL/REVIEW | **implemented**（DP-006 子规则；SAD缺失不执行阈值结论） |
+| DP-TOD-004 | k03_tod_sampling_count_consistency | TOD选样数量一致性 | K.03.2 | P3 | AUTO_FAIL | **implemented**（DP-006 子规则） |
+| DP-TOD-005 | k03_tod_sampling_identity_consistency | TOD样本编号一致性 | K.03.2 | P3 | AUTO_FAIL/REVIEW | **implemented**（DP-006 子规则；替换样本单独复核） |
+| DP-TOD-006 | k03_tod_sampling_attributes | TOD样本测试属性完整性 | K.03.2 | P3 | REVIEW | **implemented**（DP-007 子规则） |
+| DP-TOD-007 | k03_tod_sampling_difference_followup | TOD样本差异跟进 | K.03.2 | P3 | AUTO_FAIL/REVIEW | **implemented**（DP-007 子规则） |
+| DP-TOD-008 | k03_tod_sampling_documentation | TOD关键项目依据与结论 | K.03.2 | P3 | REVIEW | **implemented**（DP-007 子规则） |
 | DL-001 | first_delivery_standard | 首次交付标准 | GLOBAL | MANUAL | MANUAL_ONLY | manual_only |
 | DL-002 | final_delivery_standard | 整体交付标准 | GLOBAL | MANUAL | MANUAL_ONLY | manual_only |
 

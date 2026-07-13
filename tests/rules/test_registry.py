@@ -110,6 +110,15 @@ def test_registry_contains_current_k03_and_addition_semantic_rule_codes():
         "k03_policy_fa_salvage_mismatch": "DP-POL-005",
         "k03_policy_fa_unit_or_category_review": "DP-POL-006",
         "k03_policy_difference_marker": "DP-POL-007",
+        "k03_tod_sampling_output_required": "DP-TOD-PRE-001",
+        "k03_tod_sampling_currency": "DP-TOD-001",
+        "k03_tod_sampling_te_consistency": "DP-TOD-002",
+        "k03_tod_sampling_population_reconciliation": "DP-TOD-003",
+        "k03_tod_sampling_count_consistency": "DP-TOD-004",
+        "k03_tod_sampling_identity_consistency": "DP-TOD-005",
+        "k03_tod_sampling_attributes": "DP-TOD-006",
+        "k03_tod_sampling_difference_followup": "DP-TOD-007",
+        "k03_tod_sampling_documentation": "DP-TOD-008",
     }
     for rule_id, dict_code in expected.items():
         spec = get_by_rule_id(rule_id)

@@ -17,7 +17,11 @@ from ingest.k03_sheet import (
     K03_BRANCH_POLICY_REVIEW,
     RULE_STATUS_READY_FOR_LATER_RULES,
     RULE_STATUS_LATER_PHASE,
+    evaluate_tod_by_item,
+    evaluate_tod_sampling_main,
+    evaluate_tod_sampling_output,
     load_k03_sheets_from_workbook,
+    resolve_tod_role,
 )
 from ingest.workbook_ingest import load_workbook_ingest
 
@@ -28,6 +32,166 @@ def _save(wb: openpyxl.Workbook, path: Path) -> Path:
     wb.save(path)
     wb.close()
     return path
+
+
+def test_tod_role_evaluators_use_content_not_sheet_name():
+    main_rows = [
+        ("折旧费用总体", 1000, None, None, None, None),
+        ("关键项目选择依据", "超过阈值", None, None, None, None),
+        ("样本类型", "固定资产编号", "本期计提折旧", "重新计算折旧费用", "差异", "获得的证据"),
+        ("关键项", "FA-TEST-001", 100, 100, 0, "折旧政策"),
+    ]
+    output_rows = [
+        ("可容忍误差", 100),
+        ("抽样货币单元", "本期计提折旧"),
+        ("抽样方法", "随机抽样"),
+        ("样本池", 1000),
+        ("关键项目数量", 1),
+        ("样本类型", "固定资产编号", "固定资产名称", "本期计提折旧"),
+        ("关键项", "FA-TEST-001", "设备A", 100),
+    ]
+
+    main = evaluate_tod_sampling_main(main_rows, "误导名称_by item")
+    output = evaluate_tod_sampling_output(output_rows, "完全自定义名称")
+
+    assert main.status == "FOUND"
+    assert output.status == "FOUND"
+    assert resolve_tod_role(main_rows, "误导名称_by item").role == "tod_sampling"
+    assert resolve_tod_role(output_rows, "完全自定义名称").role == "tod_sampling_output"
+
+
+def test_tod_role_resolver_marks_conflicting_complete_roles_ambiguous():
+    rows = [
+        ("可容忍误差", 100, None, None, None, None),
+        ("抽样货币单元", "本期计提折旧", None, None, None, None),
+        ("抽样方法", "随机抽样", None, None, None, None),
+        ("样本池", 1000, None, None, None, None),
+        ("关键项目数量", 1, None, None, None, None),
+        ("折旧费用总体", 1000, None, None, None, None),
+        ("样本类型", "固定资产编号", "本期计提折旧", "重新计算折旧费用", "差异", "获得的证据"),
+        ("关键项", "FA-TEST-001", 100, 100, 0, "折旧政策"),
+    ]
+
+    evidence = resolve_tod_role(rows, "自定义")
+
+    assert evidence.status == "AMBIGUOUS"
+    assert set(evidence.conflicts) == {"tod_sampling", "tod_sampling_output"}
+
+
+def test_custom_named_incomplete_tod_candidate_is_not_silently_dropped(tmp_path: Path):
+    path = tmp_path / "custom_incomplete_tod.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "项目自定义测试页"
+    ws.append(["折旧费用总体", 1000])
+    ws.append(["样本类型", "固定资产编号", "固定资产名称"])
+    ws.append(["关键项目", "FA-TEST-001", "设备A"])
+    _save(wb, path)
+
+    datasets = load_k03_sheets_from_workbook(path)
+
+    assert len(datasets) == 1
+    assert datasets[0].execution_path == EXECUTION_PATH_UNKNOWN
+    assert datasets[0].template_type in {"tod_incomplete", "tod_ambiguous"}
+    assert datasets[0].summary["role_evidence"]["status"] in {"INCOMPLETE", "AMBIGUOUS"}
+
+
+def test_tod_by_item_requires_detail_fields_without_sampling_structure():
+    rows = [
+        ("资产编号", "资产名称", "资产类别", "原值", "残值率", "折旧年限", "折旧起始日期", "本期计提折旧", "重新计算折旧", "差异"),
+        ("FA-TEST-001", "设备A", "设备", 1000, 0.05, 60, "2025-01-01", 100, 100, 0),
+    ]
+
+    evidence = evaluate_tod_by_item(rows, "任意名称")
+
+    assert evidence.status == "FOUND"
+    assert resolve_tod_role(rows, "任意名称").role == "tod_by_item"
+
+
+def test_tod_output_role_ignores_parameter_words_in_instruction_text():
+    rows = [
+        ("说明", "请检查可容忍误差", "抽样货币单元", "抽样方法", "样本池"),
+        ("样本类型", "固定资产编号", "固定资产名称", "本期计提折旧", None),
+        ("关键项", "FA-TEST-001", "设备A", 100, None),
+    ]
+
+    evidence = evaluate_tod_sampling_output(rows, "自定义")
+
+    assert evidence.status != "FOUND"
+
+
+def test_tod_output_role_rejects_labels_used_as_fake_parameter_values():
+    rows = [
+        ("可容忍误差", "抽样货币单元"),
+        ("抽样货币单元", "抽样方法"),
+        ("抽样方法", "样本池"),
+        ("样本池", "以下为操作说明"),
+        ("关键项目数量", 1),
+        ("样本类型", "固定资产编号", "固定资产名称", "本期计提折旧"),
+        ("关键项", "FA-TEST-001", "设备A", 100),
+    ]
+
+    evidence = evaluate_tod_sampling_output(rows, "自定义")
+
+    assert evidence.status != "FOUND"
+
+
+def test_tod_output_role_marks_conflicting_currency_values_incomplete():
+    rows = [
+        ("可容忍误差", 100),
+        ("抽样货币单元", "本期计提折旧"),
+        ("抽样货币单元", "原值"),
+        ("抽样方法", "随机抽样"),
+        ("样本池", 1000),
+        ("关键项目数量", 1),
+        ("样本类型", "固定资产编号", "固定资产名称", "本期计提折旧"),
+        ("关键项", "FA-TEST-001", "设备A", 100),
+    ]
+
+    evidence = evaluate_tod_sampling_output(rows, "自定义")
+
+    assert evidence.status == "INCOMPLETE"
+    assert "ambiguous_sampling_currency" in evidence.conflicts
+
+
+def test_tod_sampling_main_supports_english_reordered_headers():
+    rows = [
+        ("Depreciation population", 1000, None, None, None, None, None),
+        ("Difference", "Asset ID", "Evidence Description", "Sample Type", "Recalculated Depreciation", "Book Depreciation", "Asset Name"),
+        (0, "FA-TEST-001", "Policy", "Key item", 100, 100, "Equipment A"),
+    ]
+
+    evidence = evaluate_tod_sampling_main(rows, "Custom")
+
+    assert evidence.status == "FOUND"
+
+
+def test_tod_sampling_table_supports_multilevel_merged_style_headers():
+    rows = [
+        ("折旧费用总体", 1000, None, None, None, None),
+        ("样本", "固定资产", None, "折旧", None, "测试"),
+        ("类型", "编号", "名称", "账面计提折旧费用", "重新计算折旧费用", "差异"),
+        ("关键项", "FA-TEST-001", "设备A", 100, 100, 0),
+    ]
+
+    evidence = evaluate_tod_sampling_main(rows, "自定义")
+
+    assert evidence.status == "FOUND"
+
+
+def test_tod_sampling_multiple_candidate_tables_are_ambiguous():
+    rows = [
+        ("折旧费用总体", 1000, None, None),
+        ("样本类型", "固定资产编号", "本期计提折旧", "差异"),
+        ("关键项", "FA-TEST-001", 100, 0),
+        (None, None, None, None),
+        ("样本类型", "固定资产编号", "本期计提折旧", "差异"),
+        ("关键项", "FA-TEST-002", 200, 0),
+    ]
+
+    evidence = evaluate_tod_sampling_main(rows, "自定义")
+
+    assert evidence.status != "FOUND"
 
 
 def _append_by_item_sheet(wb: openpyxl.Workbook, title: str = "K.03.2 折旧测试"):
