@@ -84,6 +84,8 @@
 | DP-001 | depreciation_policy_change | 折旧政策变化识别 | K.03.3 | P4 | REVIEW | manual_only |
 | DP-002 | depreciation_policy_list_consistency | 折旧政策与清单一致性 | K.03.3 | P3 | REVIEW | planned |
 | DP-003 | sap_precision_selection | 折旧测试策略恰当性 | K.03.1 | P3 | REVIEW | **implemented**（部分覆盖：CRA/TE/中高精度路径/TOD补充识别；证据充分性仍需人工判断） |
+| DP-SAP-001 | sap_te_consistency | SAP 可容忍误差与 Lead 一致性 | K.03.1 | P3 | AUTO_FAIL | **implemented**（DP-003 的 Agent 可执行子规则；SAP TE 与 Lead TE 明确不一致时 FAIL） |
+| DP-SAP-002 | sap_high_cra_consistency | 高精度 SAP CRA 与 Lead V/M 一致性 | K.03.1 | P3 | AUTO_FAIL | **implemented**（DP-003 的 Agent 可执行子规则；仅适用于高精度 SAP，明确不一致时 FAIL） |
 | DP-004 | sap_depreciation_difference | SAP折旧测试差异处理 | K.03.1 | P3 | REVIEW | **implemented**（部分覆盖：偏差阈值、超阈值判断、说明/结论是否存在；说明充分性仍需人工判断） |
 | DP-005 | depreciation_by_item_sad | By Item折旧测试差异 | K.03.2 | P3 | AUTO_WARN | planned |
 | DP-006 | depreciation_tod_sampling | TOD抽样折旧测试抽样过程 | K.03.2 | P3 | REVIEW | **implemented**（部分覆盖：总体、关键项目、K.03.2a选样输出参数；抽样设计充分性仍需人工判断） |
@@ -111,7 +113,7 @@ JSON 报告 `to_dict()` 仅输出非空扩展字段。
 
 1. **增行**：`FA-RC-001`～`007` 与上表一致，避免 Agent 规则无字典编号。
 2. **AT-002 / DT-002**：判定条件与 K1（12/5）同步——合同/控制权转移单据**不强制编号**。
-3. **K.03 映射维护**：`DP-003`、`DP-004`、`DP-006`、`DP-007` 已纳入主 runner，但仍应在映射表中标注“部分覆盖 + 人工复核边界”，不得写成审计判断全自动通过。
+3. **K.03 映射维护**：`DP-003`、`DP-004`、`DP-006`、`DP-007` 已纳入主 runner，但仍应在映射表中标注“部分覆盖 + 人工复核边界”，不得写成审计判断全自动通过。`DP-SAP-001`、`DP-SAP-002` 是从 `DP-003` 拆出的 Agent 可执行子规则，不作为原始 35 条来源字典的新行写入脱敏 CSV。
 4. **检查字段/单元格**：改为语义字段（`te`、`sad`），避免写死 `B5:B6`。
 
 ## 开发用法

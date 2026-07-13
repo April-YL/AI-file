@@ -425,6 +425,11 @@ def test_workbook_profile_prefers_high_precision_sap_for_non_minimal_cra(tmp_pat
     assert "tod_sampling_output" in profile.component_sheets
     assert "policy_review" in profile.component_sheets
     assert "auxiliary_current_depreciation" in profile.component_sheets
+    assert set(profile.executed_depreciation_paths) == {
+        EXECUTION_PATH_SAP_MEDIUM, EXECUTION_PATH_SAP_HIGH,
+        EXECUTION_PATH_TOD_BY_ITEM, EXECUTION_PATH_TOD_SAMPLING,
+    }
+    assert profile.component_sheets["policy_review"][0].execution_state == "EXECUTED"
     assert profile.evidence_completeness["policy_review"]["is_independent_required_procedure"] is True
     assert profile.evidence_completeness["auxiliary_current_depreciation"]["is_required_procedure_page"] is False
     assert "k03_multiple_depreciation_test_components_detected" in profile.warnings
@@ -579,6 +584,11 @@ def test_local_sop_workbook_profile_identifies_k03_components_when_available():
     assert "tod_sampling" in profile.component_sheets
     assert "tod_sampling_output" in profile.component_sheets
     assert "policy_review" in profile.component_sheets
+    assert set(profile.executed_depreciation_paths) == {
+        EXECUTION_PATH_SAP_MEDIUM, EXECUTION_PATH_SAP_HIGH,
+        EXECUTION_PATH_TOD_BY_ITEM, EXECUTION_PATH_TOD_SAMPLING,
+    }
+    assert profile.component_sheets["policy_review"][0].execution_state == "EXECUTED"
     assert "auxiliary_current_depreciation" in profile.component_sheets
     assert profile.evidence_completeness["policy_review"]["is_independent_required_procedure"] is True
     assert profile.evidence_completeness["auxiliary_current_depreciation"]["is_required_procedure_page"] is False

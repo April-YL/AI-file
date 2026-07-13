@@ -219,11 +219,11 @@ def test_current_fixture_matrix_contains_all_implemented_rules_and_no_executed_h
 
     assert implemented_ids.issubset(rows)
     assert matrix["summary"]["matrix_category_counts"] == {
-        "implemented_rules": 86,
+        "implemented_rules": 88,
         "delivery_checks": 2,
         "runtime_guardrails": 1,
     }
-    assert matrix["summary"]["implemented_rule_count"] == 86
+    assert matrix["summary"]["implemented_rule_count"] == 88
     assert matrix["summary"]["delivery_check_ids"] == [
         "final_delivery_standard",
         "first_delivery_standard",
@@ -233,14 +233,14 @@ def test_current_fixture_matrix_contains_all_implemented_rules_and_no_executed_h
     assert rows["final_delivery_standard"]["matrix_category"] == "delivery_checks"
     assert rows["lead_ingest_readability"]["matrix_category"] == "runtime_guardrails"
     assert rows["fa_list_required_fields"]["matrix_category"] == "implemented_rules"
-    assert matrix["summary"]["ledger_recorded_rule_count"] == 66
+    assert matrix["summary"]["ledger_recorded_rule_count"] == 68
     assert matrix["summary"]["ledger_status_counts"] == {
         "EXECUTED": 13,
         "DATA_INSUFFICIENT": 41,
-        "NOT_APPLICABLE": 12,
+        "NOT_APPLICABLE": 14,
     }
     assert matrix["summary"]["ledger_how_status_counts"] == {
-        "EVIDENCE_LEVEL": 66,
+        "EVIDENCE_LEVEL": 68,
     }
     assert matrix["summary"]["ledger_legacy_count"] == 0
     assert matrix["summary"]["ledger_missing_how_count"] == 0

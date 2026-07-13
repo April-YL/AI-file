@@ -12,6 +12,12 @@ from rules.models import QcIssue, Severity
 
 
 K03_LOW_RISK_HOW_RULE_IDS: tuple[str, ...] = (
+    "sap_precision_selection",
+    "sap_te_consistency",
+    "sap_high_cra_consistency",
+    "sap_depreciation_difference",
+    "depreciation_tod_sampling",
+    "depreciation_tod_difference",
     "k03_policy_sheet_missing",
     "k03_policy_table_unreadable",
     "k03_policy_sections_incomplete",
@@ -751,6 +757,10 @@ def _policy_actual(
 
 
 def _missing_label(rule_id: str) -> str:
+    if rule_id.startswith("sap_"):
+        return "K.03.1 SAP 折旧测试工作表"
+    if rule_id.startswith("depreciation_tod_"):
+        return "K.03.2 TOD 抽样测试工作表"
     if rule_id.startswith("k03_policy_"):
         return "K.03.3 折旧政策复核工作表"
     return "K.03.2 by-item 折旧测试工作表"

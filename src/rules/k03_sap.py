@@ -7,7 +7,9 @@ from typing import Any
 from ingest.k03_sheet import (
     EXECUTION_PATH_SAP_HIGH,
     EXECUTION_PATH_SAP_MEDIUM,
+    EXECUTION_PATH_TOD_BY_ITEM,
     EXECUTION_PATH_TOD_SAMPLING,
+    K03ExecutionProfile,
     K03SheetDataset,
 )
 from ingest.lead_sheet import LeadSheetDataset
@@ -19,6 +21,8 @@ from rules.parsing import parse_amount
 
 RULE_IDS: tuple[str, ...] = (
     "sap_precision_selection",
+    "sap_te_consistency",
+    "sap_high_cra_consistency",
     "sap_depreciation_difference",
 )
 
@@ -28,6 +32,7 @@ def run_k03_sap_rules(
     *,
     lead: LeadSheetDataset | None = None,
     k03_sheets: list[K03SheetDataset] | None = None,
+    k03_execution_profile: K03ExecutionProfile | None = None,
     recorder: RuleExecutionRecorder | None = None,
 ) -> list[QcIssue]:
     recorder = recorder or RuleExecutionRecorder()
@@ -41,81 +46,137 @@ def run_k03_sap_rules(
             )
         return []
 
-    issues: list[QcIssue] = []
-    issues.extend(_check_precision_selection(dataset, lead=lead, k03_sheets=k03_sheets or []))
-    issues.extend(_check_depreciation_difference(dataset))
-    _record_execution(recorder, dataset, issues, lead=lead, k03_sheets=k03_sheets or [])
+    precision_issues, precision_ready = _check_precision_selection(
+        dataset,
+        profile=k03_execution_profile,
+    )
+    te_issues, te_ready = _check_te_consistency(dataset, lead=lead)
+    high_cra_issues, high_cra_status = _check_high_cra_consistency(
+        dataset,
+        profile=k03_execution_profile,
+    )
+    difference_issues = _check_depreciation_difference(dataset)
+    issues = [
+        *precision_issues,
+        *te_issues,
+        *high_cra_issues,
+        *difference_issues,
+    ]
+
+    _record_rule_result(
+        recorder,
+        "sap_precision_selection",
+        dataset,
+        precision_issues,
+        status="executed" if precision_ready else "data_insufficient",
+        lead=lead,
+        profile=k03_execution_profile,
+    )
+    _record_rule_result(
+        recorder,
+        "sap_te_consistency",
+        dataset,
+        te_issues,
+        status="executed" if te_ready else "data_insufficient",
+        lead=lead,
+        profile=k03_execution_profile,
+    )
+    _record_rule_result(
+        recorder,
+        "sap_high_cra_consistency",
+        dataset,
+        high_cra_issues,
+        status=high_cra_status,
+        lead=lead,
+        profile=k03_execution_profile,
+    )
+    _record_rule_result(
+        recorder,
+        "sap_depreciation_difference",
+        dataset,
+        difference_issues,
+        status="executed",
+        lead=lead,
+        profile=k03_execution_profile,
+    )
     return issues
 
 
 def _check_precision_selection(
     dataset: K03SheetDataset,
     *,
+    profile: K03ExecutionProfile | None,
+) -> tuple[list[QcIssue], bool]:
+    lead_cra = _profile_cra(profile)
+    if not lead_cra:
+        return [], False
+    if dataset.execution_path != EXECUTION_PATH_SAP_MEDIUM:
+        return [], True
+    if _is_minimal_cra(lead_cra) or _profile_has_tod(profile):
+        return [], True
+    return [
+        _issue(
+            dataset,
+            "sap_precision_selection",
+            "execution_path",
+            Severity.NEED_REVIEW,
+            f"K.03.1 使用中精度 SAP，Lead 计价/计量认定 CRA 为 {lead_cra}，且未识别到已执行的 TOD 补充测试。",
+            "请确认是否应改用高精度 SAP，或补充 TOD 程序以取得充分、适当的审计证据。",
+        )
+    ], True
+
+
+def _check_te_consistency(
+    dataset: K03SheetDataset,
+    *,
     lead: LeadSheetDataset | None,
-    k03_sheets: list[K03SheetDataset],
-) -> list[QcIssue]:
-    issues: list[QcIssue] = []
+) -> tuple[list[QcIssue], bool]:
     summary = dataset.summary
-    sap_cra = str(summary.get("sap_cra") or "").strip()
-    lead_values = field_values(lead) if lead is not None else {}
-    lead_cra = str(lead_values.get("cra") or "").strip()
     sap_te = parse_amount(summary.get("sap_te"))
+    lead_values = field_values(lead) if lead is not None else {}
     lead_te = parse_amount(lead_values.get("te"))
-
-    if not sap_cra:
-        issues.append(
-            _issue(
-                dataset,
-                "sap_precision_selection",
-                "sap_cra",
-                Severity.NEED_REVIEW,
-                "K.03.1 SAP 折旧测试未能读取 CRA，无法判断中精度/高精度策略是否匹配风险等级。",
-                "请确认 SAP 测试页 CRA 是否已从 Lead 正确链接，或在底稿中补充风险等级依据。",
-                source_row=_summary_row(summary, "sap_cra"),
-            )
+    if sap_te is None or lead_te is None:
+        return [], False
+    tolerance = max(abs(lead_te), Decimal("1")) * Decimal("0.0001")
+    if abs(sap_te - lead_te) <= tolerance:
+        return [], True
+    return [
+        _issue(
+            dataset,
+            "sap_te_consistency",
+            "sap_te",
+            Severity.FAIL,
+            f"K.03.1 SAP 测试页 TE 与 Lead 不一致：SAP={sap_te}，Lead={lead_te}。",
+            "请修正 K.03.1 可容忍误差链接，确保 SAP 使用 Lead 中的 TE。",
+            source_row=_summary_row(summary, "sap_te"),
         )
-    elif lead_cra and _norm(sap_cra) != _norm(lead_cra):
-        issues.append(
-            _issue(
-                dataset,
-                "sap_precision_selection",
-                "sap_cra",
-                Severity.NEED_REVIEW,
-                f"K.03.1 SAP 测试页 CRA 与 Lead 不一致：SAP={sap_cra}，Lead={lead_cra}。",
-                "请核对 K.03.1 的 CRA 链接是否取自 K.00 Lead，并确认折旧测试策略是否仍适用。",
-                source_row=_summary_row(summary, "sap_cra"),
-            )
+    ], True
+
+
+def _check_high_cra_consistency(
+    dataset: K03SheetDataset,
+    *,
+    profile: K03ExecutionProfile | None,
+) -> tuple[list[QcIssue], str]:
+    if dataset.execution_path != EXECUTION_PATH_SAP_HIGH:
+        return [], "not_applicable"
+    sap_cra = str(dataset.summary.get("sap_cra") or "").strip()
+    lead_cra = _profile_cra(profile)
+    if not sap_cra or not lead_cra:
+        return [], "data_insufficient"
+    if _norm(sap_cra) == _norm(lead_cra):
+        return [], "executed"
+    return [
+        _issue(
+            dataset,
+            "sap_high_cra_consistency",
+            "sap_cra",
+            Severity.FAIL,
+            f"K.03.1 高精度 SAP 页 CRA 与 Lead 计价/计量认定 CRA 不一致：SAP={sap_cra}，Lead={lead_cra}。",
+            "请核对高精度 SAP 页 CRA，并确保其与 K.00 Lead 的计价/计量认定一致。",
+            source_row=_summary_row(dataset.summary, "sap_cra"),
         )
-
-    if sap_te is not None and lead_te is not None:
-        tolerance = max(abs(lead_te), Decimal("1")) * Decimal("0.0001")
-        if abs(sap_te - lead_te) > tolerance:
-            issues.append(
-                _issue(
-                    dataset,
-                    "sap_precision_selection",
-                    "sap_te",
-                    Severity.FAIL,
-                    f"K.03.1 SAP 测试页 TE 与 Lead 不一致：SAP={sap_te}，Lead={lead_te}。",
-                    "请修正 K.03.1 可容忍误差链接，确保折旧测试阈值使用 Lead 中的 TE。",
-                    source_row=_summary_row(summary, "sap_te"),
-                )
-            )
-
-    if dataset.execution_path == EXECUTION_PATH_SAP_MEDIUM and not _is_minimal_cra(sap_cra):
-        has_tod_sampling = any(item.execution_path == EXECUTION_PATH_TOD_SAMPLING for item in k03_sheets)
-        if not has_tod_sampling:
-            issues.append(
-                _issue(
-                    dataset,
-                    "sap_precision_selection",
-                    "execution_path",
-                    Severity.NEED_REVIEW,
-                    "K.03.1 使用中精度 SAP，但当前 CRA 不是 Minimal，且未识别到 TOD 抽样补充测试。",
-                    "请确认是否应改用高精度 SAP，或补充 TOD 抽样程序以取得足够保证。",
-                )
-            )
-    return issues
+    ], "executed"
 
 
 def _check_depreciation_difference(dataset: K03SheetDataset) -> list[QcIssue]:
@@ -171,22 +232,39 @@ def _check_depreciation_difference(dataset: K03SheetDataset) -> list[QcIssue]:
     return issues
 
 
-def _record_execution(
+def _record_rule_result(
     recorder: RuleExecutionRecorder,
+    rule_id: str,
     dataset: K03SheetDataset,
     issues: Iterable[QcIssue],
     *,
+    status: str,
     lead: LeadSheetDataset | None,
-    k03_sheets: list[K03SheetDataset],
+    profile: K03ExecutionProfile | None,
 ) -> None:
     issue_list = list(issues)
-    for rule_id in RULE_IDS:
-        count = sum(1 for issue in issue_list if issue.rule_id == rule_id)
+    observation = _sap_observation(
+        rule_id,
+        dataset,
+        issue_list,
+        lead=lead,
+        profile=profile,
+    )
+    if status == "executed":
         recorder.record_executed(
             rule_id,
-            count,
-            observation=_sap_observation(rule_id, dataset, issue_list, lead=lead, k03_sheets=k03_sheets),
+            sum(1 for issue in issue_list if issue.rule_id == rule_id),
+            observation=observation,
         )
+        return
+    if status == "not_applicable":
+        note = "当前 SAP 路径不适用该规则"
+        recorder.record_not_applicable(rule_id, note)
+        recorder.record_observation(rule_id, observation)
+        return
+    note = "执行该 SAP 规则所需资料未能可靠识别"
+    recorder.record_data_insufficient(rule_id, note)
+    recorder.record_observation(rule_id, observation)
 
 
 def _sap_observation(
@@ -195,7 +273,7 @@ def _sap_observation(
     issues: list[QcIssue],
     *,
     lead: LeadSheetDataset | None,
-    k03_sheets: list[K03SheetDataset],
+    profile: K03ExecutionProfile | None,
 ) -> dict[str, Any]:
     summary = dataset.summary
     values = [
@@ -208,19 +286,44 @@ def _sap_observation(
         lead_values = field_values(lead)
         values.extend(
             [
-                _value("Lead CRA", lead_values.get("cra"), None, None, "risk_level"),
                 _value("Lead TE", lead_values.get("te"), None, None, "materiality_amount"),
             ]
         )
+    linkage = profile.lead_linkage if profile is not None else None
+    values.extend(
+        [
+            _value(
+                "Lead V/M CRA",
+                linkage.cra if linkage else None,
+                linkage.source_row if linkage else None,
+                None,
+                "risk_level",
+            ),
+            _value(
+                "是否识别已执行 TOD 补充",
+                _profile_has_tod(profile),
+                None,
+                None,
+                "execution_path",
+            ),
+        ]
+    )
     missing: list[str] = []
     if rule_id == "sap_precision_selection":
-        if not summary.get("sap_cra"):
-            missing.append("K.03.1 SAP CRA")
-        if not summary.get("sap_te"):
+        if not _profile_cra(profile):
+            missing.append("Lead 计价/计量认定 CRA")
+    elif rule_id == "sap_te_consistency":
+        if summary.get("sap_te") is None:
             missing.append("K.03.1 SAP TE")
-        if dataset.execution_path == EXECUTION_PATH_SAP_MEDIUM:
-            has_tod = any(item.execution_path == EXECUTION_PATH_TOD_SAMPLING for item in k03_sheets)
-            values.append(_value("是否识别 TOD 抽样补充", has_tod, None, None, "execution_path"))
+        if lead is None or parse_amount(field_values(lead).get("te")) is None:
+            missing.append("Lead TE")
+    elif rule_id == "sap_high_cra_consistency":
+        if dataset.execution_path != EXECUTION_PATH_SAP_HIGH:
+            missing.append("仅高精度 SAP 适用")
+        if not summary.get("sap_cra"):
+            missing.append("高精度 SAP CRA")
+        if not _profile_cra(profile):
+            missing.append("Lead 计价/计量认定 CRA")
     else:
         if not summary.get("sap_expectation_text"):
             missing.append("SAP 预期构建说明")
@@ -234,12 +337,27 @@ def _sap_observation(
         values_read=values,
         missing_data=missing,
         logic=(
-            "系统读取 K.03.1 SAP 测试页的执行路径、CRA、TE、偏差阈值判断和说明区，"
-            "判断折旧测试策略及偏差处理是否需要复核。"
+            "系统读取 K.03.1 SAP 路径和参数，并使用 K03 profile 已关联的 Lead 计价/计量 CRA，"
+            "逐条检查策略选择、TE、高精度 CRA 或偏差处理。"
         ),
-        expected="SAP 测试页应使用与 Lead 一致的 CRA/TE，并保留预期、阈值、偏差判断和必要说明。",
+        expected="SAP 策略应匹配 Lead V/M CRA；TE 应与 Lead 一致；高精度页 CRA 应与 Lead V/M CRA 一致。",
         actual=f"本次识别执行路径={dataset.execution_path}，finding 数={sum(1 for item in issues if item.rule_id == rule_id)}。",
         summary="触发 finding。" if any(item.rule_id == rule_id for item in issues) else "未触发 finding。",
+    )
+
+
+def _profile_cra(profile: K03ExecutionProfile | None) -> str:
+    if profile is None or profile.lead_linkage is None:
+        return ""
+    return str(profile.lead_linkage.cra or "").strip()
+
+
+def _profile_has_tod(profile: K03ExecutionProfile | None) -> bool:
+    if profile is None:
+        return False
+    return any(
+        path in profile.executed_depreciation_paths
+        for path in (EXECUTION_PATH_TOD_SAMPLING, EXECUTION_PATH_TOD_BY_ITEM)
     )
 
 

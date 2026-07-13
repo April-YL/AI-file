@@ -3,6 +3,34 @@
 > 每次收工前更新本文。新成员接手先读 `docs/ONBOARDING.md`，再读 `AGENTS.md` 和本文。
 
 
+## 2026-07-13 K03 rules 阶段 2：SAP 策略与参数规则
+
+本阶段在既有 `K03ExecutionProfile` 路径分派机制内完善 SAP 策略与参数规则，并完成规则口径统一；未扩展 TOD、折旧政策、特别风险、实体类型或证据充分性判断。
+
+- `sap_precision_selection` 使用工作簿级 profile 已关联的 Lead 计价/计量（V/M）CRA，不使用 SAP 模板预设 CRA 代替 Lead CRA。Lead V/M CRA 为 Minimal 时，中精度 SAP 可单独采用；CRA 不低于 Low 时，中精度 SAP 只有在实际识别到已执行的 TOD by-item 或 TOD 抽样补充程序时才可接受，否则输出 `NEED_REVIEW`。
+- `sap_te_consistency` 独立比较 SAP TE 与 Lead TE；`sap_high_cra_consistency` 仅适用于高精度 SAP，独立比较 SAP 页 CRA 与 Lead V/M CRA。两项参数明确不一致时统一为 `AUTO_FAIL` / `FAIL`。
+- `DP-SAP-001`、`DP-SAP-002` 是从原始检查点 `DP-003` 拆出的 Agent 可执行子规则，已登记 registry 和规则映射；不作为原始 35 条来源字典的新行写入脱敏 CSV。
+- SAP 路径适用但 Lead/SAP 必要参数无法可靠读取时，相关规则在 `execution_ledger` 记录 `DATA_INSUFFICIENT`；仅高精度适用的 CRA 一致性规则在中精度 SAP 下记录 `NOT_APPLICABLE`，不得默认为已执行或通过。
+- 同一底稿实际执行多张 SAP 程序页时，runner 分别执行并合并 observation；finding 数量与 `checked_data` 中的全部被检查工作表保持可追溯一致，不再只保留最后一张 SAP 页证据。
+- 验收结果：K03 SAP、K03 runner、registry 与规则执行覆盖相关测试合计 `32 passed`；本轮测试未新增 workspace hygiene 问题。
+- 后续边界：特别风险下 TOD 要求、实体类型选择和 SAP 证据充分性仍需人工复核或后续阶段实现，不得在当前 UI/JSON 中展示为已自动完成。
+
+
+## 2026-07-12 K03 rules 阶段 1：按识别画像分派执行路径
+
+本轮只完成 K03 识别结果到现有规则 runner 的接线与路径分派，未新增 SAP、TOD 或折旧政策的具体判断规则。
+
+- `src/report/pipeline.py` 已将 `WorkbookQcContext.k03_execution_profile` 传入 `run_k03_rules()`；主流程开始消费 ingest 已识别的 K03 工作簿级画像。
+- `src/rules/k03_runner.py` 按 `primary_depreciation_path` 和 `component_sheets` 分派现有规则：SAP 中精度、SAP 高精度、TOD by-item、TOD 抽样，以及 SAP + TOD 抽样组合路径。
+- 一般四选一路径只执行已识别的方法；未采用的其他测试路径在 `execution_ledger` 记录为 `NOT_APPLICABLE`，不产生错误结论。
+- 路径无法识别，或画像已选择某路径但对应程序页无法匹配时，相关规则记录为 `DATA_INSUFFICIENT`，不得默认通过。
+- K03.3 折旧政策复核继续作为独立必要程序处理，不随折旧测试路径切换；未识别政策复核页时，政策规则单独记录为 `DATA_INSUFFICIENT`。
+- “本期计提”继续只作为辅助数据页，不作为必要程序页，也不作为已执行折旧测试的依据。
+- 新增 `tests/rules/test_k03_runner.py`，覆盖 TOD by-item 单一路径、SAP + TOD 抽样组合路径、K03.3 独立缺失，以及仅存在“本期计提”辅助页四类场景。
+- 验收结果：K03 runner 及既有 SAP、TOD 抽样、TOD by-item、政策复核测试合计 `26 passed`；测试运行未新增 workspace hygiene 问题。
+- 下一阶段应在当前分派机制内逐路径完善具体规则；不得绕过 `K03ExecutionProfile` 在 rules 层重新猜测底稿结构。
+
+
 ## 2026-07-12 UI 精修通过版沉淀
 
 本轮 UI 精修已完成并提交、推送：`d758c6a Refine audit review UI workflow`，远端为 `origin/main`。

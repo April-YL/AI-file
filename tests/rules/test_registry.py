@@ -50,6 +50,18 @@ def test_get_by_dict_code_ae003_implemented():
     assert spec.implementation == ImplementationStatus.IMPLEMENTED
 
 
+def test_k03_sap_parameter_rules_are_registered():
+    expected = {
+        "sap_te_consistency": "DP-SAP-001",
+        "sap_high_cra_consistency": "DP-SAP-002",
+    }
+    for rule_id, dict_code in expected.items():
+        spec = get_by_rule_id(rule_id)
+        assert spec is not None
+        assert spec.dict_code == dict_code
+        assert spec.implementation == ImplementationStatus.IMPLEMENTED
+
+
 def test_attach_rule_metadata_on_issue():
     from rules.models import QcIssue
 

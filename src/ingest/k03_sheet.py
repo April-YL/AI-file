@@ -25,6 +25,11 @@ EXECUTION_PATH_SAP_PLUS_TOD_SAMPLING = "sap_plus_tod_sampling"
 EXECUTION_PATH_POLICY_REVIEW = "policy_review"
 EXECUTION_PATH_UNKNOWN = "unknown"
 
+COMPONENT_STATE_EXECUTED = "EXECUTED"
+COMPONENT_STATE_TEMPLATE_ONLY = "TEMPLATE_ONLY"
+COMPONENT_STATE_INCOMPLETE = "INCOMPLETE"
+COMPONENT_STATE_AMBIGUOUS = "AMBIGUOUS"
+
 INGEST_DEPTH_DETAILED = "detailed"
 INGEST_DEPTH_LIGHTWEIGHT = "lightweight"
 INGEST_DEPTH_TEMPLATE_DETECTION = "template_detection"
@@ -273,6 +278,7 @@ class K03ComponentSheet:
     sheet_name: str
     execution_path: str
     template_type: str
+    execution_state: str = COMPONENT_STATE_AMBIGUOUS
     evidence: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
@@ -282,6 +288,7 @@ class K03ComponentSheet:
             "sheet_name": self.sheet_name,
             "execution_path": self.execution_path,
             "template_type": self.template_type,
+            "execution_state": self.execution_state,
             "evidence": self.evidence,
             "warnings": self.warnings,
         }
@@ -316,6 +323,7 @@ class K03LeadLinkage:
 @dataclass
 class K03ExecutionProfile:
     primary_depreciation_path: str = EXECUTION_PATH_UNKNOWN
+    executed_depreciation_paths: list[str] = field(default_factory=list)
     component_sheets: dict[str, list[K03ComponentSheet]] = field(default_factory=dict)
     evidence_completeness: dict[str, Any] = field(default_factory=dict)
     lead_linkage: K03LeadLinkage | None = None
@@ -324,6 +332,7 @@ class K03ExecutionProfile:
     def to_dict(self) -> dict[str, Any]:
         return {
             "primary_depreciation_path": self.primary_depreciation_path,
+            "executed_depreciation_paths": self.executed_depreciation_paths,
             "component_sheets": {
                 role: [item.to_dict() for item in items]
                 for role, items in self.component_sheets.items()
@@ -376,13 +385,15 @@ def build_k03_execution_profile(
         role = _component_role(dataset)
         if role is None:
             continue
+        evidence = _component_evidence(dataset)
         components.setdefault(role, []).append(
             K03ComponentSheet(
                 role=role,
                 sheet_name=dataset.sheet_name,
                 execution_path=dataset.execution_path,
                 template_type=dataset.template_type,
-                evidence=_component_evidence(dataset),
+                execution_state=_component_execution_state(dataset, evidence),
+                evidence=evidence,
                 warnings=list(dataset.warnings),
             )
         )
@@ -401,11 +412,13 @@ def build_k03_execution_profile(
         ]
 
     lead_linkage = _build_k03_lead_linkage(lead)
+    executed_paths = _executed_depreciation_paths(components)
     primary = _select_primary_depreciation_path(components, lead_linkage)
     evidence = _profile_evidence_completeness(components)
     warnings = _profile_warnings(components, lead_linkage, primary)
     return K03ExecutionProfile(
         primary_depreciation_path=primary,
+        executed_depreciation_paths=executed_paths,
         component_sheets=components,
         evidence_completeness=evidence,
         lead_linkage=lead_linkage,
@@ -458,6 +471,7 @@ def _component_evidence(dataset: K03SheetDataset) -> dict[str, Any]:
             "has_data_area": bool(summary.get("sample_output_summary_text")),
             "has_sampling_currency": bool(summary.get("sample_output_sampling_currency")),
             "is_required_for_tod_sampling_path": True,
+            "selected_sample_row_count": summary.get("sample_output_selected_rows_count", 0),
         }
     if dataset.execution_path == EXECUTION_PATH_TOD_SAMPLING:
         return {
@@ -492,6 +506,64 @@ def _component_evidence(dataset: K03SheetDataset) -> dict[str, Any]:
         "has_conclusion_area": bool(summary.get("has_conclusion_area")),
         "has_note_area": bool(summary.get("has_note_area")),
     }
+
+
+def _component_execution_state(
+    dataset: K03SheetDataset,
+    evidence: dict[str, Any],
+) -> str:
+    if dataset.execution_path in {EXECUTION_PATH_SAP_MEDIUM, EXECUTION_PATH_SAP_HIGH}:
+        if evidence.get("has_parameter_area") and evidence.get("has_calculation_area"):
+            return COMPONENT_STATE_EXECUTED
+        if evidence.get("has_parameter_area") or evidence.get("has_calculation_area"):
+            return COMPONENT_STATE_INCOMPLETE
+        return COMPONENT_STATE_TEMPLATE_ONLY
+    if dataset.template_type == "tod_sampling_output":
+        if evidence.get("selected_sample_row_count") or (
+            evidence.get("has_parameter_area") and evidence.get("has_data_area")
+        ):
+            return COMPONENT_STATE_EXECUTED
+        if evidence.get("has_parameter_area") or evidence.get("has_data_area"):
+            return COMPONENT_STATE_INCOMPLETE
+        return COMPONENT_STATE_TEMPLATE_ONLY
+    if dataset.execution_path == EXECUTION_PATH_TOD_SAMPLING:
+        if evidence.get("has_parameter_area") and evidence.get("sample_rows_count"):
+            return COMPONENT_STATE_EXECUTED
+        if evidence.get("has_parameter_area") or evidence.get("sample_rows_count"):
+            return COMPONENT_STATE_INCOMPLETE
+        return COMPONENT_STATE_TEMPLATE_ONLY
+    if dataset.execution_path == EXECUTION_PATH_TOD_BY_ITEM:
+        if evidence.get("has_data_area") and evidence.get("detail_row_count"):
+            return COMPONENT_STATE_EXECUTED
+        if evidence.get("has_data_area") or evidence.get("detail_row_count"):
+            return COMPONENT_STATE_INCOMPLETE
+        return COMPONENT_STATE_TEMPLATE_ONLY
+    if dataset.execution_path == EXECUTION_PATH_POLICY_REVIEW:
+        if evidence.get("has_policy_table") and evidence.get("policy_row_count"):
+            return COMPONENT_STATE_EXECUTED
+        if evidence.get("has_policy_table") or evidence.get("has_note_area"):
+            return COMPONENT_STATE_INCOMPLETE
+        return COMPONENT_STATE_TEMPLATE_ONLY
+    return COMPONENT_STATE_AMBIGUOUS
+
+
+def _executed_depreciation_paths(
+    components: dict[str, list[K03ComponentSheet]],
+) -> list[str]:
+    role_paths = (
+        ("sap_medium", EXECUTION_PATH_SAP_MEDIUM),
+        ("sap_high", EXECUTION_PATH_SAP_HIGH),
+        ("tod_by_item", EXECUTION_PATH_TOD_BY_ITEM),
+        ("tod_sampling", EXECUTION_PATH_TOD_SAMPLING),
+    )
+    return [
+        path
+        for role, path in role_paths
+        if any(
+            item.execution_state == COMPONENT_STATE_EXECUTED
+            for item in components.get(role, [])
+        )
+    ]
 
 
 def _auxiliary_current_depreciation_sheets(sheet_names: list[str]) -> list[str]:
@@ -547,11 +619,16 @@ def _select_primary_depreciation_path(
     components: dict[str, list[K03ComponentSheet]],
     lead_linkage: K03LeadLinkage | None,
 ) -> str:
-    has_medium = bool(components.get("sap_medium"))
-    has_high = bool(components.get("sap_high"))
-    has_by_item = bool(components.get("tod_by_item"))
-    has_sampling = bool(components.get("tod_sampling"))
-    has_sampling_output = bool(components.get("tod_sampling_output"))
+    def active(role: str) -> bool:
+        items = components.get(role, [])
+        executed = [item for item in items if item.execution_state == COMPONENT_STATE_EXECUTED]
+        return bool(executed or items)
+
+    has_medium = active("sap_medium")
+    has_high = active("sap_high")
+    has_by_item = active("tod_by_item")
+    has_sampling = active("tod_sampling")
+    has_sampling_output = active("tod_sampling_output")
     lead_cra = lead_linkage.cra if lead_linkage else None
 
     if has_medium and (has_sampling or has_sampling_output) and not has_high:
@@ -586,6 +663,7 @@ def _profile_evidence_completeness(
             {
                 "sheet_name": item.sheet_name,
                 "template_type": item.template_type,
+                "execution_state": item.execution_state,
                 **item.evidence,
             }
             for item in sap_items
@@ -901,13 +979,33 @@ def _map_policy_header_row(
 ) -> dict[str, K03Column]:
     row = rows[row_number - 1]
     prev = rows[row_number - 2] if row_number >= 2 else ()
+    prev_filled: list[str] = []
+    carried = ""
+    for value in prev:
+        if _text(value):
+            carried = _text(value)
+        prev_filled.append(carried)
     mapping: dict[str, K03Column] = {}
     used_fields: set[str] = set()
+    metric_occurrences: dict[str, int] = {}
+    repeated_policy_metrics = sum(
+        1 for value in row if _norm(_text(value)) in {"使用寿命", "使用年限"}
+    ) >= 2
     for col_idx, value in enumerate(row, start=1):
         header = _text(value)
-        prev_header = _text(prev[col_idx - 1]) if col_idx - 1 < len(prev) else ""
+        normalized_header = _norm(header)
+        prev_header = prev_filled[col_idx - 1] if col_idx - 1 < len(prev_filled) else ""
         combined = " ".join(v for v in (prev_header, header) if v)
-        field = _policy_field_for_header(combined, header, prev_header, used_fields)
+        metric_occurrences[normalized_header] = metric_occurrences.get(normalized_header, 0) + 1
+        occurrence = metric_occurrences[normalized_header]
+        if repeated_policy_metrics and normalized_header == "折旧政策":
+            field = "asset_category"
+        elif normalized_header in {"使用寿命", "使用年限"} and occurrence >= 3:
+            field = "useful_life_same_marker"
+        elif normalized_header in {"残值率", "净残值率"} and occurrence >= 3:
+            field = "salvage_rate_same_marker"
+        else:
+            field = _policy_field_for_header(combined, header, prev_header, used_fields)
         if not field:
             continue
         used_fields.add(field)
@@ -1681,10 +1779,20 @@ def _extract_tod_sampling_summary(
 
 
 def _extract_tod_sampling_output_summary(rows: list[tuple[Any, ...]]) -> dict[str, Any]:
+    sample_type_counts = {"key": 0, "representative": 0, "replacement": 0}
+    for row in rows:
+        row_text = " ".join(_text(value) for value in row if _text(value))
+        normalized = _norm(row_text)
+        if "关键项" in normalized or "keyitem" in normalized:
+            sample_type_counts["key"] += 1
+        elif "代表性样本" in normalized or "representativesample" in normalized:
+            sample_type_counts["representative"] += 1
+        elif "替换样本" in normalized or "replacementsample" in normalized:
+            sample_type_counts["replacement"] += 1
     return {
-        "sample_output_te": _find_label_value(rows, ("可容忍误差", "TE"))[0],
-        "sample_output_sampling_currency": _find_label_value(rows, ("抽样货币单元", "sampling currency"))[0],
-        "sample_output_population_amount": _find_label_value(rows, ("总体金额", "population amount"))[0],
+        "sample_output_te": _find_label_value(rows, ("可容忍误差", "TE"), max_offset=12)[0],
+        "sample_output_sampling_currency": _find_label_value(rows, ("抽样货币单元", "sampling currency"), max_offset=12)[0],
+        "sample_output_population_amount": _find_label_value(rows, ("总体金额", "population amount"), max_offset=12)[0],
         "sample_output_key_item_count": _find_label_value(rows, ("关键项目数量", "key item quantity"))[0],
         "sample_output_key_item_amount": _find_label_value(rows, ("关键项目金额", "key item amount"))[0],
         "sample_output_dual_purpose": _find_label_value(rows, ("双重目的", "dual purpose"))[0],
@@ -1693,6 +1801,10 @@ def _extract_tod_sampling_output_summary(rows: list[tuple[Any, ...]]) -> dict[st
         "sample_output_sample_pool_amount": _find_label_value(rows, ("样本池", "sample pool"))[0],
         "sample_output_expected_misstatement": _find_label_value(rows, ("预期错报", "expected misstatement"))[0],
         "sample_output_sampling_method": _find_label_value(rows, ("抽样方法", "sampling method"))[0],
+        "sample_output_key_item_rows_count": sample_type_counts["key"],
+        "sample_output_representative_rows_count": sample_type_counts["representative"],
+        "sample_output_replacement_rows_count": sample_type_counts["replacement"],
+        "sample_output_selected_rows_count": sample_type_counts["key"] + sample_type_counts["representative"],
         "sample_output_summary_text": _collect_rows_after_tokens(rows, ("样本", "sample"), max_rows=10),
     }
 
@@ -1700,6 +1812,8 @@ def _extract_tod_sampling_output_summary(rows: list[tuple[Any, ...]]) -> dict[st
 def _find_label_value(
     rows: list[tuple[Any, ...]],
     labels: tuple[str, ...],
+    *,
+    max_offset: int = 4,
 ) -> tuple[Any, int | None, int | None]:
     compact_labels = tuple(_norm(label) for label in labels)
     for row_no, row in enumerate(rows, start=1):
@@ -1707,7 +1821,7 @@ def _find_label_value(
             text = _norm(_text(value))
             if not text or not any(label in text for label in compact_labels):
                 continue
-            for offset in range(1, 5):
+            for offset in range(1, max_offset + 1):
                 candidate = _cell_value(row, col_no + offset)
                 if _text(candidate):
                     return candidate, row_no, col_no + offset
@@ -1739,12 +1853,50 @@ def _collect_rows_after_tokens(
 
 def _extract_sap_deviation_rows(rows: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
     marker_row = None
+    vertical_columns: dict[str, int] = {}
     for row_no, row in enumerate(rows, start=1):
-        if "偏差是否超过阈值" in _norm(" ".join(_text(value) for value in row)):
+        normalized_cells = [_norm(_text(value)) for value in row]
+        row_text = " ".join(normalized_cells)
+        if "是否超过已分配偏差阈值" in row_text or "差异是否超过已分配偏差阈值" in row_text:
+            for col_no, text in enumerate(normalized_cells, start=1):
+                if "账面计提折旧" in text or "实际折旧" in text:
+                    vertical_columns["actual_depreciation"] = col_no
+                elif text == "差异" or "差异=" in text:
+                    vertical_columns["deviation_amount"] = col_no
+                elif "已分配偏差阈值" in text and "是否" not in text:
+                    vertical_columns["threshold"] = col_no
+                elif "是否超过" in text:
+                    vertical_columns["over_threshold"] = col_no
+            marker_row = row_no
+            break
+        if "偏差是否超过阈值" in row_text:
             marker_row = row_no
             break
     if marker_row is None:
         return []
+    if vertical_columns.get("over_threshold"):
+        result: list[dict[str, Any]] = []
+        for row_no in range(marker_row + 1, min(len(rows), marker_row + 100) + 1):
+            row = rows[row_no - 1]
+            values = {
+                key: _cell_value(row, col_no)
+                for key, col_no in vertical_columns.items()
+            }
+            if not any(_text(value) for value in values.values()):
+                continue
+            first_text = _norm(" ".join(_text(value) for value in row if _text(value)))
+            if any(token in first_text for token in ("绝对值偏差", "偏差阈值", "是否超过阈值")):
+                break
+            if not _text(values.get("deviation_amount")):
+                continue
+            result.append(
+                {
+                    "row": row_no,
+                    "column": vertical_columns["over_threshold"],
+                    **values,
+                }
+            )
+        return result[:100]
     result: list[dict[str, Any]] = []
     marker = rows[marker_row - 1]
     deviation = rows[marker_row - 3] if marker_row >= 3 else ()

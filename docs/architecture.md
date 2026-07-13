@@ -136,6 +136,17 @@ MVP 阶段建议每个问题包含以下字段：
 
 ## 后续演进
 
+### K.03 SAP 策略与参数规则
+
+K.03 先识别程序页的实际执行状态，再进入规则判断。每个组成页使用 `EXECUTED`、`TEMPLATE_ONLY`、`INCOMPLETE`、`AMBIGUOUS` 四种状态；结论栏未填写不影响“已执行”识别，项目参数、计算痕迹、明细或抽样记录才是主要证据。工作簿同时执行多种折旧测试时，runner 对所有实际执行路径分别检查，不以 `primary_depreciation_path` 排除其他路径。
+
+折旧测试通常四选一：SAP 中精度、SAP 高精度、TOD by-item、TOD 抽样。SOP 和 J 案例同时执行多条路径，不代表实务底稿必须执行全部路径。K.03.3 折旧政策复核是独立必要程序，不属于上述四选一；“本期计提”工作表仅作为辅助信息，不构成程序执行证据。
+
+- `sap_precision_selection` 依据工作簿级 `K03ExecutionProfile` 已关联的 Lead 计价/计量（V/M）CRA 判断中、高精度策略；中精度模板预设的 `Minimal` 不作为 Lead CRA。
+- `sap_te_consistency` 独立检查 SAP 使用的 TE 与 Lead TE；`sap_high_cra_consistency` 仅适用于高精度 SAP，独立检查页内 CRA 与 Lead V/M CRA。
+- SAP 路径适用但必要参数无法可靠读取时，规则在 `execution_ledger` 记录 `DATA_INSUFFICIENT`；非对应路径记录 `NOT_APPLICABLE`，不得默认为已执行或通过。
+- `sap_special_risk_tod_required` 在特别风险、控制依赖和控制有效性形成可靠结构化来源前，不进入可执行 registry。
+
 - **大模型 Agent（已规划）**：规则 + LLM API 混合；见 ADR-0002。
 - 增加资产类别枚举和折旧年限规则。
 - 接入影像、合同、发票等非结构化材料。
