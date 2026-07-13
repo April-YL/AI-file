@@ -12,7 +12,6 @@ from ingest.field_mapping import map_headers
 from ingest.header_detection import scan_rows_for_headers
 from ingest.models import FieldMapping, SheetKind
 from ingest.sheet_classifier import classify_sheet
-from ingest.workbook_reader import read_worksheet_rows
 
 K03_BRANCH_DEPRECIATION_TEST = "depreciation_test"
 K03_BRANCH_POLICY_REVIEW = "depreciation_policy_review"
@@ -391,25 +390,34 @@ def load_k03_sheets_from_workbook(
     max_rows: int | None = None,
 ) -> list[K03SheetDataset]:
     path = Path(path)
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    wb = openpyxl.load_workbook(path, read_only=False, data_only=True)
     datasets: list[K03SheetDataset] = []
     try:
         for ws in wb.worksheets:
-            preview_rows = read_worksheet_rows(ws, max_rows=max_rows or 200)
+            if _looks_like_non_k03_procedure_sheet(ws.title):
+                continue
+            preview_rows = _read_k03_candidate_rows(ws, max_rows=max_rows or 200)
             kind, confidence, *_ = classify_sheet(ws.title, preview_rows)
-            dynamic_tod = _looks_like_dynamic_tod(preview_rows)
+            name_is_k03 = _looks_like_k03_sheet(ws.title)
+            dynamic_tod = False
+            if (
+                kind not in _K03_KINDS
+                and not name_is_k03
+                and _may_contain_dynamic_tod(preview_rows, ws.title)
+            ):
+                dynamic_tod = _looks_like_dynamic_tod(preview_rows)
             auxiliary_depreciation = (
                 any(token in _norm(ws.title) for token in ("本期计提", "currentdepreciation"))
-                and not _looks_like_k03_sheet(ws.title)
+                and not name_is_k03
             )
             if auxiliary_depreciation:
                 continue
-            if kind not in _K03_KINDS and not _looks_like_k03_sheet(ws.title) and not dynamic_tod:
+            if kind not in _K03_KINDS and not name_is_k03 and not dynamic_tod:
                 continue
             if dynamic_tod and kind not in _K03_KINDS:
                 kind = SheetKind.DEPRECIATION_TOD_SAMPLE
                 confidence = 0.8
-            rows = read_worksheet_rows(ws, max_rows=None)
+            rows = _read_k03_candidate_rows(ws)
             datasets.append(
                 _parse_k03_sheet(
                     path=path,
@@ -422,6 +430,42 @@ def load_k03_sheets_from_workbook(
     finally:
         wb.close()
     return datasets
+
+
+_K03_MAX_COLS_TO_READ = 100
+
+
+def _looks_like_non_k03_procedure_sheet(sheet_name: str) -> bool:
+    text = _norm(sheet_name)
+    return any(token in text for token in ("k.02", "k02"))
+
+
+def _may_contain_dynamic_tod(rows: list[tuple[Any, ...]], sheet_name: str) -> bool:
+    text = _norm(_combined_text(sheet_name, rows[:80]))
+    depreciation_hit = any(token in text for token in ("折旧", "depreciation"))
+    sampling_hit = any(token in text for token in ("tod", "抽样", "选样", "样本", "sample"))
+    return depreciation_hit and sampling_hit
+
+
+def _read_k03_candidate_rows(ws, *, max_rows: int | None = None) -> list[tuple[Any, ...]]:
+    """Read K.03 candidate rows without walking a bloated Excel used range."""
+    non_empty: dict[tuple[int, int], Any] = {}
+    for (row_no, col_no), cell in getattr(ws, "_cells", {}).items():
+        if col_no > _K03_MAX_COLS_TO_READ:
+            continue
+        if max_rows is not None and row_no > max_rows:
+            continue
+        value = cell.value
+        if _text(value):
+            non_empty[(row_no, col_no)] = value
+    if not non_empty:
+        return []
+    last_row = max(row_no for row_no, _ in non_empty)
+    last_col = max(col_no for _, col_no in non_empty)
+    return [
+        tuple(non_empty.get((row_no, col_no)) for col_no in range(1, last_col + 1))
+        for row_no in range(1, last_row + 1)
+    ]
 
 
 def _looks_like_dynamic_tod(rows: list[tuple[Any, ...]]) -> bool:
@@ -1842,7 +1886,25 @@ def _parse_tod_sheet(
         )
         for col, text in header_cells
     ]
-    role_evidence = resolve_tod_role(rows, sheet_name)
+    sample_score = _sample_score(sheet_name, rows, header_cells)
+    by_item_score = _by_item_score(normalized)
+    by_item_short_circuit = by_item_score >= 6 and sample_score < 3 and "sample_type" not in normalized
+    if by_item_short_circuit:
+        role_evidence = K03RoleEvidence(
+            role="tod_by_item",
+            status="FOUND",
+            required_hits=["detailed_depreciation_fields", "no_sampling_structure"],
+            matched_header_fields=sorted(normalized),
+            matched_rows=[header_row] if header_row else [],
+        )
+    else:
+        role_evidence = resolve_tod_role(rows, sheet_name)
+    legacy_tod_sampling = (
+        role_evidence.status in {"UNKNOWN", "INCOMPLETE"}
+        and sample_score >= 2
+        and bool(header_cells)
+        and "tod" in _norm(_combined_text(sheet_name, rows[:5]))
+    )
     warnings: list[str] = []
 
     if role_evidence.status == "FOUND" and role_evidence.role == "tod_sampling_output":
@@ -1857,6 +1919,11 @@ def _parse_tod_sheet(
         execution_path = EXECUTION_PATH_TOD_BY_ITEM
         ingest_depth = INGEST_DEPTH_DETAILED
         template_type = "tod_by_item"
+    elif legacy_tod_sampling:
+        execution_path = EXECUTION_PATH_TOD_SAMPLING
+        ingest_depth = INGEST_DEPTH_LIGHTWEIGHT
+        template_type = "tod_sampling"
+        warnings.append("k03_tod_sampling_legacy_structure")
     else:
         execution_path = EXECUTION_PATH_UNKNOWN
         ingest_depth = INGEST_DEPTH_LIGHTWEIGHT

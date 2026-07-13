@@ -2,7 +2,9 @@ from pathlib import Path
 
 import openpyxl
 import pytest
+from openpyxl.styles import PatternFill
 
+import ingest.k03_sheet as k03_sheet
 from ingest.k03_sheet import (
     EXECUTION_PATH_POLICY_REVIEW,
     EXECUTION_PATH_SAP_HIGH,
@@ -727,6 +729,30 @@ def test_workbook_ingest_does_not_truncate_tod_by_item_detail_rows(tmp_path: Pat
     assert len(ctx.k03_sheets[0].preview_rows) <= 5
     assert "preview_rows" not in ctx.k03_sheets[0].llm_candidate_context
     assert "detail_rows" not in ctx.k03_sheets[0].to_dict()
+
+
+def test_k03_loader_ignores_far_formatted_used_range(tmp_path: Path, monkeypatch):
+    path = tmp_path / "k03_far_format.xlsx"
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    ws = _append_by_item_sheet(wb)
+    ws.cell(row=5000, column=20).fill = PatternFill(fill_type="solid", fgColor="FFFF00")
+    _save(wb, path)
+
+    parsed_row_counts: list[int] = []
+    original_parse = k03_sheet._parse_k03_sheet
+
+    def _capture_parse_rows(**kwargs):
+        parsed_row_counts.append(len(kwargs["rows"]))
+        return original_parse(**kwargs)
+
+    monkeypatch.setattr(k03_sheet, "_parse_k03_sheet", _capture_parse_rows)
+
+    datasets = load_k03_sheets_from_workbook(path)
+
+    assert len(datasets) == 1
+    assert datasets[0].template_type == "tod_by_item"
+    assert parsed_row_counts == [6]
 
 
 def test_schema_reserves_sap_plus_tod_sampling_path():
