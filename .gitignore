@@ -22,6 +22,7 @@ qc_report.json
 # 本地实测/导出目录（不入库；保留占位文件）
 outputs/*
 !outputs/.gitkeep
+local_data/
 
 # 本地临时检查输出（非 fixture）
 _summary_check*.txt

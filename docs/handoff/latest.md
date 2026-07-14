@@ -1,6 +1,6 @@
 # 最新交接
 
-> 更新时间：2026-07-13。本文只保留当前可执行基线、已知边界和下一步；历史阶段记录见 [`archive/through-2026-07-13.md`](archive/through-2026-07-13.md)。
+> 更新时间：2026-07-14。本文只保留当前可执行基线、已知边界和下一步；历史阶段记录见 [`archive/through-2026-07-13.md`](archive/through-2026-07-13.md)。
 
 ## 当前基线
 
@@ -10,6 +10,14 @@
 - 必交付：结构化质检报告和 `*_qc_annotated.xlsx` 底稿标注副本均已有可运行首版。
 - 规则真源：`src/rules/registry.py`；UI/JSON 只能展示 runner 和 `execution_ledger` 记录的本次运行事实。
 - 自动结论仅使用 `PASS`、`WARN`、`FAIL`、`NEED_REVIEW`；LLM 不得单独把规则 `FAIL` 改为 `PASS`。
+
+## 本地运行历史存储
+
+- UI 运行历史已从 Windows 用户目录迁移到项目盘默认目录 `E:\AI file\local_data\fixed_asset_qc`；`history.db` 保存项目及运行元数据，`artifacts/<run_id>/` 保存 JSON、HTML 和标注底稿。
+- 可通过环境变量 `FA_QC_DATA_DIR` 覆盖默认位置；配置示例见 `.env.example`。`local_data/` 已加入 `.gitignore`，真实底稿和本地交付物不得提交。
+- 2026-07-14 已将原 C 盘 23 次运行、11 个项目和 23 个产物目录复制到 E 盘；复制核对为 60 个文件、47,599,758 字节，源目标一致。
+- C 盘原目录 `C:\Users\Admin1\.audit_workpaper_review_agent` 暂作迁移备份，未删除。需重启 UI 后再抽查历史查看及 JSON、HTML、标注底稿下载；确认正常后，删除旧副本仍须单独授权。
+- 路径解析聚焦测试为 `2 passed`；本轮测试未新增 workspace hygiene 问题。该结果不是全仓测试结论。
 
 ## 当前覆盖
 

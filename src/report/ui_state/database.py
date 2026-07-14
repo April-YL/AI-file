@@ -5,11 +5,22 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-DATA_DIR = Path.home() / ".audit_workpaper_review_agent"
+
+def _resolve_data_dir() -> Path:
+    """Resolve local persistence outside source-controlled project data."""
+    configured = os.getenv("FA_QC_DATA_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    project_root = Path(__file__).resolve().parents[3]
+    return project_root / "local_data" / "fixed_asset_qc"
+
+
+DATA_DIR = _resolve_data_dir()
 DB_PATH = DATA_DIR / "history.db"
 ARTIFACTS_DIR = DATA_DIR / "artifacts"
 
