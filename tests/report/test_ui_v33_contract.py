@@ -185,6 +185,8 @@ def test_findings_result_tabs_are_not_duplicate_or_ambiguous():
     assert "基本信息摘录" in viewer_source
     assert "运行耗时" in viewer_source
     assert "当前运行" in viewer_source
+    assert "运行版本" in viewer_source
+    assert "历史未记录" in viewer_source
     assert "render_download_bar(filename, run_id" in viewer_source
     assert viewer_source.index("render_download_bar(filename, run_id") < viewer_source.index("st.tabs")
     assert "_render_findings_summary_row(data)" in viewer_source
@@ -229,6 +231,8 @@ def test_runtime_breakdown_and_compact_layout_are_present():
 
     main_source = inspect.getsource(main)
     assert "_render_topbar()" not in main_source
+    assert "固定资产质检 Agent v" in main_source
+    assert "lock_status" in main_source
     assert "ingest_seconds" in inspect.getsource(_render_runtime_timings)
     assert "rules_seconds" in inspect.getsource(_render_runtime_breakdown)
     assert "padding-top: 0.1rem" in GLOBAL_STYLES

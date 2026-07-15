@@ -105,12 +105,15 @@ def render_findings_viewer() -> None:
     summary = data.get("summary") or {}
     overall = summary.get("overall_severity", "PASS")
     findings = _finding_count(data)
+    build_info = data.get("build_info") or {}
+    run_version = str(build_info.get("pilot_build") or "").strip() or "历史未记录"
 
     st.markdown(
         f"""
         <div class="qc-info-banner">
           当前运行：<strong>{filename}</strong> ·
-          {render_severity_badge(overall)} · {findings} findings · 运行编号 {run_id}
+          {render_severity_badge(overall)} · {findings} findings · 运行编号 {run_id} ·
+          运行版本：{run_version}
         </div>
         """,
         unsafe_allow_html=True,

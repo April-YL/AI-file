@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import Any
 
@@ -27,9 +28,15 @@ K03_LOW_RISK_HOW_RULE_IDS: tuple[str, ...] = (
     "k03_tod_sampling_attributes",
     "k03_tod_sampling_difference_followup",
     "k03_tod_sampling_documentation",
-    "k03_policy_sheet_missing",
-    "k03_policy_table_unreadable",
-    "k03_policy_sections_incomplete",
+    "k03_policy_three_elements_complete",
+    "k03_policy_method_change_consistency",
+    "k03_policy_annual_rate_recalculation",
+    "k03_policy_period_consistency",
+    "k03_policy_change_field_explanation",
+    "k03_policy_fa_category_coverage",
+    "k03_policy_fa_life_exception_followup",
+    "k03_policy_fa_salvage_exception_followup",
+    "k03_policy_conclusion_consistency",
     "k03_tod_by_item_detail_unreadable",
     "k03_tod_by_item_required_fields",
     "k03_tod_by_item_sad_unavailable",
@@ -38,12 +45,6 @@ K03_LOW_RISK_HOW_RULE_IDS: tuple[str, ...] = (
     "k03_tod_by_item_total_difference_over_sad",
     "k03_tod_by_item_rollforward_depreciation",
     "k03_tod_by_item_conclusion_missing",
-    "k03_policy_fa_life_out_of_range",
-    "k03_policy_fa_salvage_mismatch",
-    "k03_policy_fa_unit_or_category_review",
-    "k03_policy_difference_marker",
-    "k03_policy_change_without_explanation",
-    "k03_policy_obvious_anomaly",
 )
 
 
@@ -210,6 +211,7 @@ def build_k03_policy_low_risk_observation(
     issues: Iterable[QcIssue],
     *,
     fa_list: FaListDataset | None = None,
+    additional_missing_data: Iterable[str] = (),
 ) -> dict:
     issues = list(issues)
     if dataset is None:
@@ -222,7 +224,32 @@ def build_k03_policy_low_risk_observation(
     key_columns = _policy_key_columns(dataset)
     missing_data: list[str] = []
     values_read: list[dict] = []
-    if rule_id == "k03_policy_table_unreadable":
+    if rule_id in {
+        "k03_policy_three_elements_complete",
+        "k03_policy_method_change_consistency",
+        "k03_policy_annual_rate_recalculation",
+        "k03_policy_period_consistency",
+        "k03_policy_change_field_explanation",
+        "k03_policy_fa_category_coverage",
+        "k03_policy_fa_life_exception_followup",
+        "k03_policy_fa_salvage_exception_followup",
+        "k03_policy_conclusion_consistency",
+    }:
+        values_read.extend(_policy_values(dataset, rule_id))
+        if rule_id in {
+            "k03_policy_fa_category_coverage",
+            "k03_policy_fa_life_exception_followup",
+            "k03_policy_fa_salvage_exception_followup",
+        }:
+            values_read.extend(_fa_list_values(fa_list, issues, rule_id))
+            if fa_list is None or not fa_list.records:
+                missing_data.append("FA list")
+        if rule_id in {
+            "k03_policy_change_field_explanation",
+            "k03_policy_conclusion_consistency",
+        }:
+            values_read.extend(_policy_note_values(dataset))
+    elif rule_id == "k03_policy_table_unreadable":
         if table is None or not table.rows:
             missing_data.append("K.03.3 折旧政策表 1")
         else:
@@ -258,6 +285,9 @@ def build_k03_policy_low_risk_observation(
         if rule_id == "k03_policy_change_without_explanation" and not _policy_note_values(dataset):
             missing_data.append("K.03.3 difference explanation or Notes")
 
+    missing_data.extend(str(item) for item in additional_missing_data if item)
+    missing_data = _dedupe_text(missing_data)
+
     return _observation(
         checked_data=[
             _dataset_item(
@@ -271,7 +301,11 @@ def build_k03_policy_low_risk_observation(
         check_logic=_policy_logic(rule_id),
         expected_result=_policy_expected(rule_id),
         actual_result=_policy_actual(rule_id, dataset, issues, missing_data),
-        result_summary=_result_summary(issues, rule_id),
+        result_summary=(
+            "资料不足，规则未完整执行。"
+            if additional_missing_data and not _issues_for(issues, rule_id)
+            else _result_summary(issues, rule_id)
+        ),
     )
 
 
@@ -362,6 +396,13 @@ def _value_read(
         "unit": None,
         "amount_type": amount_type,
     }
+
+
+def _column_number(letters: str) -> int:
+    result = 0
+    for char in letters:
+        result = result * 26 + (ord(char) - ord("A") + 1)
+    return result
 
 
 def _short_value(value: Any) -> str:
@@ -499,6 +540,33 @@ def _policy_column_values(dataset: K03SheetDataset) -> list[dict]:
                 amount_type="字段映射",
             )
         )
+    for field in (
+        "current_policy_date",
+        "prior_policy_date",
+        "current_method",
+        "prior_method",
+        "method_same_marker",
+    ):
+        value = getattr(table, field, None)
+        cell = table.context_cell_refs.get(field)
+        if value is None and not cell:
+            continue
+        row = None
+        column = None
+        if cell:
+            match = re.fullmatch(r"([A-Z]+)(\d+)", cell)
+            if match:
+                row = int(match.group(2))
+                column = _column_number(match.group(1))
+        values.append(
+            _value_read(
+                field,
+                value,
+                row=row,
+                column=column,
+                amount_type="政策上下文",
+            )
+        )
     return values
 
 
@@ -508,6 +576,34 @@ def _policy_values(dataset: K03SheetDataset, rule_id: str) -> list[dict]:
     if table is None:
         return []
     fields = ["asset_category"]
+    if rule_id in {
+        "k03_policy_three_elements_complete",
+        "k03_policy_fa_life_exception_followup",
+    }:
+        fields.append("current_useful_life")
+    if rule_id in {
+        "k03_policy_three_elements_complete",
+        "k03_policy_fa_salvage_exception_followup",
+    }:
+        fields.append("current_salvage_rate")
+    if rule_id == "k03_policy_annual_rate_recalculation":
+        fields.extend(["current_useful_life", "current_salvage_rate", "current_annual_rate"])
+    if rule_id in {
+        "k03_policy_period_consistency",
+        "k03_policy_change_field_explanation",
+        "k03_policy_conclusion_consistency",
+    }:
+        fields.extend(
+            [
+                "current_useful_life",
+                "prior_useful_life",
+                "current_salvage_rate",
+                "prior_salvage_rate",
+                "useful_life_same_marker",
+                "salvage_rate_same_marker",
+                "difference_explanation",
+            ]
+        )
     if rule_id in {"k03_policy_fa_life_out_of_range", "k03_policy_fa_unit_or_category_review"}:
         fields.append("current_useful_life")
     if rule_id in {"k03_policy_fa_salvage_mismatch", "k03_policy_fa_unit_or_category_review"}:
@@ -570,6 +666,10 @@ def _fa_list_values(
     if not records:
         records = fa_list.records[:3]
     fields = ["asset_category"]
+    if rule_id == "k03_policy_fa_life_exception_followup":
+        fields.append("useful_life_months")
+    if rule_id == "k03_policy_fa_salvage_exception_followup":
+        fields.append("salvage_rate")
     if rule_id in {"k03_policy_fa_life_out_of_range", "k03_policy_fa_unit_or_category_review"}:
         fields.append("useful_life_months")
     if rule_id in {"k03_policy_fa_salvage_mismatch", "k03_policy_fa_unit_or_category_review"}:

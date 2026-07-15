@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 from rules.models import QcIssue, Severity
+from rules.observation_evidence import normalize_observation_for_ledger
 
 STATUS_EXECUTED = "EXECUTED"
 STATUS_DATA_INSUFFICIENT = "DATA_INSUFFICIENT"
@@ -177,7 +178,8 @@ class RuleExecutionRecorder:
         note: str = "",
         observation: dict[str, Any] | None = None,
     ) -> None:
-        checked_observation = validate_observation(observation)
+        checked_observation, observation_note = _prepare_observation(observation)
+        note = _merge_note(note, observation_note) if observation_note else note
         existing = self._records.get(rule_id)
         if existing is None:
             self._records[rule_id] = RuleExecutionRecord(
@@ -199,7 +201,10 @@ class RuleExecutionRecorder:
         existing = self._records.get(rule_id)
         if existing is None:
             raise ValueError(f"Cannot attach observation before recording rule: {rule_id}")
-        existing.observation = validate_observation(observation)
+        checked_observation, observation_note = _prepare_observation(observation)
+        if observation_note:
+            existing.status_note = _merge_note(existing.status_note, observation_note)
+        existing.observation = checked_observation
 
     def record_data_insufficient(self, rule_id: str, note: str) -> None:
         self._record_non_execution(rule_id, STATUS_DATA_INSUFFICIENT, note)
@@ -284,7 +289,24 @@ def _merge_note(existing: str, note: str) -> str:
 
 
 
-def validate_observation(observation: dict[str, Any] | None) -> dict[str, Any] | None:
+def _prepare_observation(
+    observation: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, str]:
+    validate_observation(observation, enforce_bounds=False)
+    normalized = normalize_observation_for_ledger(observation)
+    note = (
+        "observation evidence sampled: " + "; ".join(normalized.truncations)
+        if normalized.truncations
+        else ""
+    )
+    return validate_observation(normalized.observation), note
+
+
+def validate_observation(
+    observation: dict[str, Any] | None,
+    *,
+    enforce_bounds: bool = True,
+) -> dict[str, Any] | None:
     """Validate bounded ledger observation; it is a fact summary, not a trace log."""
     if observation is None:
         return None
@@ -292,16 +314,18 @@ def validate_observation(observation: dict[str, Any] | None) -> dict[str, Any] |
         raise ValueError("execution observation must be a dict")
     keys = set(observation)
     if keys == _LEGACY_OBSERVATION_KEYS:
-        return _validate_legacy_observation(observation)
+        return _validate_legacy_observation(observation, enforce_bounds=enforce_bounds)
     if keys == _EVIDENCE_OBSERVATION_KEYS:
-        return _validate_evidence_observation(observation)
+        return _validate_evidence_observation(observation, enforce_bounds=enforce_bounds)
     raise ValueError(
         "execution observation must be either legacy path/inputs/checks/notes "
         "or evidence checked_data/check_logic/expected_result/actual_result/result_summary"
     )
 
 
-def _validate_legacy_observation(observation: dict[str, Any]) -> dict[str, Any]:
+def _validate_legacy_observation(
+    observation: dict[str, Any], *, enforce_bounds: bool
+) -> dict[str, Any]:
     """Validate the original v1 observation shape for backward compatibility."""
 
     path = observation.get("path")
@@ -311,11 +335,11 @@ def _validate_legacy_observation(observation: dict[str, Any]) -> dict[str, Any]:
     inputs = observation.get("inputs")
     checks = observation.get("checks")
     notes = observation.get("notes")
-    if not isinstance(inputs, list) or len(inputs) > _MAX_INPUTS:
+    if not isinstance(inputs, list) or (enforce_bounds and len(inputs) > _MAX_INPUTS):
         raise ValueError("execution observation inputs must be a bounded list")
-    if not isinstance(checks, list) or len(checks) > _MAX_CHECKS:
+    if not isinstance(checks, list) or (enforce_bounds and len(checks) > _MAX_CHECKS):
         raise ValueError("execution observation checks must be a bounded list")
-    if not isinstance(notes, list) or len(notes) > _MAX_NOTES:
+    if not isinstance(notes, list) or (enforce_bounds and len(notes) > _MAX_NOTES):
         raise ValueError("execution observation notes must be a bounded list")
 
     checked_inputs = [_validate_input(item) for item in inputs]
@@ -329,12 +353,19 @@ def _validate_legacy_observation(observation: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _validate_evidence_observation(observation: dict[str, Any]) -> dict[str, Any]:
+def _validate_evidence_observation(
+    observation: dict[str, Any], *, enforce_bounds: bool
+) -> dict[str, Any]:
     checked_data = observation.get("checked_data")
-    if not isinstance(checked_data, list) or len(checked_data) > _MAX_EVIDENCE_ITEMS:
+    if not isinstance(checked_data, list) or (
+        enforce_bounds and len(checked_data) > _MAX_EVIDENCE_ITEMS
+    ):
         raise ValueError("execution observation checked_data must be a bounded list")
     return {
-        "checked_data": [_validate_evidence_item(item) for item in checked_data],
+        "checked_data": [
+            _validate_evidence_item(item, enforce_bounds=enforce_bounds)
+            for item in checked_data
+        ],
         "check_logic": _validate_how_text_or_none(
             observation.get("check_logic"), "check_logic"
         ),
@@ -350,17 +381,23 @@ def _validate_evidence_observation(observation: dict[str, Any]) -> dict[str, Any
     }
 
 
-def _validate_evidence_item(item: Any) -> dict[str, Any]:
+def _validate_evidence_item(item: Any, *, enforce_bounds: bool) -> dict[str, Any]:
     if not isinstance(item, dict) or set(item) != _EVIDENCE_ITEM_KEYS:
         raise ValueError("execution observation checked_data has unsupported fields")
     key_columns = item.get("key_columns")
     values_read = item.get("values_read")
     missing_data = item.get("missing_data")
-    if not isinstance(key_columns, list) or len(key_columns) > _MAX_KEY_COLUMNS:
+    if not isinstance(key_columns, list) or (
+        enforce_bounds and len(key_columns) > _MAX_KEY_COLUMNS
+    ):
         raise ValueError("execution observation key_columns must be a bounded list")
-    if not isinstance(values_read, list) or len(values_read) > _MAX_VALUES_READ:
+    if not isinstance(values_read, list) or (
+        enforce_bounds and len(values_read) > _MAX_VALUES_READ
+    ):
         raise ValueError("execution observation values_read must be a bounded list")
-    if not isinstance(missing_data, list) or len(missing_data) > _MAX_MISSING_DATA:
+    if not isinstance(missing_data, list) or (
+        enforce_bounds and len(missing_data) > _MAX_MISSING_DATA
+    ):
         raise ValueError("execution observation missing_data must be a bounded list")
     return {
         "sheet": _validate_short_text_or_none(item.get("sheet"), "checked_data.sheet"),
@@ -370,7 +407,9 @@ def _validate_evidence_item(item: Any) -> dict[str, Any]:
         "location": _validate_short_text_or_none(
             item.get("location"), "checked_data.location"
         ),
-        "identified_by": _validate_identified_by(item.get("identified_by")),
+        "identified_by": _validate_identified_by(
+            item.get("identified_by"), enforce_bounds=enforce_bounds
+        ),
         "key_columns": [
             _validate_short_text_or_none(value, "checked_data.key_columns")
             for value in key_columns
@@ -383,17 +422,23 @@ def _validate_evidence_item(item: Any) -> dict[str, Any]:
     }
 
 
-def _validate_identified_by(item: Any) -> dict[str, Any]:
+def _validate_identified_by(item: Any, *, enforce_bounds: bool) -> dict[str, Any]:
     if not isinstance(item, dict) or set(item) != _IDENTIFIED_BY_KEYS:
         raise ValueError("execution observation identified_by has unsupported fields")
     matched_keywords = item.get("matched_keywords")
     matched_rows = item.get("matched_rows")
     matched_columns = item.get("matched_columns")
-    if not isinstance(matched_keywords, list) or len(matched_keywords) > _MAX_IDENTIFIED_TERMS:
+    if not isinstance(matched_keywords, list) or (
+        enforce_bounds and len(matched_keywords) > _MAX_IDENTIFIED_TERMS
+    ):
         raise ValueError("execution observation matched_keywords must be a bounded list")
-    if not isinstance(matched_rows, list) or len(matched_rows) > _MAX_IDENTIFIED_TERMS:
+    if not isinstance(matched_rows, list) or (
+        enforce_bounds and len(matched_rows) > _MAX_IDENTIFIED_TERMS
+    ):
         raise ValueError("execution observation matched_rows must be a bounded list")
-    if not isinstance(matched_columns, list) or len(matched_columns) > _MAX_IDENTIFIED_TERMS:
+    if not isinstance(matched_columns, list) or (
+        enforce_bounds and len(matched_columns) > _MAX_IDENTIFIED_TERMS
+    ):
         raise ValueError("execution observation matched_columns must be a bounded list")
     return {
         "sheet_name": _validate_short_text_or_none(

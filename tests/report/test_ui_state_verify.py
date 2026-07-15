@@ -1,62 +1,58 @@
-"""快速验证持久化层。"""
-import sys
-sys.path.insert(0, "src")
+"""Persistence checks isolated from the user's real run history."""
 
-from report.ui_state.database import init_db, ARTIFACTS_DIR
-from report.ui_state.project_store import ensure_default_project, create_project, list_projects
-from report.ui_state.run_store import save_run, get_latest_run
+from __future__ import annotations
+
 import json
 
-init_db()
+from report.ui_state import database, run_store
+from report.ui_state.project_store import ensure_default_project
 
-# 项目
-pid = ensure_default_project()
-assert pid > 0
-pid2 = create_project("G科技", "G科技有限公司", "2025-12-31",
-                       engagement_code="SH-2025-00128",
-                       engagement_name="XX集团 2025年度审计")
-assert pid2 > pid
 
-projects = list_projects()
-assert len(projects) >= 2
-for p in projects:
-    print(f"  project: {p['name']} | eng: {p['engagement_name']} | code: {p['engagement_code']}")
+def _use_temporary_store(monkeypatch, tmp_path) -> None:
+    data_dir = tmp_path / "fixed_asset_qc"
+    artifacts_dir = data_dir / "artifacts"
+    monkeypatch.setattr(database, "DATA_DIR", data_dir)
+    monkeypatch.setattr(database, "DB_PATH", data_dir / "history.db")
+    monkeypatch.setattr(database, "ARTIFACTS_DIR", artifacts_dir)
+    monkeypatch.setattr(run_store, "ARTIFACTS_DIR", artifacts_dir)
 
-# 运行
-fake = {
-    "summary": {"overall_severity": "WARN", "fail_count": 2, "warn_count": 3, "need_review_count": 1},
-    "issues": [
-        {"severity": "FAIL", "rule_id": "test_rule", "source_sheet": "Sheet1", "source_row": 5, "field": "test", "message": "test"},
-        {"severity": "PASS", "rule_id": "test_pass", "message": "ok"},
-        {"severity": "WARN", "rule_id": "test_warn", "message": "warning"},
-    ],
-    "runtime_timings": {"total_seconds": 5.0, "llm_enabled": False},
-    "subject_code": "FA_K1",
-}
-json_bytes = json.dumps(fake, ensure_ascii=False, indent=2).encode("utf-8")
-html_bytes = b"<html><body>test</body></html>"
-run_id = save_run(pid, "test_workbook.xlsx", fake, json_bytes, html_bytes)
-assert run_id > 0
-print(f"run_id: {run_id}")
 
-# 读取最近
-latest = get_latest_run()
-assert latest is not None
-assert latest["source_filename"] == "test_workbook.xlsx"
-assert latest["overall_severity"] == "WARN"
-assert latest["finding_count"] == 2  # FAIL + WARN, PASS excluded
-assert latest["fail_count"] == 2
-print(f"latest: {latest['source_filename']} | {latest['overall_severity']} | findings={latest['finding_count']}")
+def test_run_version_round_trip(monkeypatch, tmp_path) -> None:
+    _use_temporary_store(monkeypatch, tmp_path)
+    project_id = ensure_default_project()
+    build_info = {
+        "agent_version": "0.1.0",
+        "pilot_build": "PILOT-TEST.01",
+        "source_revision": "abc12345",
+        "lock_status": "LOCKED",
+    }
+    data = {
+        "summary": {
+            "overall_severity": "WARN",
+            "fail_count": 0,
+            "warn_count": 1,
+            "need_review_count": 0,
+        },
+        "issues": [{"severity": "WARN", "rule_id": "test_rule"}],
+        "runtime_timings": {"total_seconds": 1.25, "llm_enabled": False},
+        "subject_code": "FA_K1",
+        "build_info": build_info,
+    }
+    json_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
 
-# 产物文件
-ad = ARTIFACTS_DIR / str(run_id)
-assert (ad / "report.json").exists()
-assert (ad / "review.html").exists()
-print(f"artifacts dir ok: {ad}")
+    run_id = run_store.save_run(
+        project_id,
+        "test_workbook.xlsx",
+        data,
+        json_bytes,
+        b"<html></html>",
+    )
+    saved = run_store.get_run(run_id)
 
-# 读取完整 data
-assert "data" in latest
-assert latest["data"]["summary"]["overall_severity"] == "WARN"
-print("data round-trip ok")
-
-print("\n=== ALL CHECKS PASSED ===")
+    assert saved is not None
+    assert saved["agent_version"] == "0.1.0"
+    assert saved["pilot_build"] == "PILOT-TEST.01"
+    assert saved["source_revision"] == "abc12345"
+    assert saved["lock_status"] == "LOCKED"
+    assert saved["data"]["build_info"] == build_info
+    assert (database.ARTIFACTS_DIR / str(run_id) / "report.json").exists()

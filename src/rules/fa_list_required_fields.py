@@ -6,7 +6,12 @@ from ingest.constants import (
     FA_LIST_REQUIRED_IDENTITY,
 )
 
-from ingest.models import AssetRecord
+from ingest.models import (
+    AssetRecord,
+    FaListAmountBasis,
+    FaListAmountBasisStatus,
+    FaListReviewProfile,
+)
 from rules.models import ColumnContext, QcIssue, Severity
 from rules.parsing import is_blank, record_has_identity, record_is_empty_data_row
 
@@ -16,7 +21,9 @@ _ROW_CORE = list(FA_LIST_REQUIRED)
 _ROW_RECOMMENDED = list(FA_LIST_RECOMMENDED)
 
 
-def _sheet_level_issues(ctx: ColumnContext) -> list[QcIssue]:
+def _sheet_level_issues(
+    ctx: ColumnContext, amount_basis: FaListAmountBasis | None = None
+) -> list[QcIssue]:
     present = ctx.mapped_fields
     issues: list[QcIssue] = []
 
@@ -38,7 +45,24 @@ def _sheet_level_issues(ctx: ColumnContext) -> list[QcIssue]:
             )
         )
 
+    basis_unresolved = amount_basis is not None and amount_basis.status != FaListAmountBasisStatus.CONFIRMED
+    if basis_unresolved:
+        issues.append(
+            QcIssue(
+                asset_id=None,
+                rule_id=RULE_ID,
+                field="amount_basis",
+                severity=Severity.NEED_REVIEW,
+                message="FA list 存在多组或不完整金额候选，无法确认同期间、同币种的原值、累计折旧、减值准备和净值列。",
+                suggestion="请结合 K.01 表2公式、FA list 汇总公式或明确表头确认金额口径。",
+                procedure_code=ctx.procedure_code,
+                source_sheet=ctx.source_sheet,
+            )
+        )
+
     for field_name in FA_LIST_REQUIRED:
+        if basis_unresolved:
+            continue
         if field_name not in present:
             issues.append(
                 QcIssue(
@@ -74,6 +98,7 @@ def _sheet_level_issues(ctx: ColumnContext) -> list[QcIssue]:
 def _row_level_issues(
     record: AssetRecord,
     ctx: ColumnContext,
+    amount_basis: FaListAmountBasis | None = None,
 ) -> list[QcIssue]:
     present = ctx.mapped_fields
     if record_is_empty_data_row(record, present):
@@ -99,7 +124,10 @@ def _row_level_issues(
             )
         )
 
+    basis_unresolved = amount_basis is not None and amount_basis.status != FaListAmountBasisStatus.CONFIRMED
     for field_name in _ROW_CORE:
+        if basis_unresolved:
+            continue
         if field_name not in present:
             continue
         value = getattr(record, field_name, None)
@@ -143,8 +171,31 @@ def _row_level_issues(
 def check_fa_list_required_fields(
     records: list[AssetRecord],
     ctx: ColumnContext,
+    amount_basis: FaListAmountBasis | None = None,
+    profile: FaListReviewProfile | None = None,
 ) -> list[QcIssue]:
-    issues = _sheet_level_issues(ctx)
-    for record in records:
-        issues.extend(_row_level_issues(record, ctx))
+    if profile is not None and profile.population.status.value == "empty":
+        return [
+            QcIssue(
+                asset_id=None,
+                rule_id=RULE_ID,
+                field="population",
+                severity=Severity.NEED_REVIEW,
+                message="FA list 未识别到可复核的资产明细总体",
+                suggestion="确认工作表、表头和明细范围，补充数据后重新执行",
+                procedure_code=ctx.procedure_code,
+                source_sheet=ctx.source_sheet,
+            )
+        ]
+    issues = _sheet_level_issues(ctx, amount_basis)
+    diagnostic_records = list(records)
+    if profile is not None:
+        known_rows = {record.source_row for record in diagnostic_records}
+        diagnostic_records.extend(
+            record
+            for record in profile.population.identity_incomplete_records
+            if record.source_row not in known_rows
+        )
+    for record in diagnostic_records:
+        issues.extend(_row_level_issues(record, ctx, amount_basis))
     return issues

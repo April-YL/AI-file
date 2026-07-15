@@ -11,6 +11,7 @@ from ingest.disposal_test_sheet import (
 )
 from ingest.lead_sheet import LeadSheetDataset
 from ingest.records import DisposalListSummary
+from ingest.models import AmountGroupStatus
 from ingest.rollforward_sheet import RollforwardSheetDataset, get_movement_transaction_amount
 from rules.execution_recorder import RuleExecutionRecorder
 from rules.lead_common import field_values
@@ -224,6 +225,17 @@ def check_disposal_rollforward_reconciliation(
                 Severity.NEED_REVIEW,
                 "未读取到处置清单汇总，无法与 K.02.2 和 K.01 进行总体金额勾稽。",
                 "确认处置清单识别及出售/报废减少方式分类。",
+                source_sheet,
+            )
+        ]
+    if disposal_list_summary.amount_group_status not in {None, AmountGroupStatus.CONFIRMED}:
+        return [
+            _issue(
+                "disposal_rollforward_reconciliation",
+                "amount_group",
+                Severity.NEED_REVIEW,
+                "处置清单金额组尚未确认，不能据其汇总金额执行总体勾稽。",
+                "先确认同期间、同币种、同处置口径的完整金额组，再与 K.02.2 和 K.01 比较。",
                 source_sheet,
             )
         ]

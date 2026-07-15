@@ -61,6 +61,11 @@ SHORT_SYNONYM_MAX_LEN = 3
 
 # 仅特定 sheet 启用的额外同义词（避免 FA list 误映射「变动方式」等）
 SHEET_FIELD_SYNONYM_EXTRAS: dict[SheetKind, dict[str, list[str]]] = {
+    SheetKind.FA_LIST: {
+        "entity_name": ["公司", "公司名称", "主体", "主体名称", "企业名称", "法人实体", "账套名称", "Entity"],
+        "currency": ["币种", "货币", "货币类型", "Currency"],
+        "salvage_value": ["净残值", "预计净残值", "残值金额", "预计残值金额", "预计净残值金额"],
+    },
     SheetKind.ADDITION_LIST: {
         "addition_method": ["变动方式", "取得方式", "资产来源", "新增类型"],
         "original_value": [
@@ -88,7 +93,7 @@ SHEET_FIELD_SYNONYM_EXTRAS: dict[SheetKind, dict[str, list[str]]] = {
             "本期减少累计折旧",
         ],
         "net_value": ["处置净值", "减少净值", "本期减少净值", "账面净值"],
-        "disposal_date": ["业务日期", "凭证日期", "过账日期"],
+        "disposal_date": ["业务日期", "凭证日期", "过账日期", "处置时间"],
         "disposal_method": [
             "变动方式",
             "处置类别",
@@ -96,6 +101,7 @@ SHEET_FIELD_SYNONYM_EXTRAS: dict[SheetKind, dict[str, list[str]]] = {
             "处置类型",
             "报废类型",
             "减少类型",
+            "新增/处置",
         ],
     },
 }
@@ -146,7 +152,7 @@ SHEET_FIELD_HEADER_PRIORITIES: dict[SheetKind, dict[str, tuple[str, ...]]] = {
             "累计折旧",
         ),
         "net_value": ("处置净值", "减少净值", "本期减少净值", "净值", "账面净值"),
-        "disposal_date": ("处置日期", "业务日期", "减少日期", "报废日期", "凭证日期"),
+        "disposal_date": ("处置日期", "处置时间", "业务日期", "减少日期", "报废日期", "凭证日期"),
         "disposal_method": (
             "减少方式",
             "处置/报废",
@@ -155,6 +161,7 @@ SHEET_FIELD_HEADER_PRIORITIES: dict[SheetKind, dict[str, tuple[str, ...]]] = {
             "变动方式",
             "处置类别",
             "减少类别",
+            "新增/处置",
         ),
     },
 }

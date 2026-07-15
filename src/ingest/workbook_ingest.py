@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import openpyxl
+
 from ingest.addition_test_sheet import (
     AdditionExecutionPathDataset,
     AdditionSampleOutputDataset,
@@ -37,6 +39,7 @@ from ingest.records import (
     build_disposal_list_summary,
     load_fa_list_from_workbook,
 )
+from ingest.fa_list_routing import choose_fa_list_route
 from ingest.rollforward_sheet import RollforwardSheetDataset, load_rollforward_from_workbook
 from ingest.sheet_loader import load_asset_sheet_from_workbook
 from ingest.summary_sheet import SummarySheetDataset, load_summary_from_workbook
@@ -300,6 +303,76 @@ def _first_sheet_name(
     return names[0] if names else None
 
 
+def _select_rollforward_sheet(
+    path: Path,
+    structure: WorkbookStructure,
+    *,
+    fa_sheet: str | None,
+    explicit_name: str | None,
+) -> tuple[str | None, str | None]:
+    candidates = _candidate_sheet_names(structure, SheetKind.ROLLFORWARD)
+    if explicit_name:
+        if explicit_name in candidates:
+            return explicit_name, None
+        return None, f"explicit K.01 sheet not found: {explicit_name}"
+    if not candidates:
+        return None, None
+    if len(candidates) == 1:
+        return candidates[0], None
+
+    summary_candidates = [
+        name
+        for name in candidates
+        if any(token in name.replace(" ", "").lower() for token in ("汇总", "合并", "consol"))
+    ]
+    if len(summary_candidates) == 1:
+        return summary_candidates[0], None
+
+    referencing = _k01_sheets_referencing_fa(path, candidates, fa_sheet)
+    if len(referencing) == 1:
+        return referencing[0], None
+    return None, "multiple peer K.01 candidates cannot be resolved for the selected FA list"
+
+
+def _k01_sheets_referencing_fa(
+    path: Path,
+    candidates: list[str],
+    fa_sheet: str | None,
+) -> list[str]:
+    if not fa_sheet:
+        return []
+    quoted = "'" + fa_sheet.replace("'", "''") + "'!"
+    plain = fa_sheet + "!"
+    matched: list[str] = []
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=False, keep_links=False)
+    try:
+        for name in candidates:
+            if name not in wb.sheetnames:
+                continue
+            ws = wb[name]
+            found = False
+            for row in ws.iter_rows(
+                min_row=1,
+                max_row=min(ws.max_row, 200),
+                max_col=min(ws.max_column, 60),
+            ):
+                for cell in row:
+                    value = cell.value
+                    if isinstance(value, str) and value.startswith("=") and (
+                        quoted.casefold() in value.casefold()
+                        or plain.casefold() in value.casefold()
+                    ):
+                        found = True
+                        break
+                if found:
+                    break
+            if found:
+                matched.append(name)
+    finally:
+        wb.close()
+    return matched
+
+
 def _load_fa_list_candidate_sheets(
     path: Path,
     structure: WorkbookStructure,
@@ -348,11 +421,16 @@ def load_workbook_ingest(
     path = Path(path)
     structure = analyze_workbook_structure(path, max_rows=max_rows)
 
-    fa_sheet = _first_sheet_name(structure, SheetKind.FA_LIST, fa_sheet)
+    fa_candidates = _candidate_sheet_names(structure, SheetKind.FA_LIST)
+    fa_routing = choose_fa_list_route(fa_candidates, explicit_sheet=fa_sheet)
+    fa_sheet = fa_routing.selected_sheet
     summary_sheet = _first_sheet_name(structure, SheetKind.SUMMARY, summary_sheet)
     lead_sheet = _first_sheet_name(structure, SheetKind.LEAD, lead_sheet)
-    rollforward_sheet = _first_sheet_name(
-        structure, SheetKind.ROLLFORWARD, rollforward_sheet
+    rollforward_sheet, k01_route_reason = _select_rollforward_sheet(
+        path,
+        structure,
+        fa_sheet=fa_sheet,
+        explicit_name=rollforward_sheet,
     )
     addition_sheet = _first_sheet_name(structure, SheetKind.ADDITION_LIST, addition_sheet)
     addition_test_sheet = _first_sheet_name(structure, SheetKind.ADDITION_TEST)
@@ -367,8 +445,19 @@ def load_workbook_ingest(
 
     # Lists feed population-level rules and must never be truncated by the
     # workpaper-module parsing budget.
-    fa_list = load_fa_list_from_workbook(path, sheet_name=fa_sheet, max_rows=None)
-    if not fa_list.records and not fa_list.mapped_fields:
+    fa_list = load_fa_list_from_workbook(
+        path,
+        sheet_name=fa_sheet,
+        max_rows=None,
+        k01_sheet_name=rollforward_sheet,
+        routing=fa_routing,
+        k01_route_reason=k01_route_reason,
+    )
+    if (
+        not fa_list.records
+        and not fa_list.mapped_fields
+        and fa_list.fa_profile is None
+    ):
         fa_list = None
 
     fa_list_sheets = (
@@ -377,12 +466,16 @@ def load_workbook_ingest(
         else _load_fa_list_candidate_sheets(path, structure, max_rows=None)
     )
 
-    rollforward = load_rollforward_from_workbook(
-        path,
-        sheet_name=rollforward_sheet,
-        max_rows=max_rows,
+    rollforward = (
+        load_rollforward_from_workbook(
+            path,
+            sheet_name=rollforward_sheet,
+            max_rows=max_rows,
+        )
+        if rollforward_sheet
+        else None
     )
-    if not rollforward.source_sheet:
+    if rollforward is not None and not rollforward.source_sheet:
         rollforward = None
 
     addition_list = (

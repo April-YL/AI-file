@@ -3,7 +3,15 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Iterable
 
-from ingest.models import AssetRecord
+from ingest.models import (
+    AssetRecord,
+    FaListAmountBasis,
+    FaListIdentityBasis,
+    FaListIdentityScope,
+    FaListReviewProfile,
+    FaListSalvageBasis,
+    FaListSalvageMode,
+)
 from rules.models import ColumnContext, QcIssue, Severity
 
 _FIELD_LABELS = {
@@ -13,6 +21,9 @@ _FIELD_LABELS = {
     "start_date": "入账日期",
     "useful_life_months": "使用寿命",
     "salvage_rate": "残值率",
+    "salvage_value": "残值金额",
+    "entity_name": "公司/实体",
+    "currency": "币种",
     "original_value": "原值",
     "accumulated_depreciation": "累计折旧",
     "impairment_provision": "减值准备",
@@ -24,6 +35,7 @@ def build_required_fields_observation(
     records: list[AssetRecord],
     ctx: ColumnContext,
     issues: Iterable[QcIssue],
+    profile: FaListReviewProfile | None = None,
 ) -> dict:
     issues = list(issues)
     missing = sorted({issue.field or "" for issue in issues if issue.source_row is None})
@@ -34,8 +46,7 @@ def build_required_fields_observation(
             continue
         for field in issue.field.split("|"):
             row_fields[issue.source_row].add(field)
-    return _observation(
-        checked_data=[
+    checked_data = [
             _checked_data(
                 ctx,
                 section="FA list 字段映射与必填字段",
@@ -51,7 +62,26 @@ def build_required_fields_observation(
                 matched_rows=blank_rows,
                 missing_data=[],
             ),
-        ],
+        ]
+    if profile is not None:
+        checked_data.insert(
+            0,
+            _checked_data(
+                ctx,
+                section="FA list route and population profile",
+                key_columns=[],
+                values_read=[
+                    _value_read(label="selected sheet", value=profile.routing.selected_sheet or "", row=None, column=None, amount_type="profile"),
+                    _value_read(label="candidates", value=", ".join(profile.routing.candidates), row=None, column=None, amount_type="profile"),
+                    _value_read(label="selection reason", value=profile.routing.reason, row=None, column=None, amount_type="profile"),
+                    _value_read(label="asset rows", value=len(profile.population.asset_records), row=None, column=None, amount_type="profile"),
+                    _value_read(label="identity-incomplete rows", value=len(profile.population.identity_incomplete_records), row=None, column=None, amount_type="profile"),
+                ],
+                missing_data=profile.population.reasons,
+            ),
+        )
+    return _observation(
+        checked_data=checked_data,
         check_logic="检查 FA list 是否识别到必需字段，并逐行检查已识别字段是否存在关键值为空。",
         expected_result="FA list 应至少包含资产编号或资产名称，并且已识别的核心字段不应为空。",
         actual_result=(
@@ -66,23 +96,38 @@ def build_unique_asset_id_observation(
     records: list[AssetRecord],
     ctx: ColumnContext,
     issues: Iterable[QcIssue],
+    identity_basis: FaListIdentityBasis | None = None,
 ) -> dict:
     issues = list(issues)
     duplicated_rows = sorted({issue.source_row for issue in issues if issue.source_row is not None})
     duplicated_ids = sorted({issue.asset_id for issue in issues if issue.asset_id})
+    key_columns = ["asset_id", "asset_name"]
+    if identity_basis and identity_basis.scope == FaListIdentityScope.ENTITY_ASSET_ID:
+        key_columns.insert(0, "entity_name")
+    composite = bool(
+        identity_basis and identity_basis.scope == FaListIdentityScope.ENTITY_ASSET_ID
+    )
     return _observation(
         checked_data=[
             _checked_data(
                 ctx,
                 section="FA list 资产编号唯一性",
-                key_columns=["asset_id", "asset_name"],
+                key_columns=key_columns,
                 values_read=_row_identity_values(ctx, records, rows=duplicated_rows),
                 matched_rows=duplicated_rows,
                 missing_data=[] if "asset_id" in ctx.mapped_fields else ["asset_id"],
             )
         ],
-        check_logic="按资产编号汇总 FA list 明细行，检查同一资产编号是否重复出现。",
-        expected_result="同一资产编号在 FA list 中应只出现一次。",
+        check_logic=(
+            "按实体与资产编号复合键汇总 FA list 明细行，检查同一实体内资产编号是否重复。"
+            if composite
+            else "按资产编号汇总 FA list 明细行，检查同一资产编号是否重复出现。"
+        ),
+        expected_result=(
+            "同一实体内资产编号应唯一；相同编号跨实体出现不属于重复。"
+            if composite
+            else "同一资产编号在 FA list 中应只出现一次。"
+        ),
         actual_result=(
             f"本次读取 {len(records)} 行资产明细，"
             f"发现 {len(duplicated_ids)} 个重复资产编号，涉及 {len(duplicated_rows)} 行。"
@@ -129,13 +174,91 @@ def build_asset_value_consistency_observation(
     )
 
 
+def build_amount_basis_data_insufficient_observation(
+    ctx: ColumnContext,
+    amount_basis: FaListAmountBasis,
+    *,
+    rule_name: str,
+) -> dict:
+    reasons = [*amount_basis.conflicts, *amount_basis.evidence] or ["FA list amount basis unresolved"]
+    return _observation(
+        checked_data=[
+            _checked_data(
+                ctx,
+                section="FA list 金额口径识别",
+                key_columns=["original_value", "accumulated_depreciation", "impairment_provision", "net_value"],
+                values_read=[],
+                missing_data=reasons,
+            )
+        ],
+        check_logic="仅在 K.01 公式、FA list 汇总公式或唯一无冲突表头能够确认同口径金额列时执行逐行金额检查。",
+        expected_result="金额口径应唯一且可追溯。",
+        actual_result=f"{rule_name} 因金额口径无法确认而未执行。",
+        result_summary="DATA_INSUFFICIENT；未产生逐行 finding。",
+    )
+
+
+def build_profile_data_insufficient_observation(
+    ctx: ColumnContext,
+    profile: FaListReviewProfile | None,
+    *,
+    rule_name: str,
+    reasons: list[str],
+) -> dict:
+    values_read: list[dict] = []
+    if profile is not None:
+        values_read = [
+            _value_read(
+                label="FA sheet route",
+                value=profile.routing.selected_sheet or "",
+                row=None,
+                column=None,
+                amount_type="profile",
+            ),
+            _value_read(
+                label="route candidates",
+                value=", ".join(profile.routing.candidates),
+                row=None,
+                column=None,
+                amount_type="profile",
+            ),
+            _value_read(
+                label="population status",
+                value=profile.population.status.value,
+                row=None,
+                column=None,
+                amount_type="profile",
+            ),
+        ]
+    return _observation(
+        checked_data=[
+            _checked_data(
+                ctx,
+                section="FA list unified input profile",
+                key_columns=[],
+                values_read=values_read,
+                missing_data=reasons,
+            )
+        ],
+        check_logic="Only execute the rule when the unified FA list profile confirms its required inputs.",
+        expected_result="The route, population and rule-specific input basis must be complete and unambiguous.",
+        actual_result=f"{rule_name} was not executed because its input contract was not satisfied.",
+        result_summary="DATA_INSUFFICIENT; no row-level finding was produced.",
+    )
+
+
 def build_asset_amount_non_negative_observation(
     records: list[AssetRecord],
     ctx: ColumnContext,
     issues: Iterable[QcIssue],
 ) -> dict:
     issues = list(issues)
-    fields = ["original_value", "impairment_provision", "net_value"]
+    fields = [
+        "original_value",
+        "accumulated_depreciation",
+        "impairment_provision",
+        "net_value",
+    ]
     issue_rows = _issue_rows(issues)
     rows = issue_rows or _sample_rows(records)
     missing = [field for field in fields if field not in ctx.mapped_fields]
@@ -150,8 +273,8 @@ def build_asset_amount_non_negative_observation(
                 missing_data=missing,
             )
         ],
-        check_logic="逐行读取 FA list 的原值、减值准备和净值，检查这些金额是否存在负数。",
-        expected_result="原值、减值准备和净值不应为负数；如出现负数，应由审计人员核对金额符号或调整事项。",
+        check_logic="检查原值和净值是否非负；累计折旧与减值准备允许贷方负数，仅在同一抵减列正负号混用时提示人工复核。",
+        expected_result="原值和净值应非负；累计折旧与减值准备可采用统一的正数或贷方负数口径，但同列不得混用。",
         actual_result=f"本次读取 {len(records)} 行资产明细，金额非负异常 {len(issue_rows)} 行。",
         result_summary=_result_summary(issues),
     )
@@ -189,12 +312,23 @@ def build_salvage_rate_range_observation(
     records: list[AssetRecord],
     ctx: ColumnContext,
     issues: Iterable[QcIssue],
+    salvage_basis: FaListSalvageBasis | None = None,
 ) -> dict:
     issues = list(issues)
     fields = ["salvage_rate"]
+    if salvage_basis and salvage_basis.mode == FaListSalvageMode.DERIVED_FROM_VALUE:
+        fields = ["salvage_value", "original_value"]
+    elif salvage_basis and salvage_basis.mode == FaListSalvageMode.RATE_AND_VALUE:
+        fields = ["salvage_rate", "salvage_value", "original_value"]
     issue_rows = _issue_rows(issues)
     rows = issue_rows or _sample_rows(records)
     missing = [field for field in fields if field not in ctx.mapped_fields]
+    basis_note = ""
+    if salvage_basis:
+        basis_note = (
+            f"；识别模式 {salvage_basis.mode.value}，残值率列 {salvage_basis.rate_column or '-'}，"
+            f"残值金额列 {salvage_basis.value_column or '-'}"
+        )
     return _observation(
         checked_data=[
             _checked_data(
@@ -206,9 +340,15 @@ def build_salvage_rate_range_observation(
                 missing_data=missing,
             )
         ],
-        check_logic="逐行读取 FA list 的残值率字段，检查其是否能解析为比例，并判断是否落在 0 到 1 的范围内；百分比格式仅提示确认口径。",
+        check_logic=(
+            "逐行读取 FA list 的残值率；存在残值金额时，同时使用残值金额÷原值交叉验证。"
+            "仅在字段口径已确认时执行，交叉验证矛盾汇总为一项待人工复核。"
+        ),
         expected_result="残值率应为 0 到 1 之间的比例，或可明确换算为该范围内的百分比。",
-        actual_result=f"本次读取 {len(records)} 行资产明细，残值率异常或需确认 {len(issue_rows)} 行。",
+        actual_result=(
+            f"本次读取 {len(records)} 行资产明细，残值率异常或需确认 {len(issue_rows)} 行"
+            f"{basis_note}。"
+        ),
         result_summary=_result_summary(issues),
     )
 

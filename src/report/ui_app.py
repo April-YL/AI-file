@@ -15,6 +15,7 @@ if str(_SRC_ROOT) not in sys.path:
 
 import streamlit as st
 
+from build_info import get_build_info
 from llm.env_loader import load_project_dotenv
 
 load_project_dotenv()
@@ -2093,8 +2094,13 @@ def main() -> None:
             st.cache_data.clear()
             st.success("已清除")
 
+        build_info = get_build_info()
+        lock_label = "已锁定" if build_info["lock_status"] == "LOCKED" else "未锁定"
         st.markdown(
-            '<div class="sidebar-footer-text">v3.0 · SQLite 持久化</div>',
+            '<div class="sidebar-footer-text">'
+            f'固定资产质检 Agent v{_html(build_info["agent_version"])}<br>'
+            f'{_html(build_info["pilot_build"])} · {lock_label}'
+            '</div>',
             unsafe_allow_html=True,
         )
 

@@ -54,9 +54,20 @@ CREATE TABLE IF NOT EXISTS qc_runs (
     duration_seconds  REAL    NOT NULL DEFAULT 0.0,
     subject_code      TEXT    NOT NULL DEFAULT 'FA_K1',
     artifact_dir      TEXT    NOT NULL DEFAULT '',
+    agent_version     TEXT    NOT NULL DEFAULT '',
+    pilot_build       TEXT    NOT NULL DEFAULT '',
+    source_revision   TEXT    NOT NULL DEFAULT '',
+    lock_status       TEXT    NOT NULL DEFAULT '',
     FOREIGN KEY (project_id) REFERENCES projects(id)
 );
 """
+
+_QC_RUN_VERSION_COLUMNS = {
+    "agent_version": "TEXT NOT NULL DEFAULT ''",
+    "pilot_build": "TEXT NOT NULL DEFAULT ''",
+    "source_revision": "TEXT NOT NULL DEFAULT ''",
+    "lock_status": "TEXT NOT NULL DEFAULT ''",
+}
 
 
 def ensure_data_dir() -> None:
@@ -70,8 +81,16 @@ def init_db() -> None:
     ensure_data_dir()
     with _get_conn() as conn:
         conn.executescript(_SCHEMA)
+        _ensure_qc_run_version_columns(conn)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+
+
+def _ensure_qc_run_version_columns(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(qc_runs)")}
+    for name, definition in _QC_RUN_VERSION_COLUMNS.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE qc_runs ADD COLUMN {name} {definition}")
 
 
 @contextmanager
@@ -92,9 +111,7 @@ def _get_conn():
 @contextmanager
 def get_db():
     """公共上下文管理器：自动初始化 + 连接。"""
-    ensure_data_dir()
-    if not DB_PATH.exists():
-        init_db()
+    init_db()
     with _get_conn() as conn:
         yield conn
 

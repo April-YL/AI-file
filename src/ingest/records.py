@@ -10,8 +10,28 @@ from typing import Any
 import openpyxl
 
 from ingest.field_mapping import map_headers
+from ingest.fa_list_amount_basis import resolve_fa_list_amount_basis, resolve_unique_header_basis
+from ingest.fa_list_field_semantics import (
+    resolve_fa_list_identity_basis,
+    resolve_fa_list_salvage_basis,
+)
+from ingest.fa_list_population import build_fa_list_population
+from ingest.fa_list_routing import choose_fa_list_route
 from ingest.header_detection import scan_rows_for_headers
-from ingest.models import AssetRecord, FieldMapping, SheetKind
+from ingest.amount_field_groups import build_amount_field_groups, select_amount_field_group
+from ingest.models import (
+    AmountFieldGroup,
+    AmountGroupStatus,
+    AssetRecord,
+    FaListAmountBasis,
+    FaListAmountBasisStatus,
+    FaListReviewProfile,
+    FaListRoutingDecision,
+    FaListRoutingStatus,
+    FaListSalvageMode,
+    FieldMapping,
+    SheetKind,
+)
 from ingest.sheet_classifier import classify_sheet, score_by_name
 from ingest.sheet_period_routing import choose_sheet_candidate, sort_sheet_candidates
 from ingest.workbook_reader import read_worksheet_rows
@@ -23,6 +43,9 @@ _RECORD_FIELDS = (
     "start_date",
     "useful_life_months",
     "salvage_rate",
+    "salvage_value",
+    "entity_name",
+    "currency",
     "original_value",
     "accumulated_depreciation",
     "impairment_provision",
@@ -39,6 +62,10 @@ class FaListDataset:
     source_sheet: str
     mapped_fields: list[FieldMapping]
     records: list[AssetRecord]
+    amount_groups: list[AmountFieldGroup] = field(default_factory=list)
+    selected_amount_group_id: str | None = None
+    amount_basis: FaListAmountBasis | None = None
+    fa_profile: FaListReviewProfile | None = None
 
 
 @dataclass
@@ -85,6 +112,7 @@ class DisposalListSummary:
     unclassified_net_value: str = "0"
     buckets: list[DisposalMethodBucket] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    amount_group_status: AmountGroupStatus | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -227,6 +255,10 @@ def build_disposal_list_summary(dataset: FaListDataset | None) -> DisposalListSu
     if buckets.get("other"):
         notes.append("disposal_other_reduction_detected")
 
+    selected_amount_group = next(
+        (group for group in dataset.amount_groups if group.group_id == dataset.selected_amount_group_id),
+        None,
+    )
     return DisposalListSummary(
         source_file=dataset.source_file,
         source_sheet=dataset.source_sheet,
@@ -241,6 +273,11 @@ def build_disposal_list_summary(dataset: FaListDataset | None) -> DisposalListSu
         other_reduction_net_value=_stringify_decimal(other_net),
         unclassified_net_value=_stringify_decimal(unknown_net),
         buckets=sorted(buckets.values(), key=lambda b: b.bucket_key),
+        amount_group_status=(
+            selected_amount_group.status
+            if selected_amount_group is not None
+            else AmountGroupStatus.NOT_FOUND
+        ),
         notes=notes,
     )
 
@@ -268,7 +305,7 @@ def _is_non_asset_summary_row(
     """过滤 FA list / 清单尾部重分类/合计等非资产明细行。"""
     aid = (record.asset_id or "").strip()
     name = (record.asset_name or "").strip()
-    summary_tokens = ("资产类别重分类", "重分类", "合计", "小计", "总计")
+    summary_tokens = ("资产类别重分类", "重分类", "合计", "小计", "总计", "尾差")
     text_fields = (
         aid,
         name,
@@ -283,6 +320,8 @@ def _is_non_asset_summary_row(
     )
     has_identity = bool(aid or name)
 
+    if sheet_kind == SheetKind.FA_LIST and not has_identity:
+        return True
     if has_summary_marker and not has_identity:
         return True
     if any(token in aid for token in summary_tokens) and not name:
@@ -316,38 +355,162 @@ def parse_fa_list_rows(
     source_file: str = "",
     source_sheet: str = "FA list",
     sheet_kind: SheetKind = SheetKind.FA_LIST,
+    amount_basis: FaListAmountBasis | None = None,
+    routing: FaListRoutingDecision | None = None,
+    number_formats: dict[int, list[str]] | None = None,
 ) -> FaListDataset:
     header_row, header_cells, _ = scan_rows_for_headers(rows, sheet_kind=sheet_kind)
     if not header_cells:
+        profile = None
+        if sheet_kind == SheetKind.FA_LIST:
+            route = routing or FaListRoutingDecision(
+                status=FaListRoutingStatus.CONFIRMED,
+                selected_sheet=source_sheet,
+                candidates=[source_sheet] if source_sheet else [],
+                reason="direct FA list source",
+            )
+            basis = amount_basis or FaListAmountBasis(
+                status=FaListAmountBasisStatus.NOT_FOUND,
+                conflicts=["FA list header was not found"],
+            )
+            population = build_fa_list_population([], amount_basis=basis)
+            profile = FaListReviewProfile(
+                routing=route,
+                amount_basis=basis,
+                population=population,
+                identity_basis=resolve_fa_list_identity_basis(population, [], route),
+                salvage_basis=resolve_fa_list_salvage_basis(
+                    header_cells=[],
+                    rows=rows,
+                    header_row=None,
+                    mapped_fields=[],
+                    amount_basis=basis,
+                ),
+            )
         return FaListDataset(
             source_file=source_file,
             source_sheet=source_sheet,
             mapped_fields=[],
             records=[],
+            amount_basis=profile.amount_basis if profile else amount_basis,
+            fa_profile=profile,
         )
 
     mapped_fields, _ = map_headers(header_cells, sheet_kind=sheet_kind)
+    salvage_basis = None
+    if sheet_kind == SheetKind.FA_LIST:
+        amount_basis = amount_basis or resolve_unique_header_basis(
+            header_cells, header_row=header_row
+        )
+        if amount_basis.status == FaListAmountBasisStatus.CONFIRMED:
+            amount_names = {"original_value", "accumulated_depreciation", "impairment_provision", "net_value"}
+            header_by_column = {column: text for column, text in header_cells}
+            mapped_fields = [item for item in mapped_fields if item.standard_field not in amount_names]
+            mapped_fields.extend(
+                FieldMapping(
+                    standard_field=measure,
+                    source_header=header_by_column.get(column, f"column_{column}"),
+                    column_index=column,
+                )
+                for measure, column in amount_basis.bindings.items()
+            )
+        else:
+            # Unconfirmed candidates remain diagnostic evidence on the basis;
+            # they must not become canonical rule inputs.
+            amount_names = {"original_value", "accumulated_depreciation", "impairment_provision", "net_value"}
+            mapped_fields = [item for item in mapped_fields if item.standard_field not in amount_names]
+        salvage_basis = resolve_fa_list_salvage_basis(
+            header_cells=header_cells,
+            rows=rows,
+            header_row=header_row,
+            mapped_fields=mapped_fields,
+            amount_basis=amount_basis,
+            number_formats=number_formats,
+        )
+        if salvage_basis.mode in {
+            FaListSalvageMode.EXPLICIT_RATE,
+            FaListSalvageMode.DERIVED_FROM_VALUE,
+            FaListSalvageMode.RATE_AND_VALUE,
+        }:
+            bindings = []
+            if salvage_basis.rate_column is not None:
+                bindings.append(("salvage_rate", salvage_basis.rate_column))
+            if salvage_basis.value_column is not None:
+                bindings.append(("salvage_value", salvage_basis.value_column))
+            header_by_column = {col: text for col, text in header_cells}
+            for field_name, column in bindings:
+                if not any(item.standard_field == field_name for item in mapped_fields):
+                    mapped_fields.append(
+                        FieldMapping(
+                            standard_field=field_name,
+                            source_header=header_by_column.get(column, f"column_{column}"),
+                            column_index=column,
+                        )
+                    )
+    amount_groups = (
+        build_amount_field_groups(header_cells, sheet_kind=sheet_kind)
+        if sheet_kind == SheetKind.DISPOSAL_LIST
+        else []
+    )
+    selected_amount_group = select_amount_field_group(amount_groups)
+    if selected_amount_group is not None:
+        amount_names = {"original_value", "accumulated_depreciation", "impairment_provision", "net_value"}
+        mapped_fields = [item for item in mapped_fields if item.standard_field not in amount_names]
+        mapped_fields.extend(
+            FieldMapping(
+                standard_field=measure,
+                source_header=candidate.source_header,
+                column_index=candidate.column_index,
+            )
+            for measure, candidate in selected_amount_group.members.items()
+        )
     col_by_field = {m.standard_field: m.column_index for m in mapped_fields}
 
     records: list[AssetRecord] = []
     start_idx = (header_row or 1)
     for r_idx in range(start_idx, len(rows)):
+        source_row = r_idx + 1
         row = rows[r_idx]
         if row is None:
             continue
         row_values = {i + 1: row[i] if i < len(row) else None for i in range(len(row))}
         if not any(v is not None and str(v).strip() for v in row_values.values()):
             continue
-        record = _build_record(row_values, col_by_field, source_row=r_idx + 1)
-        if _is_non_asset_summary_row(record, sheet_kind=sheet_kind):
+        record = _build_record(row_values, col_by_field, source_row=source_row)
+        if sheet_kind != SheetKind.FA_LIST and _is_non_asset_summary_row(record, sheet_kind=sheet_kind):
             continue
         records.append(record)
+
+    fa_profile = None
+    if sheet_kind == SheetKind.FA_LIST:
+        routing = routing or FaListRoutingDecision(
+            status=FaListRoutingStatus.CONFIRMED,
+            selected_sheet=source_sheet,
+            candidates=[source_sheet] if source_sheet else [],
+            reason="direct FA list parse",
+        )
+        population = build_fa_list_population(records, amount_basis=amount_basis)
+        identity_basis = resolve_fa_list_identity_basis(population, mapped_fields, routing)
+        assert amount_basis is not None
+        assert salvage_basis is not None
+        fa_profile = FaListReviewProfile(
+            routing=routing,
+            amount_basis=amount_basis,
+            population=population,
+            identity_basis=identity_basis,
+            salvage_basis=salvage_basis,
+        )
+        records = population.asset_records
 
     return FaListDataset(
         source_file=source_file,
         source_sheet=source_sheet,
         mapped_fields=mapped_fields,
         records=records,
+        amount_groups=amount_groups,
+        selected_amount_group_id=selected_amount_group.group_id if selected_amount_group else None,
+        amount_basis=amount_basis,
+        fa_profile=fa_profile,
     )
 
 
@@ -371,6 +534,7 @@ class FaListSheetCandidate:
     sheet_name: str
     confidence: float
     rows: list[tuple[Any, ...]]
+    number_formats: dict[int, list[str]]
 
 
 def find_fa_list_sheets(
@@ -395,6 +559,7 @@ def find_fa_list_sheets(
                         sheet_name=ws.title,
                         confidence=confidence,
                         rows=rows,
+                        number_formats=_number_format_samples(ws, max_rows=max_rows),
                     )
                 )
     finally:
@@ -412,42 +577,111 @@ def load_fa_list_from_workbook(
     *,
     sheet_name: str | None = None,
     max_rows: int | None = None,
+    k01_sheet_name: str | None = None,
+    routing: FaListRoutingDecision | None = None,
+    k01_route_reason: str | None = None,
 ) -> FaListDataset:
     """从 Excel 底稿读取 FA list 工作表并解析为 AssetRecord 列表。"""
     path = Path(path)
+    if routing is not None and routing.status != FaListRoutingStatus.CONFIRMED:
+        return _routing_unresolved_dataset(path, routing)
     if sheet_name:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
         try:
+            route = routing or choose_fa_list_route(wb.sheetnames, explicit_sheet=sheet_name)
+            if route.status != FaListRoutingStatus.CONFIRMED:
+                return _routing_unresolved_dataset(path, route)
             ws = wb[sheet_name]
             rows = read_worksheet_rows(ws, max_rows=max_rows)
+            number_formats = _number_format_samples(ws, max_rows=max_rows)
         finally:
             wb.close()
+        amount_basis = resolve_fa_list_amount_basis(
+            path,
+            fa_sheet=sheet_name,
+            k01_sheet=k01_sheet_name,
+            data_rows=rows,
+            k01_route_reason=k01_route_reason,
+        )
         return parse_fa_list_rows(
             rows,
             source_file=str(path),
             source_sheet=sheet_name,
+            amount_basis=amount_basis,
+            routing=route,
+            number_formats=number_formats,
         )
 
     candidates = find_fa_list_sheets(path, max_rows=max_rows)
 
     if candidates:
-        chosen = choose_sheet_candidate(
-            candidates,
-            name=lambda c: c.sheet_name,
-            confidence=lambda c: c.confidence,
-            source_path=path,
-        )
-        assert chosen is not None
+        routing = choose_fa_list_route([candidate.sheet_name for candidate in candidates])
+        if routing.status != FaListRoutingStatus.CONFIRMED or not routing.selected_sheet:
+            return _routing_unresolved_dataset(path, routing)
+        chosen = next(candidate for candidate in candidates if candidate.sheet_name == routing.selected_sheet)
     else:
-        return FaListDataset(
-            source_file=str(path),
-            source_sheet="",
-            mapped_fields=[],
-            records=[],
+        return _routing_unresolved_dataset(
+            path,
+            choose_fa_list_route([]),
         )
 
+    amount_basis = resolve_fa_list_amount_basis(
+        path,
+        fa_sheet=chosen.sheet_name,
+        k01_sheet=k01_sheet_name,
+        data_rows=chosen.rows,
+        k01_route_reason=k01_route_reason,
+    )
     return parse_fa_list_rows(
         chosen.rows,
         source_file=str(path),
         source_sheet=chosen.sheet_name,
+        amount_basis=amount_basis,
+        routing=routing,
+        number_formats=chosen.number_formats,
+    )
+
+
+def _number_format_samples(ws, *, max_rows: int | None) -> dict[int, list[str]]:
+    last_row = min(ws.max_row, max_rows) if max_rows else ws.max_row
+    samples: dict[int, list[str]] = {}
+    for row in ws.iter_rows(min_row=1, max_row=min(last_row, 250)):
+        for cell in row:
+            if cell.value is None or not cell.number_format:
+                continue
+            values = samples.setdefault(cell.column, [])
+            if cell.number_format not in values and len(values) < 8:
+                values.append(cell.number_format)
+    return samples
+
+
+def _routing_unresolved_dataset(
+    path: Path,
+    routing: FaListRoutingDecision,
+) -> FaListDataset:
+    basis = FaListAmountBasis(
+        status=FaListAmountBasisStatus.NOT_FOUND,
+        conflicts=[routing.reason],
+    )
+    population = build_fa_list_population([], amount_basis=basis)
+    profile = FaListReviewProfile(
+        routing=routing,
+        amount_basis=basis,
+        population=population,
+        identity_basis=resolve_fa_list_identity_basis(population, [], routing),
+        salvage_basis=resolve_fa_list_salvage_basis(
+            header_cells=[],
+            rows=[],
+            header_row=None,
+            mapped_fields=[],
+            amount_basis=basis,
+        ),
+    )
+    return FaListDataset(
+        source_file=str(path),
+        source_sheet="",
+        mapped_fields=[],
+        records=[],
+        amount_basis=basis,
+        fa_profile=profile,
     )

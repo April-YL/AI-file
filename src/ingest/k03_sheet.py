@@ -183,6 +183,13 @@ class K03PolicyTable:
     header_row: int | None = None
     column_map: dict[str, K03Column] = field(default_factory=dict)
     rows: list[K03PolicyRow] = field(default_factory=list)
+    current_policy_date: Any = None
+    prior_policy_date: Any = None
+    current_method: Any = None
+    prior_method: Any = None
+    method_same_marker: Any = None
+    method_difference_explanation: Any = None
+    context_cell_refs: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -191,6 +198,13 @@ class K03PolicyTable:
             "header_row": self.header_row,
             "column_map": {k: v.to_dict() for k, v in self.column_map.items()},
             "rows": [r.to_dict() for r in self.rows],
+            "current_policy_date": self.current_policy_date,
+            "prior_policy_date": self.prior_policy_date,
+            "current_method": self.current_method,
+            "prior_method": self.prior_method,
+            "method_same_marker": self.method_same_marker,
+            "method_difference_explanation": self.method_difference_explanation,
+            "context_cell_refs": self.context_cell_refs,
             "warnings": self.warnings,
         }
 
@@ -1166,6 +1180,8 @@ def _extract_policy_table(rows: list[tuple[Any, ...]]) -> K03PolicyTable | None:
     if not (required & set(column_map)):
         warnings.append("k03_policy_table_core_columns_missing")
 
+    context = _extract_policy_context(rows, header_row, column_map)
+
     row_items: list[K03PolicyRow] = []
     end_row = header_row
     max_col = max(c.column_index for c in column_map.values())
@@ -1181,8 +1197,6 @@ def _extract_policy_table(rows: list[tuple[Any, ...]]) -> K03PolicyTable | None:
             if row_items:
                 break
             continue
-        if _row_has_token(row, ("Notes", "注：", "注:", "说明", "结论")) and row_items:
-            break
         category = values.get("asset_category")
         if not _text(category):
             if row_items:
@@ -1201,11 +1215,11 @@ def _extract_policy_table(rows: list[tuple[Any, ...]]) -> K03PolicyTable | None:
             K03PolicyRow(
                 source_row=row_number,
                 asset_category=category,
-                current_method=values.get("current_method"),
+                current_method=values.get("current_method") or context["current_method"],
                 current_useful_life=values.get("current_useful_life"),
                 current_salvage_rate=values.get("current_salvage_rate"),
                 current_annual_rate=values.get("current_annual_rate"),
-                prior_method=values.get("prior_method"),
+                prior_method=values.get("prior_method") or context["prior_method"],
                 prior_useful_life=values.get("prior_useful_life"),
                 prior_salvage_rate=values.get("prior_salvage_rate"),
                 prior_annual_rate=values.get("prior_annual_rate"),
@@ -1227,8 +1241,104 @@ def _extract_policy_table(rows: list[tuple[Any, ...]]) -> K03PolicyTable | None:
         header_row=header_row,
         column_map=column_map,
         rows=row_items,
+        current_policy_date=context["current_policy_date"],
+        prior_policy_date=context["prior_policy_date"],
+        current_method=context["current_method"],
+        prior_method=context["prior_method"],
+        method_same_marker=context["method_same_marker"],
+        method_difference_explanation=context["method_difference_explanation"],
+        context_cell_refs=context["cell_refs"],
         warnings=warnings,
     )
+
+
+def _extract_policy_context(
+    rows: list[tuple[Any, ...]],
+    header_row: int,
+    column_map: dict[str, K03Column],
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "current_policy_date": None,
+        "prior_policy_date": None,
+        "current_method": None,
+        "prior_method": None,
+        "method_same_marker": None,
+        "method_difference_explanation": None,
+        "cell_refs": {},
+    }
+    current_col = _first_policy_column(
+        column_map,
+        "current_useful_life",
+        "current_salvage_rate",
+        "current_annual_rate",
+    )
+    prior_col = _first_policy_column(
+        column_map,
+        "prior_useful_life",
+        "prior_salvage_rate",
+        "prior_annual_rate",
+    )
+    marker_col = _first_policy_column(
+        column_map,
+        "useful_life_same_marker",
+        "salvage_rate_same_marker",
+    )
+    explanation_col = _first_policy_column(column_map, "difference_explanation")
+    if current_col is None or prior_col is None:
+        return result
+
+    method_row: int | None = None
+    for row_number in range(header_row - 1, max(0, header_row - 8), -1):
+        row = rows[row_number - 1]
+        if any(_norm(_text(value)) in {"折旧方法", "折旧方式"} for value in row):
+            method_row = row_number
+            break
+    if method_row is not None:
+        row = rows[method_row - 1]
+        for field, col in (
+            ("current_method", current_col),
+            ("prior_method", prior_col),
+            ("method_same_marker", marker_col),
+            ("method_difference_explanation", explanation_col),
+        ):
+            if col is None:
+                continue
+            result[field] = _cell_value(row, col)
+            result["cell_refs"][field] = f"{get_column_letter(col)}{method_row}"
+
+    date_search_end = method_row - 1 if method_row is not None else header_row - 1
+    for row_number in range(date_search_end, max(0, header_row - 8), -1):
+        row = rows[row_number - 1]
+        current_value = _cell_value(row, current_col)
+        prior_value = _cell_value(row, prior_col)
+        if not (_looks_like_policy_date(current_value) or _looks_like_policy_date(prior_value)):
+            continue
+        result["current_policy_date"] = current_value
+        result["prior_policy_date"] = prior_value
+        result["cell_refs"]["current_policy_date"] = f"{get_column_letter(current_col)}{row_number}"
+        result["cell_refs"]["prior_policy_date"] = f"{get_column_letter(prior_col)}{row_number}"
+        break
+    return result
+
+
+def _first_policy_column(
+    column_map: dict[str, K03Column],
+    *fields: str,
+) -> int | None:
+    for field in fields:
+        column = column_map.get(field)
+        if column is not None:
+            return column.column_index
+    return None
+
+
+def _looks_like_policy_date(value: Any) -> bool:
+    if value is None or isinstance(value, bool):
+        return False
+    if hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "day"):
+        return True
+    text = _text(value)
+    return bool(re.fullmatch(r"\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?", text))
 
 
 def _detect_policy_header(
@@ -1241,6 +1351,25 @@ def _detect_policy_header(
     for idx, row in enumerate(rows[:80], start=1):
         mapping = _map_policy_header_row(rows, idx)
         fields = set(mapping)
+        literal_header_hits = sum(
+            1
+            for value in row
+            if any(
+                token in _norm(_text(value))
+                for token in (
+                    "固定资产类别",
+                    "资产类别",
+                    "折旧政策",
+                    "折旧方法",
+                    "使用寿命",
+                    "使用年限",
+                    "残值率",
+                    "年折旧率",
+                    "差异说明",
+                    "true/false",
+                )
+            )
+        )
         score = len(fields & {
             "asset_category",
             "current_method",
@@ -1259,6 +1388,7 @@ def _detect_policy_header(
             score += 2
         if {"current_salvage_rate", "prior_salvage_rate"} <= fields:
             score += 2
+        score += min(literal_header_hits, 8)
         if score > best_score:
             best_row = idx
             best_map = mapping
@@ -1289,7 +1419,8 @@ def _map_policy_header_row(
     for col_idx, value in enumerate(row, start=1):
         header = _text(value)
         normalized_header = _norm(header)
-        prev_header = prev_filled[col_idx - 1] if col_idx - 1 < len(prev_filled) else ""
+        raw_prev_header = prev_filled[col_idx - 1] if col_idx - 1 < len(prev_filled) else ""
+        prev_header = raw_prev_header if _is_policy_parent_header(raw_prev_header) else ""
         combined = " ".join(v for v in (prev_header, header) if v)
         metric_occurrences[normalized_header] = metric_occurrences.get(normalized_header, 0) + 1
         occurrence = metric_occurrences[normalized_header]
@@ -1303,6 +1434,8 @@ def _map_policy_header_row(
             field = _policy_field_for_header(combined, header, prev_header, used_fields)
         if not field:
             continue
+        if field in mapping:
+            continue
         used_fields.add(field)
         mapping[field] = K03Column(
             source_header=combined or header,
@@ -1311,6 +1444,28 @@ def _map_policy_header_row(
             standard_field=field,
         )
     return mapping
+
+
+def _is_policy_parent_header(value: str) -> bool:
+    text = _norm(value)
+    if not text or len(text) > 30:
+        return False
+    return any(
+        token in text
+        for token in (
+            "本期",
+            "本年",
+            "当前",
+            "上期",
+            "上年",
+            "以前",
+            "差异",
+            "current",
+            "prior",
+            "previous",
+            "difference",
+        )
+    )
 
 
 def _policy_field_for_header(
@@ -1330,7 +1485,18 @@ def _policy_field_for_header(
     is_current = any(token in n for token in ("本期", "本年", "当前", "current", "2025")) or (
         not is_prior and any(token in p for token in ("本期", "本年", "current"))
     )
-    is_difference = any(token in n for token in ("差异", "是否一致", "变化", "变动", "difference"))
+    is_difference = any(
+        token in n
+        for token in (
+            "差异",
+            "是否一致",
+            "是否相同",
+            "true/false",
+            "变化",
+            "变动",
+            "difference",
+        )
+    )
 
     if any(token in n for token in ("差异说明", "说明", "备注", "原因", "解释", "note", "comment")):
         return "difference_explanation"
@@ -1368,13 +1534,67 @@ def _detect_policy_note_area(
     policy_range: K03Area | None,
 ) -> K03Area | None:
     start = policy_range.end_row if policy_range and policy_range.end_row else 0
-    matches: list[int] = []
+    column_limit = policy_range.end_col if policy_range and policy_range.end_col else None
     for idx, row in enumerate(rows, start=1):
         if idx <= start:
             continue
-        if _row_has_token(row, ("Notes", "注：", "注:", "说明", "差异说明", "结论")):
-            matches.append(idx)
-    return _area_for_rows(rows, matches)
+        label_cols = [
+            col
+            for col, value in enumerate(row, start=1)
+            if (column_limit is None or col <= column_limit) and _is_policy_note_label(value)
+        ]
+        if not label_cols:
+            continue
+        text_parts: list[str] = []
+        used_rows = [idx]
+        used_cols = list(label_cols)
+        for col, value in enumerate(row, start=1):
+            if column_limit is not None and col > column_limit:
+                continue
+            text = _policy_note_text(value)
+            if text:
+                text_parts.append(text)
+                used_cols.append(col)
+        for body_row_number in range(idx + 1, min(len(rows), idx + 8) + 1):
+            body_row = rows[body_row_number - 1]
+            body_values = [
+                (col, _text(value))
+                for col, value in enumerate(body_row, start=1)
+                if (column_limit is None or col <= column_limit) and _text(value)
+            ]
+            if not body_values:
+                if text_parts:
+                    break
+                continue
+            if any(_is_policy_note_label(value) for _, value in body_values):
+                break
+            used_rows.append(body_row_number)
+            for col, text in body_values:
+                text_parts.append(text)
+                used_cols.append(col)
+        return K03Area(
+            start_row=idx,
+            end_row=max(used_rows),
+            start_col=min(used_cols),
+            end_col=max(used_cols),
+            text="\n".join(text_parts)[:2000] if text_parts else None,
+        )
+    return None
+
+
+def _is_policy_note_label(value: Any) -> bool:
+    text = _norm(_text(value)).rstrip(":：")
+    return text in {"notes", "note", "注", "备注"}
+
+
+def _policy_note_text(value: Any) -> str:
+    text = _text(value).strip()
+    if not text:
+        return ""
+    if _is_policy_note_label(text):
+        return ""
+    cleaned = re.sub(r"^(?:notes?|注|备注)\s*[:：]\s*", "", text, flags=re.IGNORECASE)
+    return cleaned.strip()
 
 
 def _cell_value(row: tuple[Any, ...], col_index: int) -> Any:

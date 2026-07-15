@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from build_info import get_build_info
 from ingest.models import AssetRecord
 from report.manual_review import ManualReviewSection
 from rules.models import QcIssue, Severity
@@ -91,6 +92,7 @@ class QcReport:
     rule_execution_matrix: list[dict[str, Any]] | None = None
     ingest_summary: dict[str, Any] | None = None
     governance_diagnostics_error: str | None = None
+    build_info: dict[str, str] = field(default_factory=get_build_info)
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -101,6 +103,7 @@ class QcReport:
             "issues": [i.to_dict() for i in self.issues],
             "asset_results": [a.to_dict() for a in self.asset_results],
             "summary": self.summary.to_dict(),
+            "build_info": dict(self.build_info),
         }
         if self.summary_sheet_section is not None:
             data["summary_sheet_section"] = self.summary_sheet_section

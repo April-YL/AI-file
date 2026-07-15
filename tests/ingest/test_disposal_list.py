@@ -7,7 +7,7 @@ import openpyxl
 from ingest.records import build_disposal_list_summary
 from ingest.field_mapping import check_required_fields, map_headers
 from ingest.header_detection import scan_rows_for_headers
-from ingest.models import SheetKind
+from ingest.models import AmountGroupStatus, SheetKind
 from ingest.records import parse_fa_list_rows
 from ingest.sheet_loader import load_asset_sheet_from_workbook
 
@@ -43,6 +43,89 @@ def test_parse_disposal_list_keeps_disposal_fields():
     mapped = {m.standard_field for m in dataset.mapped_fields}
     assert "disposal_date" in mapped
     assert "disposal_method" in mapped
+
+
+def test_disposal_amount_group_does_not_mix_ending_and_disposal_columns():
+    rows = [
+        (
+            "固定资产编号",
+            "原值",
+            "累计折旧",
+            "减值准备",
+            "净值",
+            "处置原值-CNY",
+            "处置累计折旧-CNY",
+            "处置净值-CNY",
+            "处置时间",
+            "新增/处置",
+        ),
+        ("FA-D-001", 0, 0, 0, 0, 100, 80, 20, "2025-06-30", "处置或报废"),
+    ]
+
+    dataset = parse_fa_list_rows(
+        rows,
+        source_sheet="处置清单",
+        sheet_kind=SheetKind.DISPOSAL_LIST,
+    )
+
+    selected = next(
+        group for group in dataset.amount_groups
+        if group.group_id == dataset.selected_amount_group_id
+    )
+    assert selected.status == AmountGroupStatus.INCOMPLETE
+    assert selected.members["original_value"].source_header == "处置原值-CNY"
+    assert selected.members["net_value"].source_header == "处置净值-CNY"
+    assert "impairment_provision" in selected.missing_measures
+    assert dataset.records[0].original_value == "100"
+    assert dataset.records[0].net_value == "20"
+    assert dataset.records[0].disposal_date == "2025-06-30"
+    assert dataset.records[0].disposal_method == "处置或报废"
+
+
+def test_disposal_amount_group_marks_duplicate_semantic_blocks_as_conflicted():
+    headers = [
+        (1, "处置原值-CNY"), (2, "处置累计折旧-CNY"),
+        (3, "处置减值准备-CNY"), (4, "处置净值-CNY"),
+        (5, "本期减少原值-CNY"), (6, "本期减少累计折旧-CNY"),
+        (7, "本期减少减值准备-CNY"), (8, "本期减少净值-CNY"),
+    ]
+
+    dataset = parse_fa_list_rows(
+        [tuple(header for _, header in headers), tuple(range(1, 9))],
+        source_sheet="处置清单",
+        sheet_kind=SheetKind.DISPOSAL_LIST,
+    )
+    selected = next(
+        group for group in dataset.amount_groups
+        if group.group_id == dataset.selected_amount_group_id
+    )
+
+    assert selected.status == AmountGroupStatus.CONFLICTED
+
+
+def test_disposal_amount_group_prefers_complete_original_currency_group():
+    rows = [
+        (
+            "固定资产编号",
+            "处置原值", "处置累计折旧", "处置减值准备", "处置净值",
+            "处置原值-CNY", "处置累计折旧-CNY", "处置净值-CNY",
+        ),
+        ("FA-D-001", 100, 80, 0, 20, 700, 560, 140),
+    ]
+
+    dataset = parse_fa_list_rows(
+        rows,
+        source_sheet="处置清单",
+        sheet_kind=SheetKind.DISPOSAL_LIST,
+    )
+    selected = next(
+        group for group in dataset.amount_groups
+        if group.group_id == dataset.selected_amount_group_id
+    )
+
+    assert selected.status == AmountGroupStatus.CONFIRMED
+    assert selected.currency_role.value == "original"
+    assert dataset.records[0].original_value == "100"
 
 
 def test_disposal_list_prefers_disposal_original_value_over_opening():

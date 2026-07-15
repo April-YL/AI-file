@@ -1,4 +1,4 @@
-from ingest.models import AssetRecord
+from ingest.models import AssetRecord, FaListIdentityBasis, FaListIdentityScope
 from rules.models import ColumnContext, Severity
 from rules.unique_asset_id import check_unique_asset_id
 
@@ -22,3 +22,17 @@ def test_no_asset_id_column_need_review():
     )
     assert len(issues) == 1
     assert issues[0].severity == Severity.NEED_REVIEW
+
+
+def test_group_scope_uses_entity_and_asset_id_composite_key():
+    ctx = ColumnContext(mapped_fields={"entity_name", "asset_id"})
+    records = [
+        AssetRecord(source_row=2, entity_name="A公司", asset_id="001"),
+        AssetRecord(source_row=3, entity_name="B公司", asset_id="001"),
+        AssetRecord(source_row=4, entity_name="A公司", asset_id="001"),
+    ]
+    basis = FaListIdentityBasis(scope=FaListIdentityScope.ENTITY_ASSET_ID)
+
+    issues = check_unique_asset_id(records, ctx, basis)
+
+    assert {issue.source_row for issue in issues} == {2, 4}

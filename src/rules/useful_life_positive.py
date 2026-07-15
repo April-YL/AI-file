@@ -8,26 +8,25 @@ from rules.parsing import is_blank, record_is_empty_data_row
 
 RULE_ID = "useful_life_positive"
 
-_YEAR_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*年")
+_NUMBER_PATTERN = re.compile(r"[+-]?\d+(?:\.\d+)?")
 
 
-def _parse_months(value: str) -> int | None:
+def _parse_months(value: str, *, header: str = "") -> int | None:
     text = str(value).strip()
     if not text:
         return None
-    year_match = _YEAR_PATTERN.search(text)
-    if year_match and "月" not in text:
-        years = float(year_match.group(1))
-        return int(years * 12) if years > 0 else None
-    digits = re.sub(r"[^\d.]", "", text)
-    if not digits:
+    match = _NUMBER_PATTERN.search(text)
+    if not match:
         return None
     try:
-        months = float(digits)
+        value_number = float(match.group(0))
     except ValueError:
         return None
-    if "年" in text and "月" not in text:
-        return int(months * 12)
+    header_text = str(header or "")
+    is_year = ("年" in text and "月" not in text) or (
+        "年" in header_text and "月" not in header_text and "月" not in text
+    )
+    months = value_number * 12 if is_year else value_number
     return int(months) if months == int(months) else int(round(months))
 
 
@@ -46,7 +45,10 @@ def check_useful_life_positive(
         if is_blank(raw):
             continue
         aid = record.asset_id or record.identity()
-        months = _parse_months(raw)
+        months = _parse_months(
+            raw,
+            header=ctx.mapped_headers.get("useful_life_months", ""),
+        )
         if months is None:
             issues.append(
                 QcIssue(

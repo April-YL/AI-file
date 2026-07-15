@@ -26,7 +26,13 @@ def run_fa_list_qc(
         procedure_code="FA_LIST",
     )
     recorder = RuleExecutionRecorder()
-    issues = run_fa_list_rules(dataset.records, ctx, recorder=recorder)
+    issues = run_fa_list_rules(
+        dataset.records,
+        ctx,
+        recorder=recorder,
+        amount_basis=dataset.amount_basis,
+        profile=dataset.fa_profile,
+    )
     execution_ledger = recorder.to_ledger()
     validate_execution_ledger(execution_ledger, issues)
     report = build_report(

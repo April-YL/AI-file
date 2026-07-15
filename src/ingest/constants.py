@@ -26,8 +26,12 @@ FIELD_SYNONYMS: dict[str, list[str]] = {
         "累计使用期间数",
     ],
     "salvage_rate": [
-        "残值率", "残值率(%)", "预计净残值率", "净残值率", "预计残值", "残值(%)", "残值",
+        "残值率", "残值率(%)", "预计净残值率", "净残值率", "残值(%)",
     ],
+    # FA list only: concrete synonyms are enabled by field_mapping_policy.
+    "salvage_value": [],
+    "entity_name": [],
+    "currency": [],
     "original_value": [
         "原值", "资产原值", "入账价值", "固定资产原值", "期初原值", "期末原值",
         "2025年末原值", "处置原值", "未税成本", "新增价值",

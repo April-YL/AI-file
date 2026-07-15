@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
-from ingest.models import AssetRecord
+from ingest.models import AssetRecord, FaListIdentityBasis, FaListIdentityScope
 from rules.parsing import record_is_empty_data_row
 from rules.models import ColumnContext, QcIssue, Severity
 
@@ -13,6 +13,7 @@ RULE_ID = "unique_asset_id"
 def check_unique_asset_id(
     records: list[AssetRecord],
     ctx: ColumnContext,
+    identity_basis: FaListIdentityBasis | None = None,
 ) -> list[QcIssue]:
     issues: list[QcIssue] = []
 
@@ -31,18 +32,30 @@ def check_unique_asset_id(
         )
         return issues
 
-    by_id: dict[str, list[AssetRecord]] = defaultdict(list)
+    composite = bool(
+        identity_basis
+        and identity_basis.scope == FaListIdentityScope.ENTITY_ASSET_ID
+    )
+    by_id: dict[tuple[str, ...], list[AssetRecord]] = defaultdict(list)
     for record in records:
         if record_is_empty_data_row(record, ctx.mapped_fields):
             continue
         if record.asset_id is None or not str(record.asset_id).strip():
             continue
-        key = re.sub(r"\s+", " ", str(record.asset_id).strip())
+        asset_key = re.sub(r"\s+", " ", str(record.asset_id).strip()).casefold()
+        if composite:
+            if record.entity_name is None or not str(record.entity_name).strip():
+                continue
+            entity_key = re.sub(r"\s+", " ", str(record.entity_name).strip()).casefold()
+            key = (entity_key, asset_key)
+        else:
+            key = (asset_key,)
         by_id[key].append(record)
 
-    for asset_id, group in by_id.items():
+    for _, group in by_id.items():
         if len(group) < 2:
             continue
+        asset_id = str(group[0].asset_id).strip()
         rows = sorted(r.source_row for r in group if r.source_row)
         row_hint = f"，行号 {rows}" if rows else ""
         for record in group:

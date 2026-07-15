@@ -19,3 +19,19 @@ def test_negative_accumulated_depreciation_is_allowed_for_credit_presentation():
         accumulated_depreciation="-100",
     )
     assert check_asset_amount_non_negative([record], ctx) == []
+
+
+def test_negative_impairment_is_allowed_and_mixed_contra_signs_emit_one_review():
+    ctx = ColumnContext(
+        mapped_fields={"accumulated_depreciation", "impairment_provision", "asset_id"}
+    )
+    records = [
+        AssetRecord(asset_id="A", accumulated_depreciation="-10", impairment_provision="-2"),
+        AssetRecord(asset_id="B", accumulated_depreciation="10", impairment_provision="2"),
+    ]
+
+    issues = check_asset_amount_non_negative(records, ctx)
+
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.NEED_REVIEW
+    assert issues[0].source_row is None

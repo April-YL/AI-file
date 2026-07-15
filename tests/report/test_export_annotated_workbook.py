@@ -11,6 +11,7 @@ from report.export_annotated_workbook import (
     LLM_INGEST_REVIEW_SHEET_NAME,
     LOCATOR_SHEET_NAME,
     build_comments_rows,
+    build_execution_trace_rows,
     build_fa_list_detail_rows,
     build_llm_ingest_review_rows,
     build_locator_rows,
@@ -23,6 +24,30 @@ from report.summary import ReportSummary, QcReport
 from rules.models import QcIssue, Severity
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+
+
+def test_execution_trace_contains_build_info() -> None:
+    report = QcReport(
+        source_file="test.xlsx",
+        source_sheet="workbook",
+        procedure_code="WORKBOOK",
+        rule_ids=[],
+        issues=[],
+        asset_results=[],
+        summary=ReportSummary(0, 0, 0, 0, 0, Severity.PASS),
+        build_info={
+            "agent_version": "0.1.0",
+            "pilot_build": "PILOT-TEST.01",
+            "source_revision": "abc12345",
+            "lock_status": "LOCKED",
+        },
+    )
+
+    rows = build_execution_trace_rows(report)
+
+    assert ("Pilot构建号", "PILOT-TEST.01", "", "", "", "") in rows
+    assert ("代码标识", "abc12345", "", "", "", "") in rows
+    assert ("锁定状态", "已锁定", "", "", "", "") in rows
 
 
 def test_split_fa_list_issues():
@@ -162,6 +187,10 @@ def test_export_two_comment_sheets(tmp_path: Path):
     assert wb.sheetnames[2] == LOCATOR_SHEET_NAME
     assert wb.sheetnames[3] == EXECUTION_TRACE_SHEET_NAME
     assert wb.sheetnames[4] == LLM_INGEST_REVIEW_SHEET_NAME
+    trace_ws = wb[EXECUTION_TRACE_SHEET_NAME]
+    assert trace_ws.cell(2, 1).value == "— 运行版本 —"
+    assert trace_ws.cell(4, 1).value == "Pilot构建号"
+    assert trace_ws.cell(4, 2).value == report.build_info["pilot_build"]
     visible_sheetnames = [ws.title for ws in wb.worksheets if ws.sheet_state == "visible"]
     assert LOCATOR_SHEET_NAME not in visible_sheetnames
     assert wb[LOCATOR_SHEET_NAME].sheet_state == "hidden"

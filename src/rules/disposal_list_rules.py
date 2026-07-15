@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from ingest.lead_sheet import LeadSheetDataset
-from ingest.models import AssetRecord
+from ingest.models import AmountGroupStatus, AssetRecord
 from ingest.records import DisposalListSummary, FaListDataset
 from rules.execution_recorder import RuleExecutionRecorder
 from rules.lead_common import lead_tt
@@ -59,15 +59,29 @@ def run_disposal_list_rules(
 def check_disposal_required_fields(disposal_list: FaListDataset) -> list[QcIssue]:
     issues: list[QcIssue] = []
     present = {mapping.standard_field for mapping in disposal_list.mapped_fields}
+    amount_group = _selected_amount_group(disposal_list)
     for field_name in _REQUIRED_FIELDS:
         if field_name not in present:
+            ambiguous_amount_field = (
+                field_name in {"original_value", "accumulated_depreciation", "impairment_provision", "net_value"}
+                and amount_group is not None
+                and amount_group.status != AmountGroupStatus.CONFIRMED
+            )
             issues.append(
                 _issue(
                     "disposal_required_fields",
                     field_name,
-                    Severity.FAIL,
-                    f"处置清单未映射必需列：{_FIELD_LABELS[field_name]}。",
-                    "补充该列，或扩展字段同义词映射后重新质检；净值列可不提供。",
+                    Severity.NEED_REVIEW if ambiguous_amount_field else Severity.FAIL,
+                    (
+                        f"处置清单金额字段组不完整，无法确认同口径的{_FIELD_LABELS[field_name]}。"
+                        if ambiguous_amount_field
+                        else f"处置清单未映射必需列：{_FIELD_LABELS[field_name]}。"
+                    ),
+                    (
+                        "请确认原值、累计折旧、减值准备和净值是否属于同一期间、币种及处置口径。"
+                        if ambiguous_amount_field
+                        else "补充该列，或扩展字段同义词映射后重新质检；净值列可不提供。"
+                    ),
                     disposal_list.source_sheet,
                 )
             )
@@ -106,6 +120,23 @@ def check_disposal_required_fields(disposal_list: FaListDataset) -> list[QcIssue
 
 
 def check_disposal_list_net_values(disposal_list: FaListDataset) -> list[QcIssue]:
+    amount_group = _selected_amount_group(disposal_list)
+    if amount_group is not None and amount_group.status != AmountGroupStatus.CONFIRMED:
+        dimensions = (
+            f"期间={amount_group.period_role.value}、币种={amount_group.currency_role.value}、"
+            f"业务角色={amount_group.business_role.value}"
+        )
+        missing = "、".join(amount_group.missing_measures) or "存在多个候选金额组"
+        return [
+            _issue(
+                "disposal_list_net_value_recalculation",
+                "amount_group",
+                Severity.NEED_REVIEW,
+                f"处置清单金额组无法支持确定性净值重算：{dimensions}；缺失/冲突={missing}。",
+                "请人工确认同一期间、同一币种、同一处置口径的原值、累计折旧、减值准备和净值列。",
+                disposal_list.source_sheet,
+            )
+        ]
     present = {mapping.standard_field for mapping in disposal_list.mapped_fields}
     required = {"original_value", "accumulated_depreciation", "impairment_provision"}
     if not required.issubset(present) or "net_value" not in present:
@@ -139,6 +170,14 @@ def check_disposal_list_net_values(disposal_list: FaListDataset) -> list[QcIssue
     return issues
 
 
+def _selected_amount_group(disposal_list: FaListDataset):
+    selected_id = disposal_list.selected_amount_group_id
+    return next(
+        (group for group in disposal_list.amount_groups if group.group_id == selected_id),
+        None,
+    )
+
+
 def check_disposal_method_classification(
     summary: DisposalListSummary | None,
 ) -> list[QcIssue]:
@@ -166,6 +205,17 @@ def check_disposal_other_reduction_over_tt(
 ) -> list[QcIssue]:
     if summary is None:
         return []
+    if summary.amount_group_status not in {None, AmountGroupStatus.CONFIRMED}:
+        return [
+            _issue(
+                "disposal_other_reduction_over_tt",
+                "amount_group",
+                Severity.NEED_REVIEW,
+                "处置清单金额组尚未确认，不能据其汇总金额判断其他减少是否超过 TT。",
+                "先确认同期间、同币种、同处置口径的完整金额组，再执行阈值比较。",
+                summary.source_sheet,
+            )
+        ]
     other = parse_amount(summary.other_reduction_net_value) or Decimal("0")
     if other == 0:
         return []

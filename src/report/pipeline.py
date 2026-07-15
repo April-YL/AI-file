@@ -109,7 +109,15 @@ def run_workbook_qc(
             source_sheet=ctx.fa_list.source_sheet,
             procedure_code="FA_LIST",
         )
-        issues.extend(run_fa_list_rules(ctx.fa_list.records, fa_ctx, recorder=recorder))
+        issues.extend(
+            run_fa_list_rules(
+                ctx.fa_list.records,
+                fa_ctx,
+                recorder=recorder,
+                amount_basis=ctx.fa_list.amount_basis,
+                profile=ctx.fa_list.fa_profile,
+            )
+        )
         records = ctx.fa_list.records
         source_sheet = ctx.fa_list.source_sheet
 

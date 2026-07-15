@@ -7,13 +7,14 @@ from rules.models import ColumnContext, Severity
 
 def test_amount_mismatch_fail():
     ctx = ColumnContext(
-        mapped_fields={"original_value", "accumulated_depreciation", "net_value"}
+        mapped_fields={"original_value", "accumulated_depreciation", "impairment_provision", "net_value"}
     )
     record = AssetRecord(
         source_row=2,
         asset_id="FA-TEST-003",
         original_value="5000",
         accumulated_depreciation="1000",
+        impairment_provision="0",
         net_value="5000",
     )
     issues = check_asset_value_consistency([record], ctx)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 
 from rules.execution_recorder import RuleExecutionRecorder, validate_execution_ledger
@@ -165,6 +167,45 @@ def test_execution_ledger_records_bounded_observation_without_changing_summary()
     }
 
 
+def test_execution_observation_samples_many_rows_without_reducing_finding_count():
+    observation = _evidence_observation()
+    observation["checked_data"][0]["identified_by"]["matched_rows"] = list(range(1, 41))
+    recorder = RuleExecutionRecorder()
+
+    recorder.record_executed("many_findings", 40, observation=observation)
+
+    item = recorder.to_ledger()["items"][0]
+    assert item["finding_count"] == 40
+    assert item["observation"]["checked_data"][0]["identified_by"]["matched_rows"] == [
+        1, 2, 3, 4, 5, 6, 35, 36, 37, 38, 39, 40
+    ]
+    assert "40→12" in item["observation"]["result_summary"]
+    assert "完整 findings 未截断" in item["observation"]["result_summary"]
+
+
+def test_execution_observation_keeps_sampling_notice_with_long_summary():
+    observation = _evidence_observation()
+    observation["result_summary"] = "x" * 490
+    observation["checked_data"][0]["identified_by"]["matched_rows"] = list(range(1, 41))
+    recorder = RuleExecutionRecorder()
+
+    recorder.record_executed("long_summary", 40, observation=observation)
+
+    item = recorder.to_ledger()["items"][0]
+    assert item["observation"]["result_summary"].endswith("完整 findings 未截断。")
+    assert "matched_rows 40→12" in item["status_note"]
+
+
+def test_execution_observation_rejects_invalid_item_beyond_sampling_boundary():
+    observation = _evidence_observation()
+    valid_item = observation["checked_data"][0]
+    observation["checked_data"] = [deepcopy(valid_item) for _ in range(8)] + [{"bad": "shape"}]
+    recorder = RuleExecutionRecorder()
+
+    with pytest.raises(ValueError, match="checked_data has unsupported fields"):
+        recorder.record_executed("invalid_tail", 0, observation=observation)
+
+
 def test_execution_ledger_records_evidence_observation_without_changing_summary():
     recorder = RuleExecutionRecorder()
     recorder.record_executed("observed_rule", 1, observation=_evidence_observation())
@@ -205,13 +246,15 @@ def test_execution_evidence_observation_rejects_arbitrary_value_fields():
         recorder.record_executed("bad_observation", 0, observation=obs)
 
 
-def test_execution_observation_rejects_unbounded_inputs():
+def test_execution_observation_samples_unbounded_inputs():
     recorder = RuleExecutionRecorder()
     obs = _observation()
     obs["inputs"] = obs["inputs"] * 9
 
-    with pytest.raises(ValueError, match="inputs must be a bounded list"):
-        recorder.record_executed("bad_observation", 0, observation=obs)
+    recorder.record_executed("sampled_observation", 0, observation=obs)
+
+    item = recorder.to_ledger()["items"][0]
+    assert len(item["observation"]["inputs"]) == 8
 
 
 def test_execution_observation_rejects_nested_arbitrary_input_fields():

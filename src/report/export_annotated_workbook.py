@@ -711,6 +711,15 @@ def build_execution_trace_rows(report: QcReport) -> list[tuple]:
 
     rows: list[tuple] = []
 
+    build_info = getattr(report, "build_info", None) or {}
+    if build_info:
+        lock_label = "已锁定" if build_info.get("lock_status") == "LOCKED" else "未锁定"
+        rows.append(("— 运行版本 —", "", "", "", "", ""))
+        rows.append(("Agent版本", build_info.get("agent_version", "未记录"), "", "", "", ""))
+        rows.append(("Pilot构建号", build_info.get("pilot_build", "未记录"), "", "", "", ""))
+        rows.append(("代码标识", build_info.get("source_revision", "未记录"), "", "", "", ""))
+        rows.append(("锁定状态", lock_label, "", "", "", ""))
+
     # 区域 A：底稿识别（留空，可在后续版本补充 ingest_summary 数据）
     ingest = getattr(report, "ingest_summary", None) or {}
     sheets_found = ingest.get("sheets_found") or []

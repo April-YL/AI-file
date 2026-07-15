@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from ingest.disposal_test_sheet import DisposalSampleOutputDataset, DisposalTestSheetDataset
 from ingest.lead_sheet import CraAssertionRow, LeadSheetDataset
+from ingest.models import AmountGroupStatus
 from ingest.records import DisposalListSummary
 from rules.execution_recorder import RuleExecutionRecorder
 from rules.lead_common import cra_tier, field_values
@@ -70,7 +71,11 @@ def check_disposal_sample_pool_amount(
 ) -> list[QcIssue]:
     item = sample_output.amounts.get("sample_pool_amount")
     pool = parse_amount(item.amount if item else None)
-    if pool is None or summary is None:
+    if (
+        pool is None
+        or summary is None
+        or summary.amount_group_status not in {None, AmountGroupStatus.CONFIRMED}
+    ):
         return [
             _issue(
                 "disposal_sample_pool_amount_match",

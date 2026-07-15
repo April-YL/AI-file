@@ -23,6 +23,83 @@ class RollforwardLayoutProfile(str, Enum):
     UNRECOGNIZED = "unrecognized"
 
 
+class AmountPeriodRole(str, Enum):
+    OPENING = "opening"
+    CURRENT_PERIOD = "current_period"
+    ENDING = "ending"
+    AS_OF_EVENT = "as_of_event"
+    UNKNOWN = "unknown"
+
+
+class AmountCurrencyRole(str, Enum):
+    ORIGINAL = "original"
+    REPORTING = "reporting"
+    UNKNOWN = "unknown"
+
+
+class AmountBusinessRole(str, Enum):
+    BALANCE = "balance"
+    ADDITION = "addition"
+    DISPOSAL = "disposal"
+    UNKNOWN = "unknown"
+
+
+class AmountGroupStatus(str, Enum):
+    CONFIRMED = "confirmed"
+    AMBIGUOUS = "ambiguous"
+    INCOMPLETE = "incomplete"
+    CONFLICTED = "conflicted"
+    NOT_FOUND = "not_found"
+
+
+class FaListAmountBasisStatus(str, Enum):
+    CONFIRMED = "confirmed"
+    AMBIGUOUS = "ambiguous"
+    INCOMPLETE = "incomplete"
+    NOT_FOUND = "not_found"
+
+
+class FaListAmountBasisSource(str, Enum):
+    K01_FORMULA = "k01_formula"
+    FA_SUMMARY_FORMULA = "fa_summary_formula"
+    UNIQUE_HEADERS = "unique_headers"
+
+
+class FaListRoutingStatus(str, Enum):
+    CONFIRMED = "confirmed"
+    AMBIGUOUS = "ambiguous"
+    NOT_FOUND = "not_found"
+
+
+class FaListPopulationStatus(str, Enum):
+    READY = "ready"
+    EMPTY = "empty"
+    SCOPE_UNRESOLVED = "scope_unresolved"
+
+
+class FaListRowRole(str, Enum):
+    ASSET_DETAIL = "asset_detail"
+    IDENTITY_INCOMPLETE_DETAIL = "identity_incomplete_detail"
+    ADJUSTMENT_DETAIL = "adjustment_detail"
+    AGGREGATE_OR_NOTE = "aggregate_or_note"
+    UNRESOLVED = "unresolved"
+    EMPTY_ROW = "empty_row"
+
+
+class FaListIdentityScope(str, Enum):
+    ASSET_ID = "asset_id"
+    ENTITY_ASSET_ID = "entity_asset_id"
+    UNRESOLVED = "unresolved"
+
+
+class FaListSalvageMode(str, Enum):
+    EXPLICIT_RATE = "explicit_rate"
+    DERIVED_FROM_VALUE = "derived_from_value"
+    RATE_AND_VALUE = "rate_and_value"
+    UNRESOLVED = "unresolved"
+    MISSING = "missing"
+
+
 class SheetKind(str, Enum):
     FA_LIST = "fa_list"
     ADDITION_LIST = "addition_list"
@@ -53,6 +130,9 @@ class AssetRecord:
     start_date: str | None = None
     useful_life_months: str | None = None
     salvage_rate: str | None = None
+    salvage_value: str | None = None
+    entity_name: str | None = None
+    currency: str | None = None
     original_value: str | None = None
     accumulated_depreciation: str | None = None
     impairment_provision: str | None = None
@@ -74,6 +154,106 @@ class FieldMapping:
     standard_field: str
     source_header: str
     column_index: int
+
+
+@dataclass
+class FaListAmountBasis:
+    status: FaListAmountBasisStatus
+    source: FaListAmountBasisSource | None = None
+    bindings: dict[str, int] = field(default_factory=dict)
+    category_column: int | None = None
+    data_start_row: int | None = None
+    data_end_row: int | None = None
+    evidence: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+    period_role: AmountPeriodRole = AmountPeriodRole.UNKNOWN
+    currency_role: AmountCurrencyRole = AmountCurrencyRole.UNKNOWN
+    criteria_columns: tuple[int, ...] = ()
+    currency_values: tuple[str, ...] = ()
+
+
+@dataclass
+class FaListRoutingDecision:
+    status: FaListRoutingStatus
+    selected_sheet: str | None = None
+    candidates: list[str] = field(default_factory=list)
+    reason: str = ""
+
+
+@dataclass
+class ClassifiedFaRow:
+    record: AssetRecord
+    role: FaListRowRole
+    reasons: list[str] = field(default_factory=list)
+    include_in_asset_rules: bool = False
+    include_in_reconciliation: bool = False
+
+
+@dataclass
+class FaListPopulationProfile:
+    status: FaListPopulationStatus
+    classified_rows: list[ClassifiedFaRow] = field(default_factory=list)
+    asset_records: list[AssetRecord] = field(default_factory=list)
+    identity_incomplete_records: list[AssetRecord] = field(default_factory=list)
+    reconciliation_records: list[AssetRecord] = field(default_factory=list)
+    excluded_rows: list[ClassifiedFaRow] = field(default_factory=list)
+    scanned_nonempty_rows: int = 0
+    outside_basis_rows: list[int] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FaListIdentityBasis:
+    scope: FaListIdentityScope
+    asset_id_column: int | None = None
+    asset_name_column: int | None = None
+    entity_column: int | None = None
+    missing_asset_id_rows: list[int] = field(default_factory=list)
+    missing_entity_rows: list[int] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FaListSalvageBasis:
+    mode: FaListSalvageMode
+    rate_column: int | None = None
+    value_column: int | None = None
+    evidence: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FaListReviewProfile:
+    routing: FaListRoutingDecision
+    amount_basis: FaListAmountBasis
+    population: FaListPopulationProfile
+    identity_basis: FaListIdentityBasis
+    salvage_basis: FaListSalvageBasis
+
+
+@dataclass(frozen=True)
+class AmountColumnCandidate:
+    measure: str
+    source_header: str
+    column_index: int
+    period_role: AmountPeriodRole
+    currency_role: AmountCurrencyRole
+    business_role: AmountBusinessRole
+    evidence: tuple[str, ...] = ()
+
+
+@dataclass
+class AmountFieldGroup:
+    group_id: str
+    members: dict[str, AmountColumnCandidate]
+    period_role: AmountPeriodRole
+    currency_role: AmountCurrencyRole
+    business_role: AmountBusinessRole
+    status: AmountGroupStatus
+    confidence: float
+    reasons: list[str] = field(default_factory=list)
+    missing_measures: list[str] = field(default_factory=list)
 
 
 @dataclass

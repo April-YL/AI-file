@@ -6,13 +6,85 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-from ingest.models import SheetKind
+from ingest.models import SheetClassification, SheetKind
 from ingest.reconciliation import ReconciliationStatus, run_workbook_reconciliations
 from ingest.rollforward_sheet import parse_rollforward_rows
-from ingest.workbook_ingest import load_workbook_ingest
-from ingest.workbook_structure import StructureIssueCode, analyze_workbook_structure
+from ingest.workbook_ingest import _select_rollforward_sheet, load_workbook_ingest
+from ingest.workbook_structure import WorkbookStructure, StructureIssueCode, analyze_workbook_structure
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+
+
+def _rollforward_structure(path: Path, names: list[str]) -> WorkbookStructure:
+    return WorkbookStructure(
+        source_file=str(path),
+        sheets_by_kind={
+            SheetKind.ROLLFORWARD.value: [
+                SheetClassification(
+                    sheet_name=name,
+                    kind=SheetKind.ROLLFORWARD,
+                    confidence=0.9,
+                    name_score=0.9,
+                    content_score=0.9,
+                )
+                for name in names
+            ]
+        },
+    )
+
+
+def test_k01_route_prefers_unique_summary_candidate(tmp_path: Path):
+    path = tmp_path / "k01_route_summary.xlsx"
+    wb = openpyxl.Workbook()
+    wb.active.title = "FA list-汇总"
+    wb.create_sheet("K.01-A公司")
+    wb.create_sheet("K.01-汇总")
+    wb.save(path)
+    wb.close()
+
+    selected, reason = _select_rollforward_sheet(
+        path,
+        _rollforward_structure(path, ["K.01-A公司", "K.01-汇总"]),
+        fa_sheet="FA list-汇总",
+        explicit_name=None,
+    )
+
+    assert selected == "K.01-汇总"
+    assert reason is None
+
+
+def test_k01_route_uses_unique_formula_reference_or_stops(tmp_path: Path):
+    path = tmp_path / "k01_route_formula.xlsx"
+    wb = openpyxl.Workbook()
+    wb.active.title = "FA list-汇总"
+    k01_a = wb.create_sheet("K.01-A公司")
+    k01_b = wb.create_sheet("K.01-B公司")
+    k01_b["A1"] = "='FA list-汇总'!A1"
+    wb.save(path)
+    wb.close()
+    structure = _rollforward_structure(path, ["K.01-A公司", "K.01-B公司"])
+
+    selected, reason = _select_rollforward_sheet(
+        path,
+        structure,
+        fa_sheet="FA list-汇总",
+        explicit_name=None,
+    )
+    assert selected == "K.01-B公司"
+    assert reason is None
+
+    wb = openpyxl.load_workbook(path)
+    wb["K.01-B公司"]["A1"] = None
+    wb.save(path)
+    wb.close()
+    selected, reason = _select_rollforward_sheet(
+        path,
+        structure,
+        fa_sheet="FA list-汇总",
+        explicit_name=None,
+    )
+    assert selected is None
+    assert "multiple peer" in str(reason)
 
 
 @pytest.fixture
@@ -40,10 +112,11 @@ def reconciliation_workbook(tmp_path: Path) -> Path:
             "原值",
             "累计折旧",
             "净值",
+            "币种",
         ]
     )
-    ws_fa.append(["FA-TEST-001", "设备A", 1000, 200, 800])
-    ws_fa.append(["FA-TEST-002", "设备B", 2000, 300, 1700])
+    ws_fa.append(["FA-TEST-001", "设备A", 1000, 200, 800, "CNY"])
+    ws_fa.append(["FA-TEST-002", "设备B", 2000, 300, 1700, "CNY"])
 
     ws_rf = wb.create_sheet("K.01 Agree SL to GL")
     ws_rf.append(["固定资产类别", "原值", "累计折旧", "净值"])
@@ -62,8 +135,8 @@ def mismatch_workbook(tmp_path: Path) -> Path:
     wb = openpyxl.Workbook()
     ws_fa = wb.active
     ws_fa.title = "FA list"
-    ws_fa.append(["固定资产编号", "原值", "累计折旧", "净值"])
-    ws_fa.append(["FA-TEST-001", 1000, 100, 900])
+    ws_fa.append(["固定资产编号", "原值", "累计折旧", "净值", "币种"])
+    ws_fa.append(["FA-TEST-001", 1000, 100, 900, "CNY"])
     ws_rf = wb.create_sheet("K.01 Agree SL to GL")
     ws_rf.append(["类别", "原值", "累计折旧", "净值"])
     ws_rf.append(["合计", 1000, 100, 800])
@@ -304,6 +377,11 @@ def test_reconciliation_match(reconciliation_workbook: Path):
     ctx = load_workbook_ingest(reconciliation_workbook)
     assert ctx.fa_list is not None
     assert ctx.rollforward is not None
+    assert ctx.fa_list.amount_basis is not None
+    assert ctx.fa_list.amount_basis.status.value == "confirmed", ctx.fa_list.amount_basis
+    assert ctx.fa_list.amount_basis.currency_role.value != "unknown", ctx.fa_list.amount_basis
+    assert ctx.fa_list.fa_profile is not None
+    assert ctx.fa_list.fa_profile.population.status.value == "ready", ctx.fa_list.fa_profile.population
     net_checks = [c for c in ctx.reconciliations if c.link_id == "fa_list_rollforward_net"]
     assert len(net_checks) == 1
     assert net_checks[0].status == ReconciliationStatus.MATCH

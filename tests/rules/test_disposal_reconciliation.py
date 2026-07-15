@@ -7,6 +7,7 @@ from ingest.disposal_test_sheet import (
     DisposalReconciliationRow,
     DisposalTestSheetDataset,
 )
+from ingest.models import AmountGroupStatus
 from ingest.records import DisposalListSummary, DisposalMethodBucket
 from rules.disposal_reconciliation import (
     check_disposal_reconciliation_formula_source,
@@ -227,3 +228,26 @@ def test_summary_waived_skips_reconciliation_rules():
         lead=None,
     )
     assert issues == []
+
+
+def test_reconciliation_does_not_compare_unconfirmed_amount_group():
+    summary = _summary()
+    summary.amount_group_status = AmountGroupStatus.INCOMPLETE
+    test = DisposalTestSheetDataset(
+        source_file="test.xlsx",
+        source_sheet="K.02.2",
+        reconciliation_matrix=_matrix(list_original="1100", list_net="400"),
+    )
+
+    issues = run_disposal_reconciliation_rules(
+        disposal_list_summary=summary,
+        disposal_test=test,
+        disposal_execution_path=None,
+        rollforward=None,
+        lead=None,
+    )
+
+    recon = [issue for issue in issues if issue.rule_id == "disposal_rollforward_reconciliation"]
+    assert len(recon) == 1
+    assert recon[0].severity == Severity.NEED_REVIEW
+    assert recon[0].field == "amount_group"

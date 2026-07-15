@@ -20,7 +20,12 @@ def check_asset_value_consistency(
     tolerance: Decimal | None = None,
 ) -> list[QcIssue]:
     issues: list[QcIssue] = []
-    amount_fields = ("original_value", "accumulated_depreciation", "net_value")
+    amount_fields = (
+        "original_value",
+        "accumulated_depreciation",
+        "impairment_provision",
+        "net_value",
+    )
     required_mapped = all(f in ctx.mapped_fields for f in amount_fields)
 
     if not required_mapped:
@@ -46,16 +51,17 @@ def check_asset_value_consistency(
         aid = record.asset_id or record.identity()
         original = parse_amount(record.original_value)
         accumulated = parse_amount(record.accumulated_depreciation)
-        impairment = parse_amount(record.impairment_provision)
+        impairment_raw = record.impairment_provision
+        impairment = parse_amount(impairment_raw)
         net = parse_amount(record.net_value)
 
-        if impairment is None:
+        if is_blank(impairment_raw):
             impairment = Decimal("0")
 
         if original is None and accumulated is None and net is None:
             continue
 
-        if original is None or accumulated is None or net is None:
+        if original is None or accumulated is None or impairment is None or net is None:
             issues.append(
                 QcIssue(
                     asset_id=aid,

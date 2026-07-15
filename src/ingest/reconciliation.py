@@ -7,7 +7,14 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from ingest.models import AssetRecord, SheetKind
+from ingest.models import (
+    AmountCurrencyRole,
+    AssetRecord,
+    FaListAmountBasisStatus,
+    FaListPopulationStatus,
+    FaListRoutingStatus,
+    SheetKind,
+)
 from ingest.records import FaListDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset, get_movement_transaction_amount
 from rules.addition_common import sum_purchase_original_value
@@ -229,7 +236,38 @@ def run_fa_rollforward_reconciliations(
         spec = link_by_field.get(field_name)
         if spec is None:
             continue
-        left_val = _sum_dataset(fa_list.records, field_name) if fa_list and fa_list.records else None
+        if fa_list is not None and not _fa_reconciliation_ready(fa_list, field_name):
+            checks.append(
+                ReconciliationCheck(
+                    link_id=spec.link_id,
+                    dict_rule_code=spec.dict_rule_code,
+                    name=spec.name,
+                    status=ReconciliationStatus.NOT_APPLICABLE,
+                    left_ref=left_ref,
+                    right_ref=right_ref,
+                    left_value=None,
+                    right_value=(
+                        _fmt_amount(rollforward.ending_totals.get(field_name))
+                        if rollforward and rollforward.ending_totals.get(field_name) is not None
+                        else None
+                    ),
+                    difference=None,
+                    message="FA list 金额口径未确认，未执行清单重算勾稽",
+                    suggestion="先确认 FA list 金额口径；K.01 表内公式与 Check 区仍按原规则复核",
+                )
+            )
+            continue
+        basis_confirmed = fa_list is not None and _fa_reconciliation_ready(fa_list, field_name)
+        reconciliation_records = (
+            fa_list.fa_profile.population.reconciliation_records
+            if fa_list and fa_list.fa_profile
+            else (fa_list.records if fa_list else [])
+        )
+        left_val = (
+            _sum_dataset(reconciliation_records, field_name)
+            if basis_confirmed and reconciliation_records
+            else None
+        )
         right_val = rollforward.ending_totals.get(field_name) if rollforward else None
         checks.append(
             _compare_amounts(
@@ -241,6 +279,27 @@ def run_fa_rollforward_reconciliations(
             )
         )
     return checks
+
+
+def _fa_reconciliation_ready(fa_list: FaListDataset, field_name: str) -> bool:
+    basis = fa_list.amount_basis
+    if basis is None or basis.status != FaListAmountBasisStatus.CONFIRMED:
+        return False
+    if field_name not in basis.bindings:
+        return False
+    if basis.data_start_row is None or basis.data_end_row is None:
+        return False
+    if basis.currency_role == AmountCurrencyRole.ORIGINAL and len(basis.currency_values) > 1:
+        return False
+    if basis.currency_role == AmountCurrencyRole.UNKNOWN:
+        return False
+    profile = fa_list.fa_profile
+    if profile is None:
+        return True
+    return (
+        profile.routing.status == FaListRoutingStatus.CONFIRMED
+        and profile.population.status == FaListPopulationStatus.READY
+    )
 
 
 def run_list_rollforward_reconciliations(

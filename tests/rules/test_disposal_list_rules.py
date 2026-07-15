@@ -20,6 +20,8 @@ from rules.disposal_list_rules import (
     check_disposal_required_fields,
     check_disposal_other_reduction_over_tt,
 )
+from ingest.models import AmountGroupStatus, SheetKind
+from ingest.records import parse_fa_list_rows
 from rules.models import Severity
 from rules.disposal_runner import run_disposal_rules
 from rules.lead_common import lead_thresholds, lead_tt
@@ -90,6 +92,26 @@ def test_net_value_recalculation_accepts_negative_accumulated_depreciation_and_f
     issues = check_disposal_list_net_values(good)
     assert len(issues) == 1
     assert issues[0].severity == Severity.FAIL
+
+
+def test_net_value_recalculation_returns_need_review_for_incomplete_amount_group():
+    dataset = parse_fa_list_rows(
+        [
+            (
+                "固定资产编号", "原值", "累计折旧", "减值准备", "净值",
+                "处置原值-CNY", "处置累计折旧-CNY", "处置净值-CNY",
+            ),
+            ("FA-D-001", 0, 0, 0, 0, 100, 80, 20),
+        ],
+        source_sheet="处置清单",
+        sheet_kind=SheetKind.DISPOSAL_LIST,
+    )
+
+    issues = check_disposal_list_net_values(dataset)
+
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.NEED_REVIEW
+    assert issues[0].field == "amount_group"
 
 
 def test_unclassified_and_other_reductions_are_review_items():
@@ -171,6 +193,22 @@ def test_other_reduction_warns_when_over_lead_cra_tt():
 
     assert len(issues) == 1
     assert issues[0].severity == Severity.NEED_REVIEW
+
+
+def test_other_reduction_threshold_is_not_compared_for_unconfirmed_amount_group():
+    summary = DisposalListSummary(
+        source_file="test.xlsx",
+        source_sheet="处置清单",
+        record_count=1,
+        other_reduction_net_value="999999",
+        amount_group_status=AmountGroupStatus.INCOMPLETE,
+    )
+
+    issues = check_disposal_other_reduction_over_tt(summary, None)
+
+    assert len(issues) == 1
+    assert issues[0].severity == Severity.NEED_REVIEW
+    assert issues[0].field == "amount_group"
 
 
 def test_summary_waived_does_not_run_disposal_list_rules():

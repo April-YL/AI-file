@@ -10,28 +10,11 @@ from pathlib import Path
 
 from report.pipeline import run_workbook_qc_from_path
 from rules.execution_recorder import RuleExecutionRecorder
-from rules.k03_runner import run_k03_rules
+from rules.k03_observations import K03_LOW_RISK_HOW_RULE_IDS
+from rules.k03_runner import K03_RULE_IDS, run_k03_rules
 
 
-K03_LOW_RISK_RULE_IDS = {
-    "k03_policy_sheet_missing",
-    "k03_policy_table_unreadable",
-    "k03_policy_sections_incomplete",
-    "k03_tod_by_item_detail_unreadable",
-    "k03_tod_by_item_required_fields",
-    "k03_tod_by_item_sad_unavailable",
-    "k03_tod_by_item_difference_column",
-    "k03_tod_by_item_difference_over_sad",
-    "k03_tod_by_item_total_difference_over_sad",
-    "k03_tod_by_item_rollforward_depreciation",
-    "k03_tod_by_item_conclusion_missing",
-    "k03_policy_fa_life_out_of_range",
-    "k03_policy_fa_salvage_mismatch",
-    "k03_policy_fa_unit_or_category_review",
-    "k03_policy_difference_marker",
-    "k03_policy_change_without_explanation",
-    "k03_policy_obvious_anomaly",
-}
+K03_LOW_RISK_RULE_IDS = set(K03_LOW_RISK_HOW_RULE_IDS)
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -162,8 +145,8 @@ def test_k03_current_fixture_reaches_first_batch_how_coverage():
         if row["observation_type"] == OBSERVATION_EVIDENCE_LEVEL
     ]
 
-    assert len(k03_rows) == 17
-    assert {row["rule_id"] for row in evidence_rows} == K03_LOW_RISK_RULE_IDS
+    assert {row["rule_id"] for row in k03_rows} == set(K03_RULE_IDS)
+    assert {row["rule_id"] for row in evidence_rows} == set(K03_RULE_IDS)
 
 
 def test_current_fixture_has_no_missing_or_legacy_how():

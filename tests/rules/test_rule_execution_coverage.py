@@ -193,7 +193,7 @@ def test_matrix_explains_not_triggered_by_context():
             "rollforward_exists",
             "addition_required_fields",
             "disposal_sample_match",
-            "k03_policy_sheet_missing",
+            "k03_policy_three_elements_complete",
         ],
     )
     rows = {row["rule_id"]: row for row in matrix["rules"]}
@@ -201,7 +201,7 @@ def test_matrix_explains_not_triggered_by_context():
     assert rows["rollforward_exists"]["execution_status"] == EXECUTION_NOT_TRIGGERED_BY_CONTEXT
     assert rows["addition_required_fields"]["execution_status"] == EXECUTION_NOT_TRIGGERED_BY_CONTEXT
     assert rows["disposal_sample_match"]["execution_status"] == EXECUTION_NOT_TRIGGERED_BY_CONTEXT
-    assert rows["k03_policy_sheet_missing"]["execution_status"] == EXECUTION_NOT_TRIGGERED_BY_CONTEXT
+    assert rows["k03_policy_three_elements_complete"]["execution_status"] == EXECUTION_NOT_TRIGGERED_BY_CONTEXT
 
 
 def test_current_fixture_matrix_contains_all_implemented_rules_and_no_executed_how_gap():

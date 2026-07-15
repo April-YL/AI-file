@@ -36,14 +36,16 @@ def save_run(
     """
     summary = data.get("summary") or {}
     timings = data.get("runtime_timings") or {}
+    build_info = data.get("build_info") or {}
 
     with get_db() as db:
         db.execute(
             "INSERT INTO qc_runs "
             "(project_id, source_filename, completed_at, overall_severity, "
             "finding_count, fail_count, warn_count, need_review_count, "
-            "llm_enabled, delivery_stage, duration_seconds, subject_code) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "llm_enabled, delivery_stage, duration_seconds, subject_code, "
+            "agent_version, pilot_build, source_revision, lock_status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 project_id,
                 filename,
@@ -57,6 +59,10 @@ def save_run(
                 data.get("delivery_stage", "none"),
                 round(float(timings.get("total_seconds", 0.0)), 2),
                 data.get("subject_code", "FA_K1"),
+                build_info.get("agent_version", ""),
+                build_info.get("pilot_build", ""),
+                build_info.get("source_revision", ""),
+                build_info.get("lock_status", ""),
             ),
         )
         run_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
