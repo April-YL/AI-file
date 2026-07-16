@@ -14,15 +14,116 @@ from ingest.disposal_test_sheet import (
 )
 from ingest.lead_sheet import LeadMovementRow, LeadSheetDataset
 from ingest.models import AssetRecord, FieldMapping, RollforwardLayoutProfile
-from ingest.records import FaListDataset
+from ingest.records import DisposalListSummary, FaListDataset
 from ingest.rollforward_sheet import (
     K01SectionRegion,
     MovementTransactionAmount,
     RollforwardSheetDataset,
 )
+from ingest.summary_sheet import PspProgramRow, SummarySheetDataset
 from ingest.workbook_context import WorkbookQcContext
 from llm.config import build_llm_config
-from report.pipeline import run_workbook_qc, run_workbook_qc_from_path
+from llm.router import LlmRouter
+from report.pipeline import _run_workbook_qc_core, run_workbook_qc, run_workbook_qc_from_path
+
+
+def test_public_workbook_entry_uses_orchestrator(monkeypatch):
+    observed = {}
+
+    class FakeOrchestrator:
+        def __init__(self, *, core_runner):
+            observed["core_runner"] = core_runner
+
+        def run(self, ctx, **kwargs):
+            observed["ctx"] = ctx
+            observed["kwargs"] = kwargs
+            return "delegated"
+
+    monkeypatch.setattr("report.pipeline.WorkbookQcOrchestrator", FakeOrchestrator)
+    ctx = object()
+
+    result = run_workbook_qc(ctx, llm=False)
+
+    assert result == "delegated"
+    assert observed["core_runner"] is _run_workbook_qc_core
+    assert observed["ctx"] is ctx
+    assert observed["kwargs"]["llm"] is False
+
+
+def test_llm_disabled_orchestrator_matches_core_standardized_result():
+    dataset = FaListDataset(
+        source_file="shadow_compare.csv",
+        source_sheet="FA list",
+        mapped_fields=[FieldMapping("asset_id", "资产编号", 1)],
+        records=[AssetRecord(source_row=2, asset_id="FA-TEST-001")],
+    )
+    ctx = WorkbookQcContext(
+        source_file="shadow_compare.csv",
+        fa_list=dataset,
+        summary=None,
+        lead=None,
+    )
+    config = build_llm_config(enabled=False)
+
+    through_orchestrator = run_workbook_qc(ctx, llm_config=config)
+    direct_core = _run_workbook_qc_core(
+        ctx,
+        llm_config=config,
+        llm_router=LlmRouter(config),
+    )
+
+    assert [issue.to_dict() for issue in through_orchestrator.issues] == [
+        issue.to_dict() for issue in direct_core.issues
+    ]
+    assert through_orchestrator.execution_ledger == direct_core.execution_ledger
+    assert through_orchestrator.rule_execution_matrix == direct_core.rule_execution_matrix
+
+
+def test_hybrid_disabled_keeps_deterministic_psp_result_unchanged():
+    summary = SummarySheetDataset(
+        source_file="psp_hybrid_gate.xlsx",
+        source_sheet="Summary",
+        header_row=1,
+        programs=[
+            PspProgramRow(
+                procedure_name="K.02.1 addition test",
+                sheet_ref="K.02.1 addition test",
+                execution_status="No",
+                waiver_reason="amount is small",
+                notes=None,
+                source_row=2,
+            )
+        ],
+    )
+    ctx = WorkbookQcContext(
+        source_file="psp_hybrid_gate.xlsx",
+        fa_list=None,
+        summary=summary,
+        lead=None,
+    )
+    llm_off = build_llm_config(enabled=False)
+    hybrid_off = build_llm_config(
+        enabled=True,
+        api_key="sk-test",
+        hybrid_rule_enabled=False,
+        rule_review_enabled=False,
+        narrative_enabled=False,
+    )
+
+    baseline = _run_workbook_qc_core(
+        ctx,
+        llm_config=llm_off,
+        llm_router=LlmRouter(llm_off),
+    )
+    gated = _run_workbook_qc_core(
+        ctx,
+        llm_config=hybrid_off,
+        llm_router=LlmRouter(hybrid_off),
+    )
+
+    baseline_psp = [issue.to_dict() for issue in baseline.issues if issue.rule_id == "psp_completion"]
+    gated_psp = [issue.to_dict() for issue in gated.issues if issue.rule_id == "psp_completion"]
+    assert gated_psp == baseline_psp
 from rules.delivery_completion import DeliveryCompletionContext
 from rules.models import QcIssue, Severity
 
@@ -219,7 +320,7 @@ def test_workbook_qc_includes_addition_llm_issue(monkeypatch):
     monkeypatch.setattr("llm.addition_review.build_addition_llm_issues", lambda *args, **kwargs: [mock_issue])
     monkeypatch.setattr(
         "report.pipeline.enrich_report_with_llm",
-        lambda report, config, summary=None, workbook=None: report,
+        lambda report, config, summary=None, workbook=None, **kwargs: report,
     )
     report = run_workbook_qc(ctx, llm=True)
 
@@ -304,7 +405,7 @@ def test_workbook_qc_addition_purchase_population_excludes_default_cip_and_llm_d
     monkeypatch.setattr("llm.ingest_review.run_workbook_ingest_reviews", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         "report.pipeline.enrich_report_with_llm",
-        lambda report, config, summary=None, workbook=None: report,
+        lambda report, config, summary=None, workbook=None, **kwargs: report,
     )
 
     report = run_workbook_qc(ctx, llm=True)
@@ -451,7 +552,9 @@ def test_workbook_qc_includes_disposal_llm_issue(monkeypatch):
         source_sheet="K.02.2 处置测试",
         review_source="LLM辅助判断",
     )
-    monkeypatch.setattr("report.pipeline.load_llm_config", lambda cli_enabled=None: type("Config", (), {"enabled": True})())
+    config_loader = lambda cli_enabled=None: type("Config", (), {"enabled": True})()
+    monkeypatch.setattr("report.pipeline.load_llm_config", config_loader)
+    monkeypatch.setattr("agent.orchestrator.load_llm_config", config_loader)
     monkeypatch.setattr("llm.disposal_review.build_disposal_llm_issues", lambda *args, **kwargs: [mock_issue])
     monkeypatch.setattr("llm.ingest_review.run_workbook_ingest_reviews", lambda *args, **kwargs: [])
     monkeypatch.setattr("report.pipeline.enrich_report_with_llm", lambda report, config, **kwargs: report)
@@ -502,6 +605,43 @@ def test_workbook_qc_uses_explicit_llm_config_instead_of_env(monkeypatch):
         "base_url": "https://ui.example/v1",
         "model": "ui-model",
     }
+
+
+def test_disabled_llm_capability_is_closed_in_execution_ledger(monkeypatch):
+    ctx = WorkbookQcContext(
+        source_file="disabled_llm_capability.xlsx",
+        fa_list=None,
+        summary=None,
+        lead=None,
+        disposal_list_summary=DisposalListSummary(
+            source_file="disabled_llm_capability.xlsx",
+            source_sheet="disposal list",
+            record_count=0,
+        ),
+    )
+    monkeypatch.setattr(
+        "llm.disposal_review.build_disposal_llm_issues",
+        lambda *args, **kwargs: pytest.fail("disabled capability must not call LLM"),
+    )
+
+    report = run_workbook_qc(
+        ctx,
+        llm_config=build_llm_config(
+            enabled=True,
+            api_key="sk-test",
+            rule_review_enabled=False,
+            hybrid_rule_enabled=False,
+            narrative_enabled=False,
+        ),
+    )
+
+    item = next(
+        item
+        for item in report.execution_ledger["items"]
+        if item["rule_id"] == "disposal_semantic_review"
+    )
+    assert item["status"] == "NOT_APPLICABLE"
+    assert not [issue for issue in report.issues if issue.rule_id == "disposal_semantic_review"]
 
 
 def test_workbook_qc_includes_k01_ingest_review_section(monkeypatch):
@@ -565,7 +705,7 @@ def test_workbook_qc_includes_k01_ingest_review_section(monkeypatch):
     monkeypatch.setattr("llm.ingest_review.chat_completion_json", lambda *args, **kwargs: mock_result)
     monkeypatch.setattr(
         "report.pipeline.enrich_report_with_llm",
-        lambda report, config, summary=None, workbook=None: report,
+        lambda report, config, summary=None, workbook=None, **kwargs: report,
     )
 
     report = run_workbook_qc(ctx, llm=True)
@@ -621,7 +761,7 @@ def test_workbook_qc_reviews_missing_k01_candidate(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("llm.ingest_review.chat_completion_json", lambda *args, **kwargs: mock_result)
     monkeypatch.setattr(
         "report.pipeline.enrich_report_with_llm",
-        lambda report, config, summary=None, workbook=None: report,
+        lambda report, config, summary=None, workbook=None, **kwargs: report,
     )
 
     report = run_workbook_qc(ctx, llm=True)

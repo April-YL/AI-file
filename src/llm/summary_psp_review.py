@@ -14,6 +14,7 @@ from ingest.reconciliation import ReconciliationCheck
 from ingest.workbook_reader import read_worksheet_rows
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
+from llm.router import LlmCapability, LlmRouter
 from rules.models import QcIssue, Severity
 from rules.parsing import parse_amount
 from rules.psp_completion import WaiverSemanticReview, normalize_execution_status
@@ -58,6 +59,7 @@ def review_waiver_reason_with_llm(
     config: LlmConfig,
     *,
     semantic_context: dict[str, Any] | None = None,
+    router: LlmRouter | None = None,
 ) -> WaiverSemanticReview | None:
     waiver = (row.waiver_reason or "").strip()
     if not waiver:
@@ -76,7 +78,14 @@ def review_waiver_reason_with_llm(
         f"输入：{json.dumps(payload, ensure_ascii=False)}"
     )
     try:
-        out = chat_completion_json(config, system=_WAIVER_SYSTEM, user=user)
+        out = (router or LlmRouter(config)).complete_json(
+            capability=LlmCapability.HYBRID_RULE,
+            task="psp_waiver_reason",
+            rule_id="psp_completion",
+            system=_WAIVER_SYSTEM,
+            user=user,
+            client=chat_completion_json,
+        )
     except LlmClientError:
         return None
     adequacy = str(out.get("adequacy", "")).strip().lower()
@@ -94,6 +103,7 @@ def review_waiver_reasons_batch_with_llm(
     config: LlmConfig,
     *,
     semantic_context: dict[str, Any] | None = None,
+    router: LlmRouter | None = None,
 ) -> dict[int, WaiverSemanticReview]:
     targets = [
         (idx, row)
@@ -126,7 +136,14 @@ def review_waiver_reasons_batch_with_llm(
         f"输入：{json.dumps(payload, ensure_ascii=False)}"
     )
     try:
-        out = chat_completion_json(config, system=_WAIVER_SYSTEM, user=user)
+        out = (router or LlmRouter(config)).complete_json(
+            capability=LlmCapability.HYBRID_RULE,
+            task="psp_waiver_reasons_batch",
+            rule_id="psp_completion",
+            system=_WAIVER_SYSTEM,
+            user=user,
+            client=chat_completion_json,
+        )
     except LlmClientError:
         return {}
     raw_reviews = out.get("reviews")
@@ -308,6 +325,7 @@ def build_sheet_semantic_issues(
     *,
     workbook_path: str,
     workbook_sheet_titles: list[str],
+    router: LlmRouter | None = None,
 ) -> list[QcIssue]:
     issues: list[QcIssue] = []
     if not workbook_sheet_titles:
@@ -327,7 +345,7 @@ def build_sheet_semantic_issues(
         candidates = rank_sheet_candidates(ref, workbook_sheet_titles, top_k=3, min_score=0.35)
         if not candidates:
             continue
-        reviewed = _review_sheet_match(row, candidates, workbook_path, config)
+        reviewed = _review_sheet_match(row, candidates, workbook_path, config, router=router)
         if reviewed is None:
             continue
         issues.append(
@@ -353,6 +371,8 @@ def _review_sheet_match(
     candidates: list[tuple[str, float, str]],
     workbook_path: str,
     config: LlmConfig,
+    *,
+    router: LlmRouter | None = None,
 ) -> dict[str, str] | None:
     preview = _build_candidate_preview(workbook_path, [c[0] for c in candidates])
     if not preview:
@@ -375,7 +395,14 @@ def _review_sheet_match(
         f"输入：{json.dumps(payload, ensure_ascii=False)}"
     )
     try:
-        out = chat_completion_json(config, system=_SHEET_SYSTEM, user=user)
+        out = (router or LlmRouter(config)).complete_json(
+            capability=LlmCapability.RULE_REVIEW,
+            task="psp_sheet_semantic_match",
+            rule_id="summary_sheet_semantic",
+            system=_SHEET_SYSTEM,
+            user=user,
+            client=chat_completion_json,
+        )
     except LlmClientError:
         return None
     assessment = str(out.get("assessment", "")).strip().lower()

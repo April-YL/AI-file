@@ -18,6 +18,7 @@ from time import perf_counter
 
 import streamlit as st
 
+from llm.config import build_llm_config
 from report.export_annotated_workbook import export_annotated_workbook
 from report.export_json import export_report_json
 from report.export_review_html import export_review_html
@@ -70,7 +71,6 @@ def _new_run_id(now: datetime | None = None) -> str:
     return (now or datetime.now()).strftime("%Y%m%d_%H%M%S")
 
 
-@st.cache_data(show_spinner=False)
 def _run_qc_cached(
     file_bytes: bytes,
     filename: str,
@@ -80,8 +80,12 @@ def _run_qc_cached(
     lead_sheet: str | None,
     delivery_stage: str,
     cache_version: str,
+    llm_base_url: str = "",
+    llm_api_key: str = "",
+    llm_model: str = "",
+    llm_timeout: float = 60.0,
 ) -> tuple[dict, bytes, bytes, bytes | None]:
-    """执行 QC 流水线（缓存加速相同输入的重复运行）。"""
+    """执行 QC 流水线；LLM配置显式进入正式运行且不缓存密钥。"""
     total_t0 = perf_counter()
     with tempfile.TemporaryDirectory() as tmp:
         inp = Path(tmp) / filename
@@ -91,12 +95,20 @@ def _run_qc_cached(
         if delivery_stage in ("first", "final"):
             delivery_context = DeliveryCompletionContext(stage=delivery_stage)
 
+        llm_config = build_llm_config(
+            enabled=use_llm,
+            base_url=llm_base_url,
+            api_key=llm_api_key,
+            model=llm_model,
+            timeout=llm_timeout,
+        ) if use_llm else None
         report = run_input_qc(
             str(inp),
             fa_sheet=fa_sheet or None,
             summary_sheet=summary_sheet or None,
             lead_sheet=lead_sheet or None,
             llm=use_llm,
+            llm_config=llm_config,
             delivery_context=delivery_context,
         )
 
@@ -317,6 +329,10 @@ def render_qc_runner() -> None:
                     None,
                     delivery_stage,
                     _QC_CACHE_VERSION,
+                    api_url,
+                    api_key,
+                    model_name,
+                    float(st.session_state.get("runner_llm_timeout") or 60),
                 )
                 for step in _RUNNER_STEPS[:-1]:
                     _mark_runner_step(runner_state, step, data.get("runtime_timings") or {}, status="已完成")

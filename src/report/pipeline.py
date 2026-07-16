@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from time import perf_counter
 
+from agent.orchestrator import WorkbookQcOrchestrator
 from ingest.workbook_context import WorkbookQcContext, load_workbook_context
 from llm.config import LlmConfig, load_llm_config
 from llm.review import enrich_report_with_llm
+from llm.router import LlmCapability, LlmRouter
 from report.manual_review import build_manual_review_sections
 from report.addition_test_report import build_addition_sheet_section
 from report.summary import QcReport, build_report, worst_severity
@@ -51,15 +53,17 @@ WORKBOOK_RULE_IDS = (
 )
 
 
-def run_workbook_qc(
+def _run_workbook_qc_core(
     ctx: WorkbookQcContext,
     *,
     llm: bool | None = None,
     llm_config: LlmConfig | None = None,
+    llm_router: LlmRouter | None = None,
     delivery_context: DeliveryCompletionContext | None = None,
 ) -> QcReport:
     qc_start = perf_counter()
     config = llm_config if llm_config is not None else load_llm_config(cli_enabled=llm)
+    router = llm_router or LlmRouter(config)
     llm_seconds = 0.0
     llm_details = {}
 
@@ -71,18 +75,68 @@ def run_workbook_qc(
         detail["seconds"] = float(detail["seconds"]) + max(seconds, 0.0)
         detail["calls"] = int(detail["calls"]) + max(calls, 0)
 
-    def record_observed_issues(rule_issues: list, *, expected_rule_ids: list[str] | None = None) -> None:
+    def record_observed_issues(
+        rule_issues: list,
+        *,
+        expected_rule_ids: list[str] | None = None,
+        capability: LlmCapability | None = None,
+    ) -> list:
         # 先登记所有预期调用的 LLM 规则（finding_count=0）
         # recorder.record() 对已存在的 key 会保留 EXECUTED 状态并累加计数
+        accepted_issues = rule_issues
+        if capability is not None:
+            accepted_issues = [
+                issue
+                for issue in rule_issues
+                if router.is_enabled(capability, rule_id=issue.rule_id)
+            ]
         if expected_rule_ids:
             for rule_id in expected_rule_ids:
-                recorder.record(rule_id, 0)
+                if capability is not None and not router.is_enabled(
+                    capability, rule_id=rule_id
+                ):
+                    recorder.record_not_applicable(
+                        rule_id,
+                        "LLM capability or rule disabled by runtime policy.",
+                    )
+                else:
+                    recorder.record(rule_id, 0)
         # 再累加实际 finding
         counts: dict[str, int] = {}
-        for issue in rule_issues:
+        for issue in accepted_issues:
             counts[issue.rule_id] = counts.get(issue.rule_id, 0) + 1
         for rule_id, finding_count in counts.items():
             recorder.record(rule_id, finding_count)
+        return accepted_issues
+
+    def record_disabled_llm_rules() -> None:
+        """Close capability-disabled LLM checkpoints without changing ledger schema."""
+        if not config.enabled:
+            return
+        expected: list[tuple[str, LlmCapability]] = []
+        if ctx.summary is not None:
+            expected.append(("summary_sheet_semantic", LlmCapability.RULE_REVIEW))
+        if ctx.lead is not None:
+            expected.extend(
+                [
+                    ("lead_expectation_semantic", LlmCapability.RULE_REVIEW),
+                    ("lead_fluctuation_notes_semantic", LlmCapability.RULE_REVIEW),
+                    ("lead_adjustment_layout_review", LlmCapability.HYBRID_RULE),
+                    ("lead_adjustment_semantic", LlmCapability.HYBRID_RULE),
+                ]
+            )
+        if ctx.addition_list is not None or ctx.addition_test is not None:
+            expected.append(("addition_semantic_review", LlmCapability.RULE_REVIEW))
+        if ctx.disposal_list is not None or ctx.disposal_list_summary is not None:
+            expected.append(("disposal_semantic_review", LlmCapability.RULE_REVIEW))
+        if ctx.rollforward is not None:
+            expected.append(("rollforward_notes_semantic", LlmCapability.RULE_REVIEW))
+        for rule_id, capability in expected:
+            if not router.is_enabled(capability, rule_id=rule_id):
+                recorder.record_not_applicable(
+                    rule_id,
+                    "LLM capability or rule disabled by runtime policy.",
+                )
 
     issues = []
     records = []
@@ -106,6 +160,7 @@ def run_workbook_qc(
             mapped_fields={m.standard_field for m in ctx.fa_list.mapped_fields},
             mapped_headers={m.standard_field: m.source_header for m in ctx.fa_list.mapped_fields},
             mapped_columns={m.standard_field: m.column_index for m in ctx.fa_list.mapped_fields},
+            field_resolutions=ctx.fa_list.field_resolutions,
             source_sheet=ctx.fa_list.source_sheet,
             procedure_code="FA_LIST",
         )
@@ -124,7 +179,7 @@ def run_workbook_qc(
     if ctx.summary:
         wb_for_psp: str | None = wb_for_semantic
         waiver_reason_reviewer = None
-        if config.enabled:
+        if router.is_enabled(LlmCapability.HYBRID_RULE, rule_id="psp_completion"):
             llm_t0 = perf_counter()
             from llm.summary_psp_review import (
                 build_waiver_semantic_context,
@@ -147,6 +202,7 @@ def run_workbook_qc(
                 ctx.summary.programs,
                 config,
                 semantic_context=waiver_semantic_context,
+                router=router,
             )
             waiver_reviews_by_id = {
                 id(ctx.summary.programs[idx]): review
@@ -180,7 +236,7 @@ def run_workbook_qc(
                 workbook_sheet_titles=sheet_titles,
             ),
         )
-        if config.enabled and wb_for_psp and sheet_titles:
+        if router.is_enabled(LlmCapability.RULE_REVIEW, rule_id="summary_sheet_semantic") and wb_for_psp and sheet_titles:
             llm_t0 = perf_counter()
             from llm.summary_psp_review import build_sheet_semantic_issues
 
@@ -189,8 +245,13 @@ def run_workbook_qc(
                 config,
                 workbook_path=wb_for_psp,
                 workbook_sheet_titles=sheet_titles,
+                router=router,
             )
-            record_observed_issues(psp_semantic_issues, expected_rule_ids=["summary_sheet_semantic"])
+            psp_semantic_issues = record_observed_issues(
+                psp_semantic_issues,
+                expected_rule_ids=["summary_sheet_semantic"],
+                capability=LlmCapability.RULE_REVIEW,
+            )
             psp_raw_issues.extend(psp_semantic_issues)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
@@ -263,22 +324,10 @@ def run_workbook_qc(
         lead_adj_issues: list = []
         lead_semantic_context = None
 
-        if config.enabled:
-            llm_t0 = perf_counter()
-            from llm.lead_adjustment_review import (
-                RULE_LAYOUT,
-                RULE_SEMANTIC,
-                extract_layout_and_rows_for_gating,
-                run_lead_adjustment_llm_review,
-                should_review_adjustments,
-            )
-            from llm.lead_review import (
-                RULE_EXPECTATION,
-                RULE_FLUCTUATION,
-                build_lead_semantic_context,
-                build_lead_semantic_issues,
-            )
-            from rules.lead_adjustment_gating import should_run_strict_total_check
+        if router.is_enabled(LlmCapability.HYBRID_RULE) or router.is_enabled(
+            LlmCapability.RULE_REVIEW
+        ):
+            from llm.lead_review import build_lead_semantic_context
 
             lead_semantic_context = build_lead_semantic_context(
                 summary=ctx.summary,
@@ -289,12 +338,22 @@ def run_workbook_qc(
                 workbook_sheet_titles=sheet_titles,
             )
 
+        if router.is_enabled(LlmCapability.HYBRID_RULE, rule_id="lead_adjustment_semantic"):
+            llm_t0 = perf_counter()
+            from llm.lead_adjustment_review import (
+                extract_layout_and_rows_for_gating,
+                run_lead_adjustment_llm_review,
+                should_review_adjustments,
+            )
+            from rules.lead_adjustment_gating import should_run_strict_total_check
+
             if should_review_adjustments(ctx.lead):
                 lead_adj_issues, adj_review = run_lead_adjustment_llm_review(
                     ctx.lead,
                     config,
                     workbook_path=ctx.source_file,
                     workbook_context=lead_semantic_context,
+                    router=router,
                 )
                 if adj_review:
                     adjustment_layout_result, adjustment_extracted_rows = (
@@ -313,6 +372,13 @@ def run_workbook_qc(
                 elapsed,
             )
 
+        if config.enabled:
+            lead_adj_issues = record_observed_issues(
+                lead_adj_issues,
+                expected_rule_ids=["lead_adjustment_layout_review", "lead_adjustment_semantic"],
+                capability=LlmCapability.HYBRID_RULE,
+            )
+
         lead_raw_issues = run_lead_rules(
             ctx.lead,
             rollforward=ctx.rollforward,
@@ -321,17 +387,22 @@ def run_workbook_qc(
             adjustment_extracted_rows=adjustment_extracted_rows,
             recorder=recorder,
         )
-        if config.enabled:
+        if router.is_enabled(LlmCapability.RULE_REVIEW):
             llm_t0 = perf_counter()
+            from llm.lead_review import build_lead_semantic_issues
+
             llm_lead_issues = build_lead_semantic_issues(
                 ctx.lead,
                 config,
                 semantic_context=lead_semantic_context or {},
+                router=router,
             )
-            record_observed_issues(llm_lead_issues, expected_rule_ids=["lead_expectation_semantic", "lead_fluctuation_notes_semantic"])
-            record_observed_issues(lead_adj_issues, expected_rule_ids=["lead_adjustment_layout_review", "lead_adjustment_semantic"])
+            llm_lead_issues = record_observed_issues(
+                llm_lead_issues,
+                expected_rule_ids=["lead_expectation_semantic", "lead_fluctuation_notes_semantic"],
+                capability=LlmCapability.RULE_REVIEW,
+            )
             lead_raw_issues.extend(llm_lead_issues)
-            lead_raw_issues.extend(lead_adj_issues)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
             record_llm_detail(
@@ -339,6 +410,7 @@ def run_workbook_qc(
                 "Lead 预期/波动说明",
                 elapsed,
             )
+        lead_raw_issues.extend(lead_adj_issues)
         lead_issues = attach_rule_metadata(lead_raw_issues)
         issues.extend(lead_issues)
         lead_sheet_section = build_lead_sheet_section(ctx.lead, lead_issues)
@@ -358,7 +430,7 @@ def run_workbook_qc(
                 recorder=recorder,
             )
         )
-        if config.enabled:
+        if router.is_enabled(LlmCapability.RULE_REVIEW, rule_id="addition_semantic_review"):
             llm_t0 = perf_counter()
             from llm.addition_review import (
                 RULE_ID as ADDITION_LLM_RULE,
@@ -373,9 +445,14 @@ def run_workbook_qc(
                     addition_sample_output=ctx.addition_sample_output,
                     addition_execution_path=ctx.addition_execution_path,
                     prior_issues=addition_issues,
+                    router=router,
                 )
             )
-            record_observed_issues(addition_llm_issues, expected_rule_ids=["addition_semantic_review"])
+            addition_llm_issues = record_observed_issues(
+                addition_llm_issues,
+                expected_rule_ids=["addition_semantic_review"],
+                capability=LlmCapability.RULE_REVIEW,
+            )
             addition_issues.extend(addition_llm_issues)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
@@ -395,7 +472,7 @@ def run_workbook_qc(
             source_sheet = ctx.addition_list.source_sheet
     else:
         addition_issues = []
-        if config.enabled and (
+        if router.is_enabled(LlmCapability.RULE_REVIEW, rule_id="addition_semantic_review") and (
             ctx.addition_test or ctx.addition_sample_output or ctx.addition_execution_path
         ):
             llm_t0 = perf_counter()
@@ -412,9 +489,14 @@ def run_workbook_qc(
                     addition_sample_output=ctx.addition_sample_output,
                     addition_execution_path=ctx.addition_execution_path,
                     prior_issues=[],
+                    router=router,
                 )
             )
-            record_observed_issues(addition_llm_issues, expected_rule_ids=["addition_semantic_review"])
+            addition_llm_issues = record_observed_issues(
+                addition_llm_issues,
+                expected_rule_ids=["addition_semantic_review"],
+                capability=LlmCapability.RULE_REVIEW,
+            )
             addition_issues.extend(addition_llm_issues)
             issues.extend(addition_llm_issues)
             elapsed = perf_counter() - llm_t0
@@ -443,7 +525,7 @@ def run_workbook_qc(
             recorder=recorder,
         )
     )
-    if config.enabled and (
+    if router.is_enabled(LlmCapability.RULE_REVIEW, rule_id="disposal_semantic_review") and (
         ctx.disposal_list_summary
         or ctx.disposal_test
         or ctx.disposal_sample_output
@@ -463,9 +545,14 @@ def run_workbook_qc(
                 disposal_sample_output=ctx.disposal_sample_output,
                 disposal_execution_path=ctx.disposal_execution_path,
                 prior_issues=disposal_issues,
+                router=router,
             )
         )
-        record_observed_issues(disposal_llm_issues, expected_rule_ids=["disposal_semantic_review"])
+        disposal_llm_issues = record_observed_issues(
+            disposal_llm_issues,
+            expected_rule_ids=["disposal_semantic_review"],
+            capability=LlmCapability.RULE_REVIEW,
+        )
         disposal_issues.extend(disposal_llm_issues)
         elapsed = perf_counter() - llm_t0
         llm_seconds += elapsed
@@ -492,7 +579,7 @@ def run_workbook_qc(
         source_sheet = ctx.k03_sheets[0].sheet_name
 
     rollforward_sheet_section = None
-    if config.enabled:
+    if router.is_enabled(LlmCapability.RULE_REVIEW):
         llm_t0 = perf_counter()
         from llm.ingest_review import run_workbook_ingest_reviews
 
@@ -506,6 +593,7 @@ def run_workbook_qc(
             workbook_path=ctx.source_file,
             workbook_sheet_titles=sheet_titles,
             recognized_sheet_kinds=_recognized_ingest_sheet_kinds(ctx),
+            router=router,
         ):
             item = result.to_dict()
             item.update(
@@ -534,7 +622,7 @@ def run_workbook_qc(
             reconciliations=ctx.reconciliations,
             recorder=recorder,
         )
-        if config.enabled:
+        if router.is_enabled(LlmCapability.RULE_REVIEW, rule_id="rollforward_notes_semantic"):
             llm_t0 = perf_counter()
             from llm.lead_review import build_lead_semantic_context
             from llm.rollforward_notes_review import (
@@ -556,8 +644,13 @@ def run_workbook_qc(
                 lead=ctx.lead,
                 prior_issues=rollforward_raw_issues,
                 workbook_context=rf_semantic_context,
+                router=router,
             )
-            record_observed_issues(rf_note_issues, expected_rule_ids=["rollforward_notes_semantic"])
+            rf_note_issues = record_observed_issues(
+                rf_note_issues,
+                expected_rule_ids=["rollforward_notes_semantic"],
+                capability=LlmCapability.RULE_REVIEW,
+            )
             rollforward_raw_issues.extend(rf_note_issues)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
@@ -590,6 +683,7 @@ def run_workbook_qc(
         delivery_issues = attach_rule_metadata(delivery_raw_issues)
         issues.extend(delivery_issues)
 
+    record_disabled_llm_rules()
     execution_ledger = recorder.to_ledger()
     validate_execution_ledger(execution_ledger, issues, llm_enabled=bool(config.enabled), workbook_context=ctx)
     rule_execution_summary = None
@@ -640,13 +734,14 @@ def run_workbook_qc(
     )
     report.manual_review_sections = build_manual_review_sections(ctx.lead)
 
-    if config.enabled:
+    if router.is_enabled(LlmCapability.NARRATIVE):
         llm_t0 = perf_counter()
         report = enrich_report_with_llm(
             report,
             config,
             summary=ctx.summary,
             workbook=ctx,
+            router=router,
         )
         elapsed = perf_counter() - llm_t0
         llm_seconds += elapsed
@@ -670,9 +765,27 @@ def run_workbook_qc(
                 }
                 for key, detail in llm_details.items()
             ],
+            "llm_router_calls": router.traces(),
         }
     )
     return report
+
+
+def run_workbook_qc(
+    ctx: WorkbookQcContext,
+    *,
+    llm: bool | None = None,
+    llm_config: LlmConfig | None = None,
+    delivery_context: DeliveryCompletionContext | None = None,
+) -> QcReport:
+    """Compatibility entry routed through the single Agent orchestrator."""
+    orchestrator = WorkbookQcOrchestrator(core_runner=_run_workbook_qc_core)
+    return orchestrator.run(
+        ctx,
+        llm=llm,
+        llm_config=llm_config,
+        delivery_context=delivery_context,
+    )
 
 
 def _recognized_ingest_sheet_kinds(ctx: WorkbookQcContext) -> dict[str, bool]:

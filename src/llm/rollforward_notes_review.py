@@ -10,6 +10,7 @@ from ingest.lead_sheet import LeadSheetDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
+from llm.router import LlmCapability, LlmRouter
 from rules.lead_common import field_values
 from rules.models import QcIssue, Severity
 from rules.parsing import parse_amount
@@ -108,6 +109,7 @@ def build_rollforward_notes_issues(
     lead: LeadSheetDataset | None = None,
     prior_issues: list[QcIssue] | None = None,
     workbook_context: dict[str, Any] | None = None,
+    router: LlmRouter | None = None,
 ) -> list[QcIssue]:
     issues, _ = run_rollforward_notes_llm_review(
         rollforward,
@@ -115,6 +117,7 @@ def build_rollforward_notes_issues(
         lead=lead,
         prior_issues=prior_issues,
         workbook_context=workbook_context,
+        router=router,
     )
     return issues
 
@@ -126,6 +129,7 @@ def run_rollforward_notes_llm_review(
     lead: LeadSheetDataset | None = None,
     prior_issues: list[QcIssue] | None = None,
     workbook_context: dict[str, Any] | None = None,
+    router: LlmRouter | None = None,
 ) -> tuple[list[QcIssue], dict[str, Any] | None]:
     if not config.enabled or rollforward is None:
         return [], None
@@ -145,7 +149,14 @@ def run_rollforward_notes_llm_review(
     )
     user = _USER_TEMPLATE.format(payload=json.dumps(payload, ensure_ascii=False, indent=2))
     try:
-        review = chat_completion_json(config, system=_SYSTEM, user=user)
+        review = (router or LlmRouter(config)).complete_json(
+            capability=LlmCapability.RULE_REVIEW,
+            task="rollforward_notes_semantic",
+            rule_id=RULE_ID,
+            system=_SYSTEM,
+            user=user,
+            client=chat_completion_json,
+        )
     except LlmClientError:
         return [], None
     if not review:

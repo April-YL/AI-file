@@ -8,6 +8,7 @@ from ingest.records import FaListDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset
 from ingest.summary_sheet import PspProgramRow, SummarySheetDataset
 from llm.config import LlmConfig
+from llm.router import LlmRouter
 from llm.summary_psp_review import (
     build_sheet_semantic_issues,
     build_waiver_semantic_context,
@@ -46,6 +47,76 @@ def test_review_waiver_reason_with_llm_parses_result():
         res = review_waiver_reason_with_llm(row, _config())
     assert res is not None
     assert res.adequacy == "insufficient"
+
+
+def test_review_waiver_reason_is_traced_as_hybrid_psp_rule():
+    row = PspProgramRow(
+        procedure_name="K.02.1 addition test",
+        sheet_ref="K.02.1 addition test",
+        execution_status="No",
+        waiver_reason="amount is small",
+        notes=None,
+        source_row=12,
+        is_psp=False,
+    )
+    config = _config()
+    router = LlmRouter(config)
+
+    with patch(
+        "llm.summary_psp_review.chat_completion_json",
+        return_value={
+            "adequacy": "insufficient",
+            "rationale": "missing threshold basis",
+            "suggested_action": "add evidence",
+        },
+    ):
+        result = review_waiver_reason_with_llm(row, config, router=router)
+
+    assert result is not None
+    assert router.traces() == [
+        {
+            "capability": "hybrid_rule",
+            "task": "psp_waiver_reason",
+            "rule_id": "psp_completion",
+            "status": "completed",
+            "seconds": router.traces()[0]["seconds"],
+            "prompt_version": None,
+        }
+    ]
+
+
+def test_review_waiver_reason_does_not_call_llm_when_hybrid_is_disabled():
+    row = PspProgramRow(
+        procedure_name="K.02.1 addition test",
+        sheet_ref="K.02.1 addition test",
+        execution_status="No",
+        waiver_reason="amount is small",
+        notes=None,
+        source_row=12,
+        is_psp=False,
+    )
+    config = LlmConfig(
+        enabled=True,
+        base_url="https://api.example.com/v1",
+        api_key="sk-test",
+        model="gpt-4o-mini",
+        hybrid_rule_enabled=False,
+    )
+    router = LlmRouter(config)
+
+    with patch("llm.summary_psp_review.chat_completion_json") as mock_call:
+        result = review_waiver_reason_with_llm(row, config, router=router)
+
+    assert result is None
+    mock_call.assert_not_called()
+    assert router.traces()[0] == {
+        "capability": "hybrid_rule",
+        "task": "psp_waiver_reason",
+        "rule_id": "psp_completion",
+        "status": "disabled",
+        "seconds": 0.0,
+        "prompt_version": None,
+    }
 
 
 def test_review_waiver_reasons_batch_with_llm_parses_results():

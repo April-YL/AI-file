@@ -31,6 +31,8 @@ from rules.addition_sampling_output import (
 )
 from rules.execution_recorder import RuleExecutionRecorder
 from rules.models import ColumnContext, QcIssue
+from rules.readiness import evaluate_rule_readiness, readiness_spec_from_registry
+from rules.registry import get_by_rule_id
 
 ADDITION_RULE_IDS: tuple[str, ...] = (
     "addition_required_fields",
@@ -42,6 +44,22 @@ ADDITION_RULE_IDS: tuple[str, ...] = (
     "addition_sampling_assertions_scope",
     "addition_sample_replacement_reason",
 )
+
+
+def _readiness(rule_id: str, ctx: ColumnContext):
+    spec = get_by_rule_id(rule_id)
+    if spec is None:
+        raise ValueError(f"Rule is not registered: {rule_id}")
+    return evaluate_rule_readiness(readiness_spec_from_registry(spec), ctx)
+
+
+def _record_readiness_insufficient(recorder: RuleExecutionRecorder, decision) -> None:
+    reason = decision.note()
+    recorder.record_data_insufficient(decision.rule_id, reason)
+    recorder.record_observation(
+        decision.rule_id,
+        build_addition_data_insufficient_observation(decision.rule_id, reason),
+    )
 
 
 def run_addition_rules(
@@ -73,50 +91,65 @@ def run_addition_rules(
             mapped_fields={m.standard_field for m in addition_list.mapped_fields},
             mapped_headers={m.standard_field: m.source_header for m in addition_list.mapped_fields},
             mapped_columns={m.standard_field: m.column_index for m in addition_list.mapped_fields},
+            field_resolutions=addition_list.field_resolutions,
             source_sheet=addition_list.source_sheet,
             procedure_code="K.02.1",
         )
-        required_issues = recorder.execute_rule(
-            "addition_required_fields",
-            check_addition_required_fields,
-            addition_list.records,
-            ctx,
-        )
-        recorder.record_observation(
-            "addition_required_fields",
-            build_addition_required_fields_observation(addition_list, ctx, required_issues),
-        )
-        issues.extend(required_issues)
-        homogeneity_issues = recorder.execute_rule(
-            "addition_population_homogeneity",
-            check_addition_population_homogeneity,
-            addition_list.records,
-            ctx,
-        )
-        recorder.record_observation(
-            "addition_population_homogeneity",
-            build_addition_population_homogeneity_observation(addition_list, ctx, homogeneity_issues),
-        )
-        issues.extend(homogeneity_issues)
-        reconciliation_issues = recorder.execute_rule(
-            "addition_rollforward_reconciliation",
-            check_addition_rollforward_reconciliation,
-            addition_list,
-            rollforward=rollforward,
-            lead=lead,
-            addition_test=addition_test,
-        )
-        recorder.record_observation(
-            "addition_rollforward_reconciliation",
-            build_addition_rollforward_reconciliation_observation(
+        required_decision = _readiness("addition_required_fields", ctx)
+        if required_decision.ready:
+            required_issues = recorder.execute_rule(
+                "addition_required_fields",
+                check_addition_required_fields,
+                addition_list.records,
+                ctx,
+            )
+            recorder.record_observation(
+                "addition_required_fields",
+                build_addition_required_fields_observation(addition_list, ctx, required_issues),
+            )
+            issues.extend(required_issues)
+        else:
+            _record_readiness_insufficient(recorder, required_decision)
+
+        homogeneity_decision = _readiness("addition_population_homogeneity", ctx)
+        if homogeneity_decision.ready:
+            homogeneity_issues = recorder.execute_rule(
+                "addition_population_homogeneity",
+                check_addition_population_homogeneity,
+                addition_list.records,
+                ctx,
+            )
+            recorder.record_observation(
+                "addition_population_homogeneity",
+                build_addition_population_homogeneity_observation(addition_list, ctx, homogeneity_issues),
+            )
+            issues.extend(homogeneity_issues)
+        else:
+            _record_readiness_insufficient(recorder, homogeneity_decision)
+
+        reconciliation_decision = _readiness("addition_rollforward_reconciliation", ctx)
+        if reconciliation_decision.ready:
+            reconciliation_issues = recorder.execute_rule(
+                "addition_rollforward_reconciliation",
+                check_addition_rollforward_reconciliation,
                 addition_list,
-                rollforward,
-                lead,
-                addition_test,
-                reconciliation_issues,
-            ),
-        )
-        issues.extend(reconciliation_issues)
+                rollforward=rollforward,
+                lead=lead,
+                addition_test=addition_test,
+            )
+            recorder.record_observation(
+                "addition_rollforward_reconciliation",
+                build_addition_rollforward_reconciliation_observation(
+                    addition_list,
+                    rollforward,
+                    lead,
+                    addition_test,
+                    reconciliation_issues,
+                ),
+            )
+            issues.extend(reconciliation_issues)
+        else:
+            _record_readiness_insufficient(recorder, reconciliation_decision)
     sample_match_issues = recorder.execute_rule(
         "addition_sample_match",
         check_addition_sample_match,

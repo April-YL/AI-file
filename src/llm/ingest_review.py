@@ -21,12 +21,14 @@ from ingest.disposal_test_sheet import (
     DisposalTestSheetDataset,
 )
 from ingest.lead_sheet import LeadSheetDataset
-from ingest.models import SheetKind
+from ingest.models import ResolutionStatus, SheetKind
+from ingest.records import FaListDataset
 from ingest.rollforward_sheet import K01_SECTION_IDS, RollforwardSheetDataset
 from ingest.sheet_classifier import classify_sheet, score_by_name
 from ingest.workbook_reader import read_worksheet_rows
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
+from llm.router import LlmCapability, LlmRouter
 from llm.ingest_profiles import (
     K01_PROFILE_HINT,
     K021_ADDITION_PROFILE_HINT,
@@ -234,6 +236,91 @@ FORBIDDEN_OUTPUT_KEYS = {
     "rule_severity",
 }
 
+IDENTIFICATION_SYSTEM_PROMPT = """You review deterministic field candidates for an audit workpaper.
+Choose only from the supplied candidate column numbers. Do not create mappings, calculate audit
+rules, or infer PASS/FAIL. A suggestion is advisory and will be revalidated by code. Return JSON:
+{"selections":[{"standard_field":"", "column":1, "confidence":0.0, "reason":""}]}.
+If evidence does not distinguish candidates, omit that field."""
+
+
+def run_field_identification_fallback(
+    config: LlmConfig,
+    dataset: FaListDataset,
+    *,
+    router: LlmRouter | None = None,
+) -> dict[str, int]:
+    """Ask identification LLM to choose only among existing ambiguous candidates."""
+    llm_router = router or LlmRouter(config)
+    unresolved = [
+        decision
+        for decision in dataset.field_resolutions.values()
+        if decision.status == ResolutionStatus.AMBIGUOUS
+        and decision.reorganization_count < 1
+    ]
+    if not unresolved or not llm_router.is_enabled(LlmCapability.IDENTIFICATION):
+        return {}
+    payload = {
+        "source_sheet": dataset.source_sheet,
+        "fields": [
+            {
+                "standard_field": decision.standard_field,
+                "candidates": [
+                    {
+                        "column": candidate.column_index,
+                        "header": candidate.source_header[:80],
+                        "evidence": [
+                            {
+                                "type": item.evidence_type.value,
+                                "description": item.description[:160],
+                            }
+                            for item in candidate.evidence
+                        ],
+                        "negative_evidence": [
+                            item.description[:160] for item in candidate.negative_evidence
+                        ],
+                    }
+                    for candidate in decision.candidates
+                ],
+            }
+            for decision in unresolved
+        ],
+    }
+    try:
+        raw = llm_router.complete_json(
+            capability=LlmCapability.IDENTIFICATION,
+            task="field_candidate_selection_v1",
+            system=IDENTIFICATION_SYSTEM_PROMPT,
+            user=json.dumps(payload, ensure_ascii=False),
+            client=chat_completion_json,
+        )
+    except LlmClientError:
+        return {}
+    selections: dict[str, int] = {}
+    allowed = {
+        decision.standard_field: {
+            candidate.column_index
+            for candidate in decision.candidates
+            if not candidate.negative_evidence
+            and len({item.evidence_type for item in candidate.evidence}) >= 2
+        }
+        for decision in unresolved
+    }
+    items = raw.get("selections") if isinstance(raw, dict) else None
+    if not isinstance(items, list):
+        return {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        field_name = str(item.get("standard_field") or "")
+        try:
+            column = int(item.get("column"))
+            confidence = float(item.get("confidence", 0))
+        except (TypeError, ValueError):
+            continue
+        if column in allowed.get(field_name, set()) and 0 <= confidence <= 1:
+            selections[field_name] = column
+    return selections
+
 
 @dataclass(frozen=True)
 class IngestReviewCandidatePreview:
@@ -328,6 +415,8 @@ def build_ingest_review_user_prompt(payload: IngestReviewPayload) -> str:
 def run_ingest_review(
     config: LlmConfig,
     payload: IngestReviewPayload,
+    *,
+    router: LlmRouter | None = None,
 ) -> tuple[IngestReviewResult | None, dict[str, Any] | None]:
     """Run LLM ingest review and validate the returned JSON strictly."""
     if not config.enabled:
@@ -335,7 +424,13 @@ def run_ingest_review(
 
     user = build_ingest_review_user_prompt(payload)
     try:
-        raw = chat_completion_json(config, system=SYSTEM_PROMPT, user=user)
+        raw = (router or LlmRouter(config)).complete_json(
+            capability=LlmCapability.RULE_REVIEW,
+            task="legacy_ingest_advisory",
+            system=SYSTEM_PROMPT,
+            user=user,
+            client=chat_completion_json,
+        )
     except LlmClientError:
         return None, None
     result = parse_ingest_review_result(raw, payload)
@@ -355,6 +450,7 @@ def run_workbook_ingest_reviews(
     workbook_path: str | None = None,
     workbook_sheet_titles: list[str] | None = None,
     recognized_sheet_kinds: dict[str, bool] | None = None,
+    router: LlmRouter | None = None,
 ) -> list[IngestReviewResult]:
     """Run project-level ingest reviews that are ready for pipeline use."""
     if not config.enabled:
@@ -405,7 +501,7 @@ def run_workbook_ingest_reviews(
 
     results: list[IngestReviewResult] = []
     for payload in payloads:
-        result, _raw = run_ingest_review(config, payload)
+        result, _raw = run_ingest_review(config, payload, router=router)
         if result is not None and result.assessment in {"suspicious", "unclear"}:
             procedure = str(payload.expected_object.get("procedure") or "")
             results.append(

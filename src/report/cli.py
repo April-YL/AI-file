@@ -213,8 +213,7 @@ def main() -> None:
         llm_flag = None
 
     try:
-        if llm_flag is not None:
-            load_llm_config(cli_enabled=llm_flag)
+        llm_config = load_llm_config(cli_enabled=llm_flag)
         if is_excel:
             report = run_input_qc(
                 str(input_path),
@@ -222,12 +221,13 @@ def main() -> None:
                 summary_sheet=args.summary_sheet,
                 lead_sheet=args.lead_sheet,
                 llm=llm_flag,
+                llm_config=llm_config,
             )
         else:
             if not dataset.records:
                 print("CSV 无有效数据行。", file=sys.stderr)
                 sys.exit(2)
-            report = run_input_qc(str(input_path), llm=llm_flag)
+            report = run_input_qc(str(input_path), llm=llm_flag, llm_config=llm_config)
     except LlmConfigError as e:
         print(str(e), file=sys.stderr)
         sys.exit(4)

@@ -7,6 +7,14 @@ import openpyxl
 
 from ingest.addition_test_sheet import ModuleAssessment
 from ingest.lead_sheet import LeadSheetDataset
+from ingest.models import (
+    EvidenceType,
+    FieldCandidate,
+    FieldEvidence,
+    FieldResolutionDecision,
+    ResolutionStatus,
+)
+from ingest.records import FaListDataset
 from ingest.disposal_test_sheet import (
     DisposalExecutionPathDataset,
     DisposalSampleOutputDataset,
@@ -31,6 +39,7 @@ from llm.ingest_review import (
     build_ingest_review_user_prompt,
     parse_ingest_review_result,
     run_ingest_review,
+    run_field_identification_fallback,
     run_workbook_ingest_reviews,
     should_review_k022_disposal_ingest,
     should_review_lead_ingest,
@@ -477,3 +486,64 @@ def test_run_workbook_ingest_reviews_handles_k022_read_result_review():
     assert results[0].procedure_code == "K.02.2"
     assert results[0].review_type == "k022_ingest_review"
     assert results[0].risk_area == "section_boundary"
+
+
+def test_identification_fallback_can_only_select_existing_supported_candidate():
+    first = FieldCandidate(
+        "asset_id",
+        "资产编号",
+        1,
+        evidence=[
+            FieldEvidence(EvidenceType.HEADER_SEMANTIC, "header"),
+            FieldEvidence(EvidenceType.VALUE_DISTRIBUTION, "distinct values"),
+        ],
+    )
+    second = FieldCandidate(
+        "asset_id",
+        "备用编号",
+        2,
+        evidence=[FieldEvidence(EvidenceType.HEADER_SEMANTIC, "header")],
+    )
+    dataset = FaListDataset(
+        source_file="demo.xlsx",
+        source_sheet="FA list",
+        mapped_fields=[],
+        records=[],
+        field_resolutions={
+            "asset_id": FieldResolutionDecision(
+                standard_field="asset_id",
+                candidates=[first, second],
+                status=ResolutionStatus.AMBIGUOUS,
+            )
+        },
+    )
+    config = LlmConfig(
+        enabled=True,
+        base_url="https://api.example.com/v1",
+        api_key="sk-test",
+        model="test",
+        identification_enabled=True,
+    )
+    raw = {
+        "selections": [
+            {"standard_field": "asset_id", "column": 1, "confidence": 0.9},
+            {"standard_field": "invented", "column": 99, "confidence": 1},
+        ]
+    }
+
+    with patch("llm.ingest_review.chat_completion_json", return_value=raw):
+        selections = run_field_identification_fallback(config, dataset)
+
+    assert selections == {"asset_id": 1}
+
+
+def test_identification_disabled_does_not_call_llm():
+    dataset = FaListDataset(
+        source_file="demo.xlsx",
+        source_sheet="FA list",
+        mapped_fields=[],
+        records=[],
+    )
+    with patch("llm.ingest_review.chat_completion_json") as client:
+        assert run_field_identification_fallback(_config(), dataset) == {}
+    client.assert_not_called()

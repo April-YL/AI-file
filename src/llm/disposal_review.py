@@ -13,6 +13,7 @@ from ingest.disposal_test_sheet import (
 from ingest.records import DisposalListSummary
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
+from llm.router import LlmCapability, LlmRouter
 from rules.models import QcIssue, Severity
 
 RULE_ID = "disposal_semantic_review"
@@ -113,6 +114,7 @@ def build_disposal_llm_issues(
     disposal_sample_output: DisposalSampleOutputDataset | None = None,
     disposal_execution_path: DisposalExecutionPathDataset | None = None,
     prior_issues: list[QcIssue] | None = None,
+    router: LlmRouter | None = None,
 ) -> list[QcIssue]:
     if not config.enabled:
         return []
@@ -136,10 +138,13 @@ def build_disposal_llm_issues(
         prior_issues=prior_issues,
     )
     try:
-        review = chat_completion_json(
-            config,
+        review = (router or LlmRouter(config)).complete_json(
+            capability=LlmCapability.RULE_REVIEW,
+            task="disposal_semantic_review",
+            rule_id=RULE_ID,
             system=SYSTEM_PROMPT,
             user=USER_TEMPLATE.format(payload=json.dumps(payload, ensure_ascii=False, indent=2)),
+            client=chat_completion_json,
         )
     except LlmClientError:
         return []

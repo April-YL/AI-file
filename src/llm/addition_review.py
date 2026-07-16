@@ -18,6 +18,7 @@ from ingest.addition_test_sheet import (
 from ingest.records import FaListDataset
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
+from llm.router import LlmCapability, LlmRouter
 from rules.models import QcIssue, Severity
 
 RULE_ID = "addition_semantic_review"
@@ -145,6 +146,7 @@ def run_addition_llm_review(
     addition_execution_path: AdditionExecutionPathDataset | None = None,
     prior_issues: list[QcIssue] | None = None,
     workbook_context: dict[str, Any] | None = None,
+    router: LlmRouter | None = None,
 ) -> tuple[list[QcIssue], dict[str, Any] | None]:
     if not config.enabled:
         return [], None
@@ -158,7 +160,14 @@ def run_addition_llm_review(
     )
     user = USER_TEMPLATE.format(payload=json.dumps(payload, ensure_ascii=False, indent=2))
     try:
-        review = chat_completion_json(config, system=SYSTEM_PROMPT, user=user)
+        review = (router or LlmRouter(config)).complete_json(
+            capability=LlmCapability.RULE_REVIEW,
+            task="addition_semantic_review",
+            rule_id=RULE_ID,
+            system=SYSTEM_PROMPT,
+            user=user,
+            client=chat_completion_json,
+        )
     except LlmClientError:
         return [], None
     if not review:
@@ -175,6 +184,7 @@ def build_addition_llm_issues(
     addition_execution_path: AdditionExecutionPathDataset | None = None,
     prior_issues: list[QcIssue] | None = None,
     workbook_context: dict[str, Any] | None = None,
+    router: LlmRouter | None = None,
 ) -> list[QcIssue]:
     issues, _ = run_addition_llm_review(
         config,
@@ -184,6 +194,7 @@ def build_addition_llm_issues(
         addition_execution_path=addition_execution_path,
         prior_issues=prior_issues,
         workbook_context=workbook_context,
+        router=router,
     )
     return issues
 

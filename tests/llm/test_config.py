@@ -10,6 +10,10 @@ def test_load_llm_config_disabled_by_default(monkeypatch):
     monkeypatch.delenv("FA_QC_LLM_API_KEY", raising=False)
     cfg = load_llm_config(cli_enabled=False)
     assert cfg.enabled is False
+    assert cfg.identification_enabled is False
+    assert cfg.rule_review_enabled is None
+    assert cfg.hybrid_rule_enabled is None
+    assert cfg.narrative_enabled is None
 
 
 def test_load_llm_config_requires_api_key_when_enabled(monkeypatch):
@@ -26,6 +30,9 @@ def test_load_llm_config_from_env(monkeypatch):
     monkeypatch.setenv("FA_QC_LLM_RETRY_BACKOFF", "0.25")
     monkeypatch.setenv("FA_QC_LLM_PROXY", "http://127.0.0.1:7890")
     monkeypatch.setenv("FA_QC_LLM_TRUST_ENV", "false")
+    monkeypatch.setenv("FA_QC_LLM_IDENTIFICATION_ENABLED", "true")
+    monkeypatch.setenv("FA_QC_LLM_RULE_REVIEW_ENABLED", "false")
+    monkeypatch.setenv("FA_QC_LLM_DISABLED_RULE_IDS", "rule-a, rule-b")
     cfg = load_llm_config()
     assert cfg.enabled is True
     assert cfg.api_key == "sk-test"
@@ -34,6 +41,9 @@ def test_load_llm_config_from_env(monkeypatch):
     assert cfg.retry_backoff == 0.25
     assert cfg.proxy == "http://127.0.0.1:7890"
     assert cfg.trust_env is False
+    assert cfg.identification_enabled is True
+    assert cfg.rule_review_enabled is False
+    assert cfg.disabled_rule_ids == frozenset({"rule-a", "rule-b"})
 
 
 def test_load_llm_config_rejects_invalid_retry(monkeypatch):

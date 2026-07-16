@@ -10,6 +10,7 @@ from ingest.rollforward_sheet import RollforwardSheetDataset
 from ingest.summary_sheet import SummarySheetDataset
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
+from llm.router import LlmCapability, LlmRouter
 from rules.lead_common import exceeds_volatility_threshold
 from rules.parsing import parse_amount
 from rules.models import QcIssue, Severity
@@ -67,10 +68,11 @@ def build_lead_semantic_issues(
     config: LlmConfig,
     *,
     semantic_context: dict[str, Any] | None = None,
+    router: LlmRouter | None = None,
 ) -> list[QcIssue]:
     issues: list[QcIssue] = []
-    issues.extend(_review_expectation_semantic(lead, config, semantic_context=semantic_context))
-    issues.extend(_review_fluctuation_notes_semantic(lead, config, semantic_context=semantic_context))
+    issues.extend(_review_expectation_semantic(lead, config, semantic_context=semantic_context, router=router))
+    issues.extend(_review_fluctuation_notes_semantic(lead, config, semantic_context=semantic_context, router=router))
     return issues
 
 
@@ -105,6 +107,7 @@ def _review_expectation_semantic(
     config: LlmConfig,
     *,
     semantic_context: dict[str, Any] | None = None,
+    router: LlmRouter | None = None,
 ) -> list[QcIssue]:
     # 无预期行时由确定性规则 lead_expectation_analysis 处理，不在此重复报错。
     if not lead.expectations:
@@ -146,6 +149,8 @@ def _review_expectation_semantic(
         system=_EXPECTATION_SYSTEM,
         payload=payload,
         rationale_hint="预期分析",
+        rule_id=RULE_EXPECTATION,
+        router=router,
     )
     if out is None or out["assessment"] in {"sufficient", "unclear"}:
         return []
@@ -174,6 +179,7 @@ def _review_fluctuation_notes_semantic(
     config: LlmConfig,
     *,
     semantic_context: dict[str, Any] | None = None,
+    router: LlmRouter | None = None,
 ) -> list[QcIssue]:
     notes = (lead.fluctuation_notes or "").strip()
     # 空值由确定性规则 unexpected_movement_investigation 处理；这里仅评估“已填写但是否充分”。
@@ -201,6 +207,8 @@ def _review_fluctuation_notes_semantic(
         system=_FLUCTUATION_SYSTEM,
         payload=payload,
         rationale_hint="异常波动说明",
+        rule_id=RULE_FLUCTUATION,
+        router=router,
     )
     if out is None or out["assessment"] == "sufficient":
         return []
@@ -304,6 +312,8 @@ def _call_semantic_review(
     system: str,
     payload: dict,
     rationale_hint: str,
+    rule_id: str,
+    router: LlmRouter | None = None,
 ) -> dict[str, str] | None:
     user = (
         f"请判断该{rationale_hint}是否充分。返回 JSON：\n"
@@ -311,7 +321,14 @@ def _call_semantic_review(
         f"输入：{json.dumps(payload, ensure_ascii=False)}"
     )
     try:
-        out = chat_completion_json(config, system=system, user=user)
+        out = (router or LlmRouter(config)).complete_json(
+            capability=LlmCapability.RULE_REVIEW,
+            task=rule_id,
+            rule_id=rule_id,
+            system=system,
+            user=user,
+            client=chat_completion_json,
+        )
     except LlmClientError:
         return None
     assessment = str(out.get("assessment", "")).strip().lower()

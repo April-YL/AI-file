@@ -20,6 +20,11 @@ class LlmConfig:
     retry_backoff: float = 1.5
     proxy: str | None = None
     trust_env: bool = True
+    identification_enabled: bool = False
+    rule_review_enabled: bool | None = None
+    hybrid_rule_enabled: bool | None = None
+    narrative_enabled: bool | None = None
+    disabled_rule_ids: frozenset[str] = frozenset()
 
     @property
     def chat_completions_url(self) -> str:
@@ -56,6 +61,18 @@ def _env_int(name: str, default: int) -> int:
         raise LlmConfigError(f"{name} must be an integer.") from e
 
 
+def _env_optional_bool(name: str) -> bool | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    normalized = raw.strip().lower()
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    raise LlmConfigError(f"{name} must be a boolean.")
+
+
 def load_llm_config(*, cli_enabled: bool | None = None) -> LlmConfig:
     """
     从环境变量加载 LLM 配置。
@@ -82,6 +99,15 @@ def load_llm_config(*, cli_enabled: bool | None = None) -> LlmConfig:
     retry_backoff = _env_float("FA_QC_LLM_RETRY_BACKOFF", 1.5)
     proxy = os.getenv("FA_QC_LLM_PROXY", "").strip() or None
     trust_env = _env_bool("FA_QC_LLM_TRUST_ENV", True)
+    identification_enabled = _env_bool("FA_QC_LLM_IDENTIFICATION_ENABLED", False)
+    rule_review_enabled = _env_optional_bool("FA_QC_LLM_RULE_REVIEW_ENABLED")
+    hybrid_rule_enabled = _env_optional_bool("FA_QC_LLM_HYBRID_RULE_ENABLED")
+    narrative_enabled = _env_optional_bool("FA_QC_LLM_NARRATIVE_ENABLED")
+    disabled_rule_ids = frozenset(
+        item.strip()
+        for item in os.getenv("FA_QC_LLM_DISABLED_RULE_IDS", "").split(",")
+        if item.strip()
+    )
 
     if enabled and not api_key:
         raise LlmConfigError(
@@ -109,6 +135,11 @@ def load_llm_config(*, cli_enabled: bool | None = None) -> LlmConfig:
         retry_backoff=retry_backoff,
         proxy=proxy,
         trust_env=trust_env,
+        identification_enabled=identification_enabled,
+        rule_review_enabled=rule_review_enabled,
+        hybrid_rule_enabled=hybrid_rule_enabled,
+        narrative_enabled=narrative_enabled,
+        disabled_rule_ids=disabled_rule_ids,
     )
 
 
@@ -124,6 +155,11 @@ def build_llm_config(
     retry_backoff: float = 1.5,
     proxy: str | None = None,
     trust_env: bool = True,
+    identification_enabled: bool = False,
+    rule_review_enabled: bool | None = None,
+    hybrid_rule_enabled: bool | None = None,
+    narrative_enabled: bool | None = None,
+    disabled_rule_ids: frozenset[str] | set[str] | tuple[str, ...] = frozenset(),
 ) -> LlmConfig:
     """Build LLM config from explicit UI/runtime inputs without reading .env."""
     base_url = (base_url or "").strip() or "https://api.openai.com/v1"
@@ -155,4 +191,9 @@ def build_llm_config(
         retry_backoff=retry_backoff,
         proxy=proxy,
         trust_env=trust_env,
+        identification_enabled=identification_enabled,
+        rule_review_enabled=rule_review_enabled,
+        hybrid_rule_enabled=hybrid_rule_enabled,
+        narrative_enabled=narrative_enabled,
+        disabled_rule_ids=frozenset(disabled_rule_ids),
     )

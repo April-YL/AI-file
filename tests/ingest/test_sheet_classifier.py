@@ -1,5 +1,5 @@
-from ingest.sheet_classifier import classify_sheet, score_by_name
-from ingest.models import SheetKind
+from ingest.sheet_classifier import classify_sheet, resolve_sheet_decision, score_by_name
+from ingest.models import ResolutionStatus, SheetKind
 
 
 def test_name_variants_fa_list():
@@ -164,3 +164,23 @@ def test_period_headers_favor_rollforward_on_unnamed_sheet():
     ]
     kind, *_ = classify_sheet("Sheet1", rows)
     assert kind == SheetKind.ROLLFORWARD
+
+
+def test_fa_list_name_conflicting_with_tod_content_is_not_silently_adopted():
+    rows = [
+        ("资产编号", "资产名称", "原值", "本期计提折旧", "重新计算折旧费用", "差异"),
+        ("FA-TEST-001", "设备A", 1000, 100, 100, 0),
+    ]
+
+    kind, *_ = classify_sheet("FA list", rows)
+    decision = resolve_sheet_decision("FA list", rows)
+
+    assert kind == SheetKind.UNCLASSIFIED
+    assert decision.status == ResolutionStatus.AMBIGUOUS
+    assert decision.selected_kind is None
+    candidate_kinds = {kind for kind, _ in decision.candidates}
+    assert SheetKind.FA_LIST in candidate_kinds
+    assert candidate_kinds & {
+        SheetKind.DEPRECIATION_TOD,
+        SheetKind.DEPRECIATION_TOD_SAMPLE,
+    }

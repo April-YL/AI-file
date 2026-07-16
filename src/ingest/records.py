@@ -9,7 +9,7 @@ from typing import Any
 
 import openpyxl
 
-from ingest.field_mapping import map_headers
+from ingest.field_mapping import map_headers, resolve_fields, resolved_mappings
 from ingest.fa_list_amount_basis import resolve_fa_list_amount_basis, resolve_unique_header_basis
 from ingest.fa_list_field_semantics import (
     resolve_fa_list_identity_basis,
@@ -29,7 +29,12 @@ from ingest.models import (
     FaListRoutingDecision,
     FaListRoutingStatus,
     FaListSalvageMode,
+    EvidenceType,
+    FieldCandidate,
+    FieldEvidence,
     FieldMapping,
+    FieldResolutionDecision,
+    ResolutionStatus,
     SheetKind,
 )
 from ingest.sheet_classifier import classify_sheet, score_by_name
@@ -66,6 +71,7 @@ class FaListDataset:
     selected_amount_group_id: str | None = None
     amount_basis: FaListAmountBasis | None = None
     fa_profile: FaListReviewProfile | None = None
+    field_resolutions: dict[str, FieldResolutionDecision] = field(default_factory=dict)
 
 
 @dataclass
@@ -349,6 +355,58 @@ def _is_non_asset_summary_row(
     return aid in {"-", "—", "N/A", "NA"}
 
 
+def _confirm_profile_mapping(
+    decisions: dict[str, FieldResolutionDecision],
+    mapping: FieldMapping,
+    *,
+    source_sheet: str,
+    header_row: int | None,
+    reason: str,
+) -> None:
+    decision = decisions.setdefault(
+        mapping.standard_field,
+        FieldResolutionDecision(
+            standard_field=mapping.standard_field,
+            source_sheet=source_sheet,
+        ),
+    )
+    candidate = next(
+        (
+            item
+            for item in decision.candidates
+            if item.column_index == mapping.column_index
+        ),
+        None,
+    )
+    if candidate is None:
+        candidate = FieldCandidate(
+            standard_field=mapping.standard_field,
+            source_header=mapping.source_header,
+            column_index=mapping.column_index,
+        )
+        decision.candidates.append(candidate)
+    if not any(item.evidence_type == EvidenceType.STRUCTURAL_CONTEXT for item in candidate.evidence):
+        candidate.evidence.append(
+            FieldEvidence(
+                EvidenceType.STRUCTURAL_CONTEXT,
+                reason,
+                source_sheet=source_sheet,
+                row=header_row,
+                column=mapping.column_index,
+            )
+        )
+    decision.status = ResolutionStatus.RESOLVED
+    decision.selected_candidate = candidate
+    decision.evidence = list(candidate.evidence)
+    decision.negative_evidence = []
+    decision.header = mapping.source_header
+    decision.row = header_row
+    decision.column = mapping.column_index
+    decision.resolution_source = "deterministic_profile"
+    decision.acceptance_reason = reason
+    decision.rejection_reasons = []
+
+
 def parse_fa_list_rows(
     rows: list[tuple[Any, ...]],
     *,
@@ -396,7 +454,19 @@ def parse_fa_list_rows(
             fa_profile=profile,
         )
 
-    mapped_fields, _ = map_headers(header_cells, sheet_kind=sheet_kind)
+    field_resolutions: dict[str, FieldResolutionDecision] = {}
+    if sheet_kind in {SheetKind.FA_LIST, SheetKind.ADDITION_LIST, SheetKind.DISPOSAL_LIST}:
+        field_resolutions = resolve_fields(
+            header_cells,
+            sheet_kind,
+            rows=rows,
+            header_row=header_row,
+            number_formats=number_formats,
+            source_sheet=source_sheet,
+        )
+        mapped_fields = resolved_mappings(field_resolutions)
+    else:
+        mapped_fields, _ = map_headers(header_cells, sheet_kind=sheet_kind)
     salvage_basis = None
     if sheet_kind == SheetKind.FA_LIST:
         amount_basis = amount_basis or resolve_unique_header_basis(
@@ -406,14 +476,23 @@ def parse_fa_list_rows(
             amount_names = {"original_value", "accumulated_depreciation", "impairment_provision", "net_value"}
             header_by_column = {column: text for column, text in header_cells}
             mapped_fields = [item for item in mapped_fields if item.standard_field not in amount_names]
-            mapped_fields.extend(
+            basis_mappings = [
                 FieldMapping(
                     standard_field=measure,
                     source_header=header_by_column.get(column, f"column_{column}"),
                     column_index=column,
                 )
                 for measure, column in amount_basis.bindings.items()
-            )
+            ]
+            mapped_fields.extend(basis_mappings)
+            for mapping in basis_mappings:
+                _confirm_profile_mapping(
+                    field_resolutions,
+                    mapping,
+                    source_sheet=source_sheet,
+                    header_row=header_row,
+                    reason="confirmed by the existing FA list amount-basis profile",
+                )
         else:
             # Unconfirmed candidates remain diagnostic evidence on the basis;
             # they must not become canonical rule inputs.
@@ -440,12 +519,18 @@ def parse_fa_list_rows(
             header_by_column = {col: text for col, text in header_cells}
             for field_name, column in bindings:
                 if not any(item.standard_field == field_name for item in mapped_fields):
-                    mapped_fields.append(
-                        FieldMapping(
-                            standard_field=field_name,
-                            source_header=header_by_column.get(column, f"column_{column}"),
-                            column_index=column,
-                        )
+                    mapping = FieldMapping(
+                        standard_field=field_name,
+                        source_header=header_by_column.get(column, f"column_{column}"),
+                        column_index=column,
+                    )
+                    mapped_fields.append(mapping)
+                    _confirm_profile_mapping(
+                        field_resolutions,
+                        mapping,
+                        source_sheet=source_sheet,
+                        header_row=header_row,
+                        reason="confirmed by the existing FA list salvage-basis profile",
                     )
     amount_groups = (
         build_amount_field_groups(header_cells, sheet_kind=sheet_kind)
@@ -456,14 +541,23 @@ def parse_fa_list_rows(
     if selected_amount_group is not None:
         amount_names = {"original_value", "accumulated_depreciation", "impairment_provision", "net_value"}
         mapped_fields = [item for item in mapped_fields if item.standard_field not in amount_names]
-        mapped_fields.extend(
+        group_mappings = [
             FieldMapping(
                 standard_field=measure,
                 source_header=candidate.source_header,
                 column_index=candidate.column_index,
             )
             for measure, candidate in selected_amount_group.members.items()
-        )
+        ]
+        mapped_fields.extend(group_mappings)
+        for mapping in group_mappings:
+            _confirm_profile_mapping(
+                field_resolutions,
+                mapping,
+                source_sheet=source_sheet,
+                header_row=header_row,
+                reason="confirmed by the existing disposal amount-group profile",
+            )
     col_by_field = {m.standard_field: m.column_index for m in mapped_fields}
 
     records: list[AssetRecord] = []
@@ -511,6 +605,7 @@ def parse_fa_list_rows(
         selected_amount_group_id=selected_amount_group.group_id if selected_amount_group else None,
         amount_basis=amount_basis,
         fa_profile=fa_profile,
+        field_resolutions=field_resolutions,
     )
 
 
@@ -527,6 +622,59 @@ def load_fa_list_csv(path: str | Path, *, source_sheet: str = "FA list") -> FaLi
         source_sheet=source_sheet,
     )
     return dataset
+
+
+def apply_verified_field_selections(
+    dataset: FaListDataset,
+    *,
+    workbook_path: str | Path,
+    selections: dict[str, int],
+) -> list[str]:
+    """Apply validated existing candidates and reread only affected columns once."""
+    if not selections or not dataset.source_sheet:
+        return []
+    wb = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
+    applied: list[str] = []
+    try:
+        if dataset.source_sheet not in wb.sheetnames:
+            return []
+        ws = wb[dataset.source_sheet]
+        for field_name, column in selections.items():
+            decision = dataset.field_resolutions.get(field_name)
+            if decision is None or decision.reorganization_count >= 1:
+                continue
+            candidate = next(
+                (item for item in decision.candidates if item.column_index == column),
+                None,
+            )
+            if candidate is None or candidate.negative_evidence:
+                continue
+            if len({item.evidence_type for item in candidate.evidence}) < 2:
+                continue
+            for record in dataset.records:
+                if record.source_row is None:
+                    continue
+                setattr(record, field_name, ws.cell(record.source_row, column).value)
+            dataset.mapped_fields = [
+                item for item in dataset.mapped_fields if item.standard_field != field_name
+            ]
+            dataset.mapped_fields.append(
+                FieldMapping(field_name, candidate.source_header, candidate.column_index)
+            )
+            decision.selected_candidate = candidate
+            decision.status = ResolutionStatus.RESOLVED
+            decision.evidence = list(candidate.evidence)
+            decision.negative_evidence = []
+            decision.header = candidate.source_header
+            decision.column = candidate.column_index
+            decision.resolution_source = "llm_suggestion_system_verified"
+            decision.acceptance_reason = "LLM selected an existing candidate; system evidence revalidated"
+            decision.rejection_reasons = []
+            decision.reorganization_count += 1
+            applied.append(field_name)
+    finally:
+        wb.close()
+    return applied
 
 
 @dataclass

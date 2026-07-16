@@ -119,6 +119,73 @@ class SheetKind(str, Enum):
     SKIP = "skip"
 
 
+class ResolutionStatus(str, Enum):
+    RESOLVED = "RESOLVED"
+    AMBIGUOUS = "AMBIGUOUS"
+    MISSING = "MISSING"
+    INVALID = "INVALID"
+
+
+class EvidenceType(str, Enum):
+    HEADER_SEMANTIC = "HEADER_SEMANTIC"
+    VALUE_TYPE = "VALUE_TYPE"
+    VALUE_DISTRIBUTION = "VALUE_DISTRIBUTION"
+    STRUCTURAL_CONTEXT = "STRUCTURAL_CONTEXT"
+
+
+@dataclass(frozen=True)
+class FieldEvidence:
+    evidence_type: EvidenceType
+    description: str
+    source_sheet: str | None = None
+    row: int | None = None
+    column: int | None = None
+    cell_range: str | None = None
+
+
+@dataclass
+class FieldCandidate:
+    standard_field: str
+    source_header: str
+    column_index: int
+    evidence: list[FieldEvidence] = field(default_factory=list)
+    negative_evidence: list[FieldEvidence] = field(default_factory=list)
+    confidence: float = 0.0
+
+
+@dataclass
+class FieldResolutionDecision:
+    standard_field: str
+    candidates: list[FieldCandidate] = field(default_factory=list)
+    selected_candidate: FieldCandidate | None = None
+    status: ResolutionStatus = ResolutionStatus.MISSING
+    evidence: list[FieldEvidence] = field(default_factory=list)
+    negative_evidence: list[FieldEvidence] = field(default_factory=list)
+    source_sheet: str | None = None
+    header: str | None = None
+    row: int | None = None
+    column: int | None = None
+    cell_range: str | None = None
+    resolution_source: str = "deterministic"
+    acceptance_reason: str = ""
+    rejection_reasons: list[str] = field(default_factory=list)
+    reorganization_count: int = 0
+
+
+@dataclass
+class SheetResolutionDecision:
+    sheet_name: str
+    candidates: list[tuple[SheetKind, float]] = field(default_factory=list)
+    selected_kind: SheetKind | None = None
+    status: ResolutionStatus = ResolutionStatus.MISSING
+    evidence: list[FieldEvidence] = field(default_factory=list)
+    negative_evidence: list[FieldEvidence] = field(default_factory=list)
+    resolution_source: str = "deterministic"
+    acceptance_reason: str = ""
+    rejection_reasons: list[str] = field(default_factory=list)
+    reorganization_count: int = 0
+
+
 @dataclass
 class AssetRecord:
     """标准化 FA list 行记录（ingest 输出、rules 输入）。"""
@@ -280,6 +347,7 @@ class SheetClassification:
     missing_recommended: list[str] = field(default_factory=list)
     unmapped_headers: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    resolution_decision: SheetResolutionDecision | None = None
 
 
 @dataclass

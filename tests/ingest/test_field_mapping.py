@@ -3,8 +3,15 @@ from pathlib import Path
 
 import pytest
 
-from ingest.field_mapping import check_required_fields, map_headers, match_standard_field
-from ingest.models import FieldMapping, SheetKind
+from ingest.field_mapping import (
+    check_required_fields,
+    map_headers,
+    match_standard_field,
+    resolve_fields,
+    resolved_mappings,
+)
+from ingest.models import AssetRecord, FieldMapping, ResolutionStatus, SheetKind
+from ingest.records import FaListDataset, apply_verified_field_selections
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 CASE_HEADERS = FIXTURES / "field_mapping_case_headers.json"
@@ -123,3 +130,104 @@ def test_map_headers_dedupes_standard_field():
     fields = {m.standard_field for m in mapped}
     assert "asset_id" in fields
     assert len([m for m in mapped if m.standard_field == "asset_id"]) == 1
+
+
+def test_resolve_fields_prefers_month_life_over_year_life():
+    decisions = resolve_fields(
+        [(1, "资产编号"), (2, "使用年限(年)"), (3, "使用年限(月)")],
+        SheetKind.FA_LIST,
+        rows=[
+            ("资产编号", "使用年限(年)", "使用年限(月)"),
+            ("FA-TEST-001", 5, 60),
+            ("FA-TEST-002", 10, 120),
+        ],
+        header_row=1,
+        source_sheet="FA list",
+    )
+
+    decision = decisions["useful_life_months"]
+    assert decision.status == ResolutionStatus.RESOLVED
+    assert decision.selected_candidate.column_index == 3
+    assert any(candidate.negative_evidence for candidate in decision.candidates if candidate.column_index == 2)
+
+
+def test_resolve_fields_does_not_adopt_legacy_asset_id_by_name_alone():
+    decisions = resolve_fields(
+        [(1, "旧资产编号"), (2, "资产名称")],
+        SheetKind.FA_LIST,
+        rows=[("旧资产编号", "资产名称"), ("OLD-001", "设备")],
+        header_row=1,
+    )
+
+    assert decisions["asset_id"].status == ResolutionStatus.INVALID
+    assert "asset_id" not in {item.standard_field for item in resolved_mappings(decisions)}
+
+
+def test_resolve_fields_rejects_unscaled_salvage_rate_five():
+    decisions = resolve_fields(
+        [(1, "资产编号"), (2, "残值率")],
+        SheetKind.FA_LIST,
+        rows=[("资产编号", "残值率"), ("FA-TEST-001", 5), ("FA-TEST-002", 5)],
+        header_row=1,
+        number_formats={2: ["0", "0"]},
+    )
+
+    assert decisions["salvage_rate"].status == ResolutionStatus.INVALID
+
+
+def test_resolve_fields_keeps_equal_duplicate_candidates_ambiguous():
+    decisions = resolve_fields(
+        [(1, "资产编号"), (2, "资产编号")],
+        SheetKind.ADDITION_LIST,
+        rows=[("资产编号", "资产编号"), ("FA-TEST-001", "FA-TEST-101")],
+        header_row=1,
+    )
+
+    assert decisions["asset_id"].status == ResolutionStatus.AMBIGUOUS
+
+
+def test_verified_selection_reorganizes_affected_field_at_most_once(monkeypatch):
+    decisions = resolve_fields(
+        [(1, "资产编号"), (2, "资产编号")],
+        SheetKind.FA_LIST,
+        rows=[("资产编号", "资产编号"), ("OLD", "FA-TEST-001")],
+        header_row=1,
+    )
+    dataset = FaListDataset(
+        source_file="demo.xlsx",
+        source_sheet="FA list",
+        mapped_fields=[],
+        records=[AssetRecord(source_row=2)],
+        field_resolutions=decisions,
+    )
+
+    class Sheet:
+        def cell(self, row, column):
+            return type("Cell", (), {"value": "FA-TEST-001"})()
+
+    class Workbook:
+        sheetnames = ["FA list"]
+
+        def __getitem__(self, name):
+            return Sheet()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("ingest.records.openpyxl.load_workbook", lambda *args, **kwargs: Workbook())
+
+    first = apply_verified_field_selections(
+        dataset,
+        workbook_path="demo.xlsx",
+        selections={"asset_id": 2},
+    )
+    second = apply_verified_field_selections(
+        dataset,
+        workbook_path="demo.xlsx",
+        selections={"asset_id": 1},
+    )
+
+    assert first == ["asset_id"]
+    assert second == []
+    assert dataset.records[0].asset_id == "FA-TEST-001"
+    assert decisions["asset_id"].reorganization_count == 1

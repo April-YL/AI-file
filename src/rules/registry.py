@@ -5,7 +5,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Iterator
 
-from rules.models import AutomationLevel, QcIssue, Severity
+from rules.models import AutomationLevel, QcIssue, RuleExecutionMode, Severity
 
 # 脱敏规则字典 fixture（与桌面 xlsx 结构一致）
 RULE_DICTIONARY_CSV = (
@@ -51,6 +51,13 @@ class RuleSpec:
     agent_priority: AgentPriority = AgentPriority.MANUAL
     implementation: ImplementationStatus = ImplementationStatus.PLANNED
     notes: str = ""
+    execution_mode: RuleExecutionMode = RuleExecutionMode.DETERMINISTIC
+    required_data: tuple[str, ...] = ()
+    required_fields: tuple[str, ...] = ()
+    minimum_evidence: int = 0
+    allowed_llm_capability: str | None = None
+    insufficient_action: str = "DATA_INSUFFICIENT"
+    block_on_missing: bool = True
 
     def enrich_issue(self, issue: QcIssue) -> QcIssue:
         """将注册表元数据写入 QcIssue（不覆盖已有 message/suggestion）。"""
@@ -698,6 +705,10 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="FA-RC-001",
             rule_id="fa_list_required_fields",
+            required_data=("fa_list",),
+            required_fields=("asset_id", "original_value", "net_value"),
+            minimum_evidence=2,
+            block_on_missing=False,
             rule_name="FA list 必需字段完整",
             procedure_code="FA_LIST",
             sheet_hints=("FA list",),
@@ -714,6 +725,9 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="FA-RC-002",
             rule_id="unique_asset_id",
+            required_data=("fa_list",),
+            required_fields=("asset_id",),
+            minimum_evidence=2,
             rule_name="资产编号唯一",
             procedure_code="FA_LIST",
             sheet_hints=("FA list",),
@@ -730,6 +744,9 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="FA-RC-003",
             rule_id="asset_value_consistency",
+            required_data=("fa_list",),
+            required_fields=("original_value", "accumulated_depreciation", "impairment_provision", "net_value"),
+            minimum_evidence=2,
             rule_name="金额勾稽一致",
             procedure_code="FA_LIST",
             sheet_hints=("FA list",),
@@ -746,6 +763,9 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="FA-RC-004",
             rule_id="asset_amount_non_negative",
+            required_data=("fa_list",),
+            required_fields=("original_value", "accumulated_depreciation", "impairment_provision", "net_value"),
+            minimum_evidence=2,
             rule_name="金额非负",
             procedure_code="FA_LIST",
             sheet_hints=("FA list",),
@@ -762,6 +782,9 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="FA-RC-005",
             rule_id="useful_life_positive",
+            required_data=("fa_list",),
+            required_fields=("useful_life_months",),
+            minimum_evidence=2,
             rule_name="使用寿命为正",
             procedure_code="FA_LIST",
             sheet_hints=("FA list",),
@@ -778,6 +801,9 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="FA-RC-006",
             rule_id="salvage_rate_range",
+            required_data=("fa_list",),
+            required_fields=("salvage_rate",),
+            minimum_evidence=2,
             rule_name="残值率区间合理",
             procedure_code="FA_LIST",
             sheet_hints=("FA list",),
@@ -811,6 +837,9 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="SP-001",
             rule_id="addition_population_homogeneity",
+            required_data=("addition_list",),
+            required_fields=("addition_method",),
+            minimum_evidence=1,
             rule_name="交易类别区分",
             procedure_code="K.02.1",
             sheet_hints=("K.02.1", "K.02.2"),
@@ -828,6 +857,10 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="K02-003",
             rule_id="addition_required_fields",
+            required_data=("addition_list",),
+            required_fields=("asset_category", "asset_id", "asset_name", "start_date", "original_value", "addition_method"),
+            minimum_evidence=1,
+            block_on_missing=False,
             rule_name="新增清单字段完整",
             procedure_code="K.02.1",
             sheet_hints=("新增清单",),
@@ -862,6 +895,9 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="SP-002",
             rule_id="addition_rollforward_reconciliation",
+            required_data=("addition_list", "rollforward"),
+            required_fields=("original_value",),
+            minimum_evidence=2,
             rule_name="样本池与BKD一致性",
             procedure_code="K.02.1",
             sheet_hints=("K.02.1", "K.02.2", "新增清单"),
@@ -1132,6 +1168,10 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="DT-P0-006",
             rule_id="disposal_required_fields",
+            required_data=("disposal_list",),
+            required_fields=("asset_category", "asset_id", "asset_name", "original_value", "accumulated_depreciation", "impairment_provision", "disposal_date", "disposal_method"),
+            minimum_evidence=1,
+            block_on_missing=False,
             rule_name="处置清单必需字段完整",
             procedure_code="K.02.2",
             sheet_hints=("处置清单",),
@@ -1149,6 +1189,9 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="DT-P0-007",
             rule_id="disposal_list_net_value_recalculation",
+            required_data=("disposal_list",),
+            required_fields=("original_value", "accumulated_depreciation", "impairment_provision", "net_value"),
+            minimum_evidence=2,
             rule_name="处置清单净值重算",
             procedure_code="K.02.2",
             sheet_hints=("处置清单",),
@@ -1165,6 +1208,9 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="DT-P1-001",
             rule_id="disposal_method_classification",
+            required_data=("disposal_list",),
+            required_fields=("disposal_method",),
+            minimum_evidence=1,
             rule_name="处置减少方式分类",
             procedure_code="K.02.2",
             sheet_hints=("处置清单",),
@@ -1181,6 +1227,9 @@ def _specs() -> list[RuleSpec]:
         RuleSpec(
             dict_code="DT-P1-002",
             rule_id="disposal_other_reduction_over_tt",
+            required_data=("disposal_list", "lead"),
+            required_fields=("net_value", "disposal_method"),
+            minimum_evidence=1,
             rule_name="重大其他减少单独复核",
             procedure_code="K.02.2",
             sheet_hints=("处置清单",),

@@ -6,6 +6,7 @@ from pathlib import Path
 from ingest.records import FaListDataset
 from llm.config import LlmConfig, load_llm_config
 from llm.review import enrich_report_with_llm
+from llm.router import LlmCapability, LlmRouter
 from report.summary import QcReport, build_report
 from rules.execution_recorder import RuleExecutionRecorder, validate_execution_ledger
 from rules.models import ColumnContext
@@ -22,6 +23,7 @@ def run_fa_list_qc(
         mapped_fields={m.standard_field for m in dataset.mapped_fields},
         mapped_headers={m.standard_field: m.source_header for m in dataset.mapped_fields},
         mapped_columns={m.standard_field: m.column_index for m in dataset.mapped_fields},
+        field_resolutions=dataset.field_resolutions,
         source_sheet=dataset.source_sheet,
         procedure_code="FA_LIST",
     )
@@ -45,8 +47,9 @@ def run_fa_list_qc(
         execution_ledger=execution_ledger,
     )
     config = llm_config if llm_config is not None else load_llm_config(cli_enabled=llm)
-    if config.enabled:
-        report = enrich_report_with_llm(report, config, summary=None)
+    router = LlmRouter(config)
+    if router.is_enabled(LlmCapability.NARRATIVE):
+        report = enrich_report_with_llm(report, config, summary=None, router=router)
     return report
 
 

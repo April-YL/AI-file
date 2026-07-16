@@ -5,6 +5,7 @@ from typing import Any
 
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
+from llm.router import LlmCapability, LlmRouter
 from llm.prompts import SYSTEM_PROMPT, build_review_user_prompt
 from llm.redact import redact_issues_for_llm, redact_programs_for_llm, redact_value_tree
 from llm.workbook_payload import payload_section_names
@@ -63,6 +64,7 @@ def enrich_report_with_llm(
     *,
     summary: SummarySheetDataset | None = None,
     workbook: WorkbookQcContext | None = None,
+    router: LlmRouter | None = None,
 ) -> QcReport:
     """在报告上附加 LLM 复核摘要；失败时写入 error，不中断规则报告。"""
     if not config.enabled:
@@ -92,10 +94,12 @@ def enrich_report_with_llm(
     )
 
     try:
-        result = chat_completion_json(
-            config,
+        result = (router or LlmRouter(config)).complete_json(
+            capability=LlmCapability.NARRATIVE,
+            task="report_enrichment",
             system=SYSTEM_PROMPT,
             user=user_prompt,
+            client=chat_completion_json,
         )
         enrichment = LlmEnrichment(
             model=config.model,

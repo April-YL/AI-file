@@ -8,3 +8,6 @@ __all__ = [
     "load_llm_config",
     "enrich_report_with_llm",
 ]
+from llm.router import LlmCapability, LlmRouter
+
+__all__ = ["LlmCapability", "LlmRouter"]

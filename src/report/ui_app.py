@@ -1859,7 +1859,6 @@ def _render_coverage_diagnostics(data: dict) -> None:
                     _render_trace_detail(row)
 
 
-@st.cache_data(show_spinner=False)
 def _run_qc_cached(
     file_bytes: bytes,
     filename: str,

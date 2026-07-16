@@ -10,6 +10,7 @@ from ingest.lead_adjustment_grid import load_adjustment_grid_for_lead
 from ingest.lead_sheet import LeadSheetDataset
 from llm.client import LlmClientError, chat_completion_json
 from llm.config import LlmConfig
+from llm.router import LlmCapability, LlmRouter
 from rules.lead_adjustment_internal_consistency import build_adjustment_reconciliation_hints
 from rules.lead_adjustment_gating import PPE_DIRECT_ACCOUNT_ALIASES
 from rules.lead_common import parse_threshold_amount
@@ -176,15 +177,23 @@ Additional LEAD-017 instructions:
 """
 
 
-def _call_combined_review(config: LlmConfig, payload: dict[str, Any]) -> dict[str, Any] | None:
+def _call_combined_review(
+    config: LlmConfig,
+    payload: dict[str, Any],
+    *,
+    router: LlmRouter | None = None,
+) -> dict[str, Any] | None:
     user = _USER_COMBINED_TEMPLATE.format(
         payload=json.dumps(payload, ensure_ascii=False, indent=2),
     )
     try:
-        return chat_completion_json(
-            config,
+        return (router or LlmRouter(config)).complete_json(
+            capability=LlmCapability.HYBRID_RULE,
+            task="lead_adjustment_combined_review",
+            rule_id=RULE_SEMANTIC,
             system=_SYSTEM_COMBINED + _LEAD017_ADDITIONAL_SYSTEM,
             user=user,
+            client=chat_completion_json,
         )
     except LlmClientError:
         return None
@@ -274,6 +283,7 @@ def run_lead_adjustment_llm_review(
     workbook_path: str | None = None,
     deterministic_hints: list[dict[str, Any]] | None = None,
     workbook_context: dict[str, Any] | None = None,
+    router: LlmRouter | None = None,
 ) -> tuple[list[QcIssue], dict[str, Any] | None]:
     """
     调整汇总 LLM 复核入口。
@@ -298,7 +308,7 @@ def run_lead_adjustment_llm_review(
         # 分步模式留待 M3c-b；当前与合并 pass 相同
         pass
 
-    review = _call_combined_review(config, payload)
+    review = _call_combined_review(config, payload, router=router)
     if not review:
         return [], None
 
@@ -312,6 +322,7 @@ def build_lead_adjustment_issues(
     workbook_path: str | None = None,
     deterministic_hints: list[dict[str, Any]] | None = None,
     workbook_context: dict[str, Any] | None = None,
+    router: LlmRouter | None = None,
 ) -> list[QcIssue]:
     """仅返回 issues（兼容调用方）。"""
     issues, _ = run_lead_adjustment_llm_review(
@@ -320,6 +331,7 @@ def build_lead_adjustment_issues(
         workbook_path=workbook_path,
         deterministic_hints=deterministic_hints,
         workbook_context=workbook_context,
+        router=router,
     )
     return issues
 

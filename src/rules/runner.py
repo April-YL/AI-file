@@ -26,7 +26,8 @@ from rules.fa_list_observations import (
 )
 from rules.fa_list_required_fields import check_fa_list_required_fields
 from rules.models import ColumnContext, QcIssue
-from rules.registry import attach_rule_metadata
+from rules.readiness import evaluate_rule_readiness, readiness_spec_from_registry
+from rules.registry import attach_rule_metadata, get_by_rule_id
 from rules.salvage_rate_range import check_salvage_rate_range
 from rules.unique_asset_id import check_unique_asset_id
 from rules.useful_life_positive import check_useful_life_positive
@@ -64,6 +65,35 @@ def run_fa_list_rules(
 
     base_blockers = _base_profile_blockers(profile)
     if profile is not None and profile.population.status == FaListPopulationStatus.EMPTY:
+        required_readiness = _readiness_reasons("fa_list_required_fields", ctx)
+        if required_readiness:
+            _record_data_insufficient(
+                recorder, "fa_list_required_fields", ctx, profile, required_readiness
+            )
+        else:
+            required_issues = recorder.execute_rule(
+                "fa_list_required_fields",
+                check_fa_list_required_fields,
+                required_records,
+                ctx,
+                amount_basis,
+                profile,
+            )
+            recorder.record_observation(
+                "fa_list_required_fields",
+                build_required_fields_observation(required_records, ctx, required_issues, profile),
+            )
+            issues.extend(required_issues)
+        for rule_id in FA_LIST_RULE_IDS[1:]:
+            _record_data_insufficient(recorder, rule_id, ctx, profile, base_blockers)
+        return attach_rule_metadata(issues)
+
+    required_readiness = _readiness_reasons("fa_list_required_fields", ctx)
+    if required_readiness:
+        _record_data_insufficient(
+            recorder, "fa_list_required_fields", ctx, profile, required_readiness
+        )
+    else:
         required_issues = recorder.execute_rule(
             "fa_list_required_fields",
             check_fa_list_required_fields,
@@ -77,25 +107,9 @@ def run_fa_list_rules(
             build_required_fields_observation(required_records, ctx, required_issues, profile),
         )
         issues.extend(required_issues)
-        for rule_id in FA_LIST_RULE_IDS[1:]:
-            _record_data_insufficient(recorder, rule_id, ctx, profile, base_blockers)
-        return attach_rule_metadata(issues)
-
-    required_issues = recorder.execute_rule(
-        "fa_list_required_fields",
-        check_fa_list_required_fields,
-        required_records,
-        ctx,
-        amount_basis,
-        profile,
-    )
-    recorder.record_observation(
-        "fa_list_required_fields",
-        build_required_fields_observation(required_records, ctx, required_issues, profile),
-    )
-    issues.extend(required_issues)
 
     identity_blockers = list(base_blockers)
+    identity_blockers.extend(_readiness_reasons("unique_asset_id", ctx))
     if profile is not None and profile.identity_basis.scope == FaListIdentityScope.UNRESOLVED:
         identity_blockers.extend(profile.identity_basis.conflicts or ["identity key is unresolved"])
     if identity_blockers:
@@ -120,6 +134,7 @@ def run_fa_list_rules(
         issues.extend(unique_issues)
 
     amount_blockers = _amount_profile_blockers(profile, amount_basis)
+    amount_blockers.extend(_readiness_reasons("asset_amount_non_negative", ctx))
     if amount_blockers:
         for rule_id in ("asset_amount_non_negative", "asset_value_consistency"):
             _record_data_insufficient(recorder, rule_id, ctx, profile, amount_blockers)
@@ -148,6 +163,7 @@ def run_fa_list_rules(
         issues.extend(value_issues)
 
     life_blockers = list(base_blockers)
+    life_blockers.extend(_readiness_reasons("useful_life_positive", ctx))
     if "useful_life_months" not in ctx.mapped_fields:
         life_blockers.append("useful life column is missing")
     if life_blockers:
@@ -166,6 +182,7 @@ def run_fa_list_rules(
         issues.extend(life_issues)
 
     salvage_blockers = _salvage_profile_blockers(profile, ctx)
+    salvage_blockers.extend(_readiness_reasons("salvage_rate_range", ctx))
     if salvage_blockers:
         _record_data_insufficient(recorder, "salvage_rate_range", ctx, profile, salvage_blockers)
     else:
@@ -188,6 +205,17 @@ def run_fa_list_rules(
         issues.extend(salvage_issues)
 
     return attach_rule_metadata(issues)
+
+
+def _readiness_reasons(rule_id: str, ctx: ColumnContext) -> list[str]:
+    registry_spec = get_by_rule_id(rule_id)
+    if registry_spec is None:
+        return []
+    decision = evaluate_rule_readiness(
+        readiness_spec_from_registry(registry_spec),
+        ctx,
+    )
+    return [] if decision.ready else [decision.note()]
 
 
 def _base_profile_blockers(profile: FaListReviewProfile | None) -> list[str]:

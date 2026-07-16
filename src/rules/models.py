@@ -31,6 +31,18 @@ class AutomationLevel(str, Enum):
     MANUAL_ONLY = "MANUAL_ONLY"
 
 
+class ReadinessStatus(str, Enum):
+    READY = "READY"
+    DATA_INSUFFICIENT = "DATA_INSUFFICIENT"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class RuleExecutionMode(str, Enum):
+    DETERMINISTIC = "deterministic"
+    LLM = "llm"
+    HYBRID = "hybrid"
+
+
 @dataclass
 class ColumnContext:
     """已映射的标准字段集合（sheet 级）。"""
@@ -40,6 +52,7 @@ class ColumnContext:
     procedure_code: str = "FA_LIST"
     mapped_headers: dict[str, str] = field(default_factory=dict)
     mapped_columns: dict[str, int] = field(default_factory=dict)
+    field_resolutions: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

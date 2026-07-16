@@ -4,7 +4,20 @@ import re
 
 from ingest.constants import CONTENT_SIGNATURES, SKIP_SHEET_PREFIXES
 from ingest.header_detection import count_signature_fields, scan_rows_for_headers
-from ingest.models import SheetKind
+from ingest.models import (
+    EvidenceType,
+    FieldEvidence,
+    ResolutionStatus,
+    SheetKind,
+    SheetResolutionDecision,
+)
+
+
+_EVIDENCE_GATED_LIST_KINDS = {
+    SheetKind.FA_LIST,
+    SheetKind.ADDITION_LIST,
+    SheetKind.DISPOSAL_LIST,
+}
 
 
 def _norm_name(name: str) -> str:
@@ -220,6 +233,21 @@ def classify_sheet(
     if locked is not None:
         return locked
 
+    if (
+        name_kind in _EVIDENCE_GATED_LIST_KINDS
+        and name_score >= 0.7
+        and content_kind not in {name_kind, SheetKind.UNCLASSIFIED}
+        and content_score >= 0.45
+    ):
+        return (
+            SheetKind.UNCLASSIFIED,
+            max(name_score, content_score) * 0.5,
+            name_score,
+            content_score,
+            name_hint,
+            header_row,
+        )
+
     # K.02.1/K.02.1a 是程序页，不应因包含资产编号/原值等测试表头被当作 FA list 或 K.01。
     if name_kind in (
         SheetKind.ADDITION_TEST,
@@ -265,3 +293,55 @@ def classify_sheet(
         return name_kind, confidence, name_score, content_score, name_hint, header_row
 
     return SheetKind.UNCLASSIFIED, max(name_score, content_score) * 0.5, name_score, content_score, name_hint, header_row
+
+
+def resolve_sheet_decision(sheet_name: str, rows: list) -> SheetResolutionDecision:
+    """Return an auditable sheet decision while preserving classify_sheet compatibility."""
+    name_kind, name_score, _ = score_by_name(sheet_name)
+    content_kind, content_score, header_row, _ = score_by_content(
+        rows,
+        sheet_kind_hint=name_kind if name_score >= 0.7 else None,
+    )
+    selected, _, _, _, _, _ = classify_sheet(sheet_name, rows)
+    candidates = []
+    if name_kind != SheetKind.UNCLASSIFIED:
+        candidates.append((name_kind, name_score))
+    if content_kind != SheetKind.UNCLASSIFIED and not any(
+        kind == content_kind for kind, _ in candidates
+    ):
+        candidates.append((content_kind, content_score))
+    decision = SheetResolutionDecision(
+        sheet_name=sheet_name,
+        candidates=candidates,
+        selected_kind=selected if selected != SheetKind.UNCLASSIFIED else None,
+        status=ResolutionStatus.RESOLVED if selected != SheetKind.UNCLASSIFIED else ResolutionStatus.MISSING,
+        evidence=[
+            FieldEvidence(
+                EvidenceType.HEADER_SEMANTIC,
+                f"sheet-name candidate: {name_kind.value} ({name_score:.2f})",
+                source_sheet=sheet_name,
+            ),
+            FieldEvidence(
+                EvidenceType.STRUCTURAL_CONTEXT,
+                f"content candidate: {content_kind.value} ({content_score:.2f})",
+                source_sheet=sheet_name,
+                row=header_row,
+            ),
+        ],
+        acceptance_reason="deterministic name and content evidence agree",
+    )
+    if (
+        name_kind != content_kind
+        and name_kind != SheetKind.UNCLASSIFIED
+        and content_kind != SheetKind.UNCLASSIFIED
+        and name_score >= 0.7
+        and content_score >= 0.45
+    ):
+        decision.status = ResolutionStatus.AMBIGUOUS
+        decision.selected_kind = None
+        decision.acceptance_reason = ""
+        decision.rejection_reasons.append(
+            f"sheet name indicates {name_kind.value} but content indicates {content_kind.value}"
+        )
+        decision.negative_evidence = list(decision.evidence)
+    return decision

@@ -12,7 +12,13 @@ from rules.disposal_consistency import check_disposal_sample_match
 from rules.disposal_detailed_test import RULE_IDS as DISPOSAL_DETAILED_RULE_IDS
 from rules.disposal_detailed_test import run_disposal_detailed_test_rules
 from rules.disposal_list_rules import RULE_IDS as DISPOSAL_LIST_RULE_IDS
-from rules.disposal_list_rules import run_disposal_list_rules
+from rules.disposal_list_rules import (
+    check_disposal_method_classification,
+    check_disposal_other_reduction_over_tt,
+    check_disposal_required_fields,
+    check_disposal_list_net_values,
+    run_disposal_list_rules,
+)
 from rules.disposal_observations import (
     build_disposal_difference_investigation_observation,
     build_disposal_exception_followup_observation,
@@ -37,7 +43,9 @@ from rules.disposal_reconciliation import run_disposal_reconciliation_rules
 from rules.disposal_sampling_output import RULE_IDS as DISPOSAL_SAMPLING_RULE_IDS
 from rules.disposal_sampling_output import run_disposal_sampling_rules
 from rules.execution_recorder import RuleExecutionRecorder
-from rules.models import QcIssue
+from rules.models import ColumnContext, QcIssue
+from rules.readiness import evaluate_rule_readiness, readiness_spec_from_registry
+from rules.registry import get_by_rule_id
 
 DISPOSAL_RULE_IDS: tuple[str, ...] = (
     "disposal_sample_match",
@@ -46,6 +54,23 @@ DISPOSAL_RULE_IDS: tuple[str, ...] = (
     *DISPOSAL_SAMPLING_RULE_IDS,
     *DISPOSAL_DETAILED_RULE_IDS,
 )
+
+
+def _execute_disposal_list_rule(
+    recorder: RuleExecutionRecorder,
+    rule_id: str,
+    ctx: ColumnContext,
+    function,
+    *args,
+) -> list[QcIssue]:
+    spec = get_by_rule_id(rule_id)
+    if spec is None:
+        raise ValueError(f"Rule is not registered: {rule_id}")
+    decision = evaluate_rule_readiness(readiness_spec_from_registry(spec), ctx)
+    if not decision.ready:
+        recorder.record_data_insufficient(rule_id, decision.note())
+        return []
+    return recorder.execute_rule(rule_id, function, *args)
 
 
 def run_disposal_rules(
@@ -79,12 +104,60 @@ def run_disposal_rules(
     )
     issues.extend(reconciliation_issues)
     if not disposal_execution_path or disposal_execution_path.path_kind != "summary_waived":
-        list_issues = run_disposal_list_rules(
-            disposal_list,
-            disposal_list_summary,
-            lead=lead,
-            recorder=recorder,
-        )
+        if disposal_list is None:
+            list_issues = run_disposal_list_rules(
+                disposal_list,
+                disposal_list_summary,
+                lead=lead,
+                recorder=recorder,
+            )
+        else:
+            list_ctx = ColumnContext(
+                mapped_fields={m.standard_field for m in disposal_list.mapped_fields},
+                mapped_headers={m.standard_field: m.source_header for m in disposal_list.mapped_fields},
+                mapped_columns={m.standard_field: m.column_index for m in disposal_list.mapped_fields},
+                field_resolutions=disposal_list.field_resolutions,
+                source_sheet=disposal_list.source_sheet,
+                procedure_code="K.02.2",
+            )
+            list_issues = []
+            list_issues.extend(
+                _execute_disposal_list_rule(
+                    recorder,
+                    "disposal_required_fields",
+                    list_ctx,
+                    check_disposal_required_fields,
+                    disposal_list,
+                )
+            )
+            list_issues.extend(
+                _execute_disposal_list_rule(
+                    recorder,
+                    "disposal_list_net_value_recalculation",
+                    list_ctx,
+                    check_disposal_list_net_values,
+                    disposal_list,
+                )
+            )
+            list_issues.extend(
+                _execute_disposal_list_rule(
+                    recorder,
+                    "disposal_method_classification",
+                    list_ctx,
+                    check_disposal_method_classification,
+                    disposal_list_summary,
+                )
+            )
+            list_issues.extend(
+                _execute_disposal_list_rule(
+                    recorder,
+                    "disposal_other_reduction_over_tt",
+                    list_ctx,
+                    check_disposal_other_reduction_over_tt,
+                    disposal_list_summary,
+                    lead,
+                )
+            )
         _record_disposal_list_observations(
             recorder,
             disposal_list=disposal_list,
