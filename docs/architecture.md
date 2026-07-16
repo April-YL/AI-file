@@ -1,12 +1,12 @@
 # 架构说明
 
-固定资产质检 Agent 第一版采用清晰的三段式架构：数据接入、规则质检、报告输出。每个模块保持边界清楚，便于后续接入更多数据源和规则。
+固定资产质检 Agent 第一版采用数据接入、规则质检、报告输出三段式架构。Pilot 两批测试后，目标架构进一步明确为：在保留模块边界的基础上，由统一 Orchestrator 组织唯一正式执行链，由统一 LLM Router 管理贯穿识别、规则和报告的 LLM 能力。
 
 业务流程和底稿口径以 `docs/audit-workflow.md`、`docs/qc-checklist.md`、`docs/workpaper-fields.md` 和 `docs/rule-dictionary-mapping.md` 为准。
 
 业务规则需求以脱敏规则字典（`tests/fixtures/rule_dictionary_sanitized.csv`）为准；代码注册表见 `src/rules/registry.py`。
 
-规则真源、资料识别事实、执行台账、执行证据和 UI 展示边界见 [fa_qc_governance_plan.md](architecture/fa_qc_governance_plan.md)。
+规则真源、资料识别事实、规则级 Readiness、执行台账、执行证据和 UI 展示边界见 [fa_qc_governance_plan.md](architecture/fa_qc_governance_plan.md)。统一编排与 LLM 治理的当前正式决策见 [ADR-0003](decisions/ADR-0003-unified-orchestrator-and-llm-governance.md)。
 
 ## 数据流
 
@@ -25,23 +25,25 @@ src/rules/       执行质检规则，产生结构化问题
 src/report/      汇总结果，输出报告或人工复核清单
 ```
 
-### 目标（M3+ 大模型 Agent）
+### 当前目标（Pilot 准确性修复 + M3）
 
 ```text
-底稿/台账
-    → ingest ──(+ 可选 llm-map)──→ 结构化数据
-    → rules  ──→ findings（severity 仅由此判定）
-              ↘
-               llm-rules / llm-checklist（可选，语义项 + 逐条 checklist）
-              ↗
-    → report → JSON + HTML + 标注副本
-              ↘
-               llm 层 4 叙述（可选，低优先级；不改变 severity）
+输入底稿
+  → Orchestrator（唯一正式执行链）
+      → ingest：确定性识别、候选与证据
+      → LLM Router / identification（歧义时可选兜底）
+      → 系统验证 + 规则级 Readiness
+      → rules
+          ├─ 纯代码规则
+          ├─ 纯 LLM 语义规则
+          └─ 代码 + LLM 联合规则
+      → finding / execution_ledger / observation
+      → report：JSON + HTML + 标注副本 + 可选 narrative
 ```
 
-**产品优先级**：质检点准确 = **rules + ingest**；LLM 主战场为 **规则语义 + checklist**，非报告摘要。详见 [llm-agent-roadmap.md](llm-agent-roadmap.md) § 产品优先级。
+**产品优先级**：质检点准确优先于 finding 数量和报告叙述。先修复工作表/字段识别和规则级准入这一最低层共同根因，再校准具体规则和输出。LLM 是识别兜底、语义规则、联合规则和报告叙述的统一受控能力，不只是报告增强。
 
-编排入口仍为 **`fa-qc-run`（本地 CLI）**；不依赖 Cursor。
+产品入口仍包括 **`fa-qc-run`（本地 CLI）**和 Streamlit UI；二者必须进入同一个 Orchestrator 和同一套 LLM 配置，不依赖 Cursor。
 
 ## 模块职责
 
@@ -75,14 +77,15 @@ src/report/      汇总结果，输出报告或人工复核清单
 | 能力 | 状态 | 优先级 |
 | --- | --- | --- |
 | `config` / `client` / `redact` | 已实现 | 基础设施 |
-| `rule_review`（`--llm-rules`） | **待做** | **P1** |
-| `checklist_assess`（`--llm-checklist`） | **待做** | **P1** |
-| `map_headers`（`--llm-map`） | 待做 | P2 |
+| 统一 LLM Router | 待统一 | **基础设施** |
+| `identification`（识别兜底） | 部分复核能力已存在，尚未进入规则前闭环 | **P1** |
+| `rule_review` / `hybrid_rule` | 部分模块已存在，尚未统一治理 | **P1** |
 | `review` + `workbook_payload`（`--llm`，层 4 叙述） | 已实现 | **P3（低）** |
 
-- 调用可配置 **LLM API**（OpenAI 兼容）；脱敏后仅传结构化摘录 + findings。
-- **不**替代 `rules` 中 `AUTO_FAIL` / `AUTO_WARN`；**不**将 FAIL 改为 PASS。
-- 默认关闭（`FA_QC_LLM_ENABLED=false`）。
+- 所有 LLM 调用最终必须经统一 LLM Router，使用总开关、分能力开关和按规则控制；默认总开关关闭。
+- LLM 可以参与识别、纯 LLM 语义规则和代码 + LLM 联合规则，但不得绕过 registry 和 Orchestrator 直接形成正式 finding。
+- 金额勾稽、唯一性、必填等确定性部分仍由代码基于已验证字段执行；LLM 不得无依据将确定性 `FAIL` 改为 `PASS`。
+- 调用可配置 OpenAI 兼容 API；传输遵守脱敏和最小必要原则。
 
 ## 质检问题结构
 

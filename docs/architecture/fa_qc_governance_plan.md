@@ -4,10 +4,14 @@
 
 本方案用于约束固定资产质检 Agent 的规则来源、资料识别、执行记录、执行证据和展示边界，核心目标是避免系统运行成为黑箱。
 
+统一编排、LLM Router 和准确性修复的当前决策以 [ADR-0003](../decisions/ADR-0003-unified-orchestrator-and-llm-governance.md) 为准。本方案负责把该决策落实为规则准入和运行追溯要求。
+
 当前治理重点不是让 Agent 做更多判断，而是保证每次运行后都能稳定回答：
 
 - 系统识别到了哪些资料，在哪里，依据是什么。
+- 识别结果是否足以支持某一条具体规则执行；若不足，阻断字段和降级原因是什么。
 - 哪些规则属于可执行规则清单，哪些规则本次实际进入执行，哪些规则未执行或不适用。
+- 本次是否调用 LLM、用于哪种能力、调用失败后如何降级。
 - 每条已执行规则看了哪里、读了什么值、按什么逻辑检查、输出了什么结果。
 - UI 和 JSON 报告展示的是运行事实和执行证据，而不是展示层自行推断。
 
@@ -55,6 +59,15 @@
 - 命中的行号、列号、单元格或数据区域。
 - 是否使用了 fallback 识别路径。
 
+关键或歧义字段不得只保留一个映射结果，还应保留候选、选择结果、证据、反证、采纳或拒绝理由、位置和识别来源。可用的独立系统证据至少包括：
+
+- `HEADER_SEMANTIC`：表头和业务语义。
+- `VALUE_TYPE`：编号、日期、金额、百分比等数据类型或格式。
+- `VALUE_DISTRIBUTION`：非空率、重复率、取值范围和样本值合理性。
+- `STRUCTURAL_CONTEXT`：相邻列、表格区块、工作表用途和跨字段关系。
+
+关键或歧义字段原则上至少满足两类独立系统证据。LLM 可以帮助理解语义和缩小候选范围，但 LLM 输出本身不单独构成字段采纳证据。
+
 `ingest_result` 的识别状态应使用稳定枚举，例如：
 
 - `FOUND`：明确识别到资料。
@@ -65,6 +78,18 @@
 rules 只能基于 `ingest_result` 或 runner 实际读取结果执行，不得绕过资料识别事实自行假设资料存在。
 
 observation 中的 `checked_data` 必须能追溯到 `ingest_result` 或 runner 的实际定位结果。若资料不足，应记录 `missing_data`，不得伪造 location、values_read 或识别依据。
+
+### 2.1 规则级 Readiness
+
+Readiness 判断“某条规则是否具备执行条件”，不得以整本底稿统一可用或不可用代替。每条规则至少声明所需资料、字段、最低识别证据、是否允许 LLM 参与，以及资料不足时的降级动作。
+
+Readiness 至少使用：
+
+- `READY`：所需资料和字段达到最低证据要求，可以进入规则执行。
+- `DATA_INSUFFICIENT`：资料缺失、字段歧义或证据不足，规则不得形成确定性 `FAIL`。
+- `NOT_APPLICABLE`：当前底稿场景不适用该规则。
+
+聚合 `NEED_REVIEW` 可以用于降低重复展示，但必须保留全部受影响规则、阻断字段、具体原因和数据位置；不得用一条汇总 finding 掩盖未执行范围。
 
 ### 3. 规则真源：registry.py
 
@@ -78,17 +103,29 @@ runner、execution_ledger、UI 和 JSON 报告不得直接依赖 `review_rules.m
 
 新增或修改规则时，必须以 `registry.py` 为准，并同步确认：
 
+- 规则类型是纯代码、纯 LLM 语义还是代码 + LLM 联合规则。
+- 所需资料、字段、最低证据和 Readiness 降级动作是否明确。
 - 是否有实际 rule 函数。
 - 是否被 runner 接入。
 - 是否有 execution_ledger 记录。
 - 是否有 observation 执行证据。
 - 是否有测试覆盖。
 
+### 3.1 统一 Orchestrator 与 LLM Router
+
+Orchestrator 负责组织唯一正式执行链的阶段顺序、运行上下文、状态传递和失败降级，不重新实现 ingest、rules 或 report 的业务逻辑。
+
+LLM Router 是所有 LLM 能力的唯一调用入口，统一管理 LLM 总开关、`identification`、`rule_review`、`hybrid_rule`、`narrative` 分能力开关、按规则启停、模型与提示词版本、结构校验、超时、重试和失败策略。UI、CLI 和配置文件不得形成彼此独立的 LLM 控制链。
+
+识别兜底失败时不得猜测字段；纯 LLM 语义规则失败时降级为 `NEED_REVIEW`；联合规则失败时保留确定性事实，并将未完成的语义判断降级为 `NEED_REVIEW`。所有正式规则仍必须在 registry 登记。
+
 ### 4. 实际执行层：runner / rules
 
 runner / rules 负责实际执行检查。
 
 确定性规则应由代码读取已识别资料并执行，不使用 LLM 生成判断过程。
+
+除纯代码规则外，系统还允许经过 registry 登记的纯 LLM 语义规则和代码 + LLM 联合规则。纯 LLM 语义规则必须产生结构化结论、依据和引用位置；联合规则必须明确代码事实、LLM 判断和固定合并策略。LLM 不得绕过 Orchestrator 和 registry 直接生成正式 finding，也不得无依据把确定性 `FAIL` 改为 `PASS`。
 
 如果资料不足，规则应输出资料不足或需要复核的结果，并让 execution_ledger 记录未执行原因或执行状态；不得因为资料未识别就默认为通过。
 
@@ -165,9 +202,12 @@ UI 不得将旧字段、规则名称或 finding 文案拼接成新的执行解�
 
 ```text
 input workbook
-→ ingest_result：识别到了什么资料、在哪里、依据是什么
+→ Orchestrator：组织唯一正式执行链
+→ ingest_result：识别到了什么资料、候选在哪里、依据是什么
+→ LLM Router / identification：仅在允许且需要时提供受控识别兜底
+→ Rule Readiness：逐条规则判断 READY / DATA_INSUFFICIENT / NOT_APPLICABLE
 → registry.py：系统承认的可执行规则真源
-→ runner / rules：基于 ingest_result 和当前底稿场景决定本次实际进入哪些规则并执行
+→ runner / rules：执行纯代码、纯 LLM 语义或代码 + LLM 联合规则
 → execution_ledger：是否执行、finding 数、未执行原因
 → observation：看了哪里、读了什么值、怎么判断、结果是什么
 → UI / JSON：只展示，不推断
@@ -177,12 +217,11 @@ input workbook
 
 ## 当前阶段
 
-当前阶段只做 K.01 两条规则的证据级 HOW 样板：
+当前阶段是 Pilot 两批测试的准确性修复。第一批覆盖运行 28–40，第二批覆盖运行 41–57；修复应先处理工作表/字段识别过早定案和缺少规则级 Readiness 这一最低层共同根因，再校准具体规则和报告展示。
 
-- Lead / TB / K.01 后推表勾稽类规则。
-- FA list / K.01 后推表勾稽类规则。
+本阶段将 FA list 纳入，是为修复 Run 43、52、54 等样本中已确认的批量误报和检查覆盖漏失，不代表 FA list 重新成为长期开发主线；K.00–K.03 的既有程序口径、规则优先级和演进方向不变。
 
-本阶段目标是验证 CPA 能否直接看懂：
+此前 K.01 证据级 HOW 样板继续保留。本阶段进一步要求 CPA 能够直接看懂：
 
 - 系统看了哪个 sheet。
 - 看了哪个 section 或表格区域。
@@ -201,13 +240,15 @@ K.01 只是勾稽类 HOW 样板，不强行泛化到全部模块。
 1. 是否已登记 `src/rules/registry.py`。
 2. 是否明确 `data_sources` 和 `check_method`。
 3. `ingest_result` 或 runner 是否能定位所需 sheet、section、range。
-4. runner 是否接入 `execute_rule` 或等效的规则执行入口。
-5. `execution_ledger` 是否能记录 `EXECUTED`、`DATA_INSUFFICIENT`、`NOT_APPLICABLE`。
-6. observation 是否记录证据级 HOW。
-7. UI / JSON 是否只展示结构化结果，不自由总结或补判断。
-8. 是否有测试覆盖。
-9. 是否不会让 `review_rules.md` / skill rules 直接进入运行链路。
-10. 是否不会让 LLM 覆盖确定性规则结论。
+4. 是否声明所需字段、最低证据和规则级 Readiness 降级动作。
+5. 是否声明规则类型及允许使用的 LLM 能力。
+6. runner 是否接入 `execute_rule` 或等效的规则执行入口。
+7. `execution_ledger` 是否能记录 `EXECUTED`、`DATA_INSUFFICIENT`、`NOT_APPLICABLE`。
+8. observation 是否记录证据级 HOW；LLM 参与时是否记录能力、版本、依据和失败状态。
+9. UI / JSON 是否只展示结构化结果，不自由总结或补判断。
+10. 是否有测试覆盖字段正确、错列、缺列、同名字段、量纲歧义和 LLM 不可用等边界。
+11. 是否不会让 `review_rules.md` / skill rules 直接进入运行链路。
+12. 是否不会让 LLM 无依据覆盖确定性规则结论。
 
 ## 后续阶段
 
@@ -222,22 +263,24 @@ K.01 样板验收后，再按规则类型推广到其他模块：
 
 不同规则类型应设计不同 observation 模板，不能把 K.01 勾稽模板硬套到全部规则。
 
-### 2. LLM 初步验证
+### 2. LLM 受控接入与验证
 
-LLM 验证单独进行，不和 HOW 样板开发混在同一轮。
+LLM 是识别兜底、纯 LLM 语义规则、代码 + LLM 联合规则和报告叙述的统一受控能力，不只提供事后解释。所有调用必须经统一 LLM Router，并由 Orchestrator 在正确阶段发起。
 
 LLM 结果不得覆盖 deterministic rule 的结论，尤其不得将确定性规则的 `FAIL` 改为 `PASS`。
 
 LLM 输出必须可追溯到输入文本、底稿摘录或识别区块。
 
-初步验证只评估：
+验证至少评估：
 
 - 是否稳定。
 - 是否可复现。
 - 是否存在明显漂移。
 - 是否存在明显误报或漏报。
+- 总开关、分能力开关和按规则开关是否真实生效。
+- LLM 不可用时是否按能力安全降级且不影响无关确定性规则。
 
-LLM 适合作为语义复核或人工复核提示，不作为金额勾稽、唯一性、必填等确定性规则的替代。
+LLM 可以执行已注册的语义规则或参与联合规则；金额勾稽、唯一性、必填等确定性部分仍由代码基于已验证字段执行。
 
 ### 3. skill gap 逐步迁移
 
@@ -263,5 +306,7 @@ LLM 适合作为语义复核或人工复核提示，不作为金额勾稽、唯�
 - 不删除旧结构。
 - 不改变 execution_ledger 顶层结构。
 - 不让 UI 自由总结 HOW。
-- 不让 LLM 生成 deterministic rule 的 HOW。
+- 不让 LLM 绕过统一 Router、registry 或 Orchestrator 直接形成正式 finding。
+- 不按公司、文件名、运行编号、固定行列或单元格地址增加样本特例。
+- 不用 finding 数量上限、统一放宽阈值或缺失即通过掩盖上游识别问题。
 - 不让 review_rules.md / skill rules 进入运行链路。
