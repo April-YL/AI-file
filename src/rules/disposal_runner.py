@@ -6,6 +6,7 @@ from ingest.disposal_test_sheet import (
     DisposalTestSheetDataset,
 )
 from ingest.lead_sheet import LeadSheetDataset
+from ingest.models import SheetKind
 from ingest.records import DisposalListSummary, FaListDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset
 from rules.disposal_consistency import check_disposal_sample_match
@@ -43,6 +44,7 @@ from rules.disposal_reconciliation import run_disposal_reconciliation_rules
 from rules.disposal_sampling_output import RULE_IDS as DISPOSAL_SAMPLING_RULE_IDS
 from rules.disposal_sampling_output import run_disposal_sampling_rules
 from rules.execution_recorder import RuleExecutionRecorder
+from rules.list_readiness_context import build_list_column_context
 from rules.models import ColumnContext, QcIssue
 from rules.readiness import evaluate_rule_readiness, readiness_spec_from_registry
 from rules.registry import get_by_rule_id
@@ -86,12 +88,29 @@ def run_disposal_rules(
 ) -> list[QcIssue]:
     recorder = recorder or RuleExecutionRecorder()
     issues: list[QcIssue] = []
+    list_ctx = None
+    if disposal_list is not None:
+        available_data = {"disposal_list"}
+        if rollforward is not None:
+            available_data.add("rollforward")
+        if lead is not None:
+            available_data.add("lead")
+        if disposal_sample_output is not None:
+            available_data.add("disposal_sample_output")
+        list_ctx = build_list_column_context(
+            disposal_list,
+            expected_kind=SheetKind.DISPOSAL_LIST,
+            procedure_code="K.02.2",
+            available_data=available_data,
+            disposal_summary=disposal_list_summary,
+        )
     reconciliation_issues = run_disposal_reconciliation_rules(
         disposal_list_summary=disposal_list_summary,
         disposal_test=disposal_test,
         disposal_execution_path=disposal_execution_path,
         rollforward=rollforward,
         lead=lead,
+        readiness_ctx=list_ctx,
         recorder=recorder,
     )
     _record_disposal_reconciliation_observations(
@@ -112,14 +131,7 @@ def run_disposal_rules(
                 recorder=recorder,
             )
         else:
-            list_ctx = ColumnContext(
-                mapped_fields={m.standard_field for m in disposal_list.mapped_fields},
-                mapped_headers={m.standard_field: m.source_header for m in disposal_list.mapped_fields},
-                mapped_columns={m.standard_field: m.column_index for m in disposal_list.mapped_fields},
-                field_resolutions=disposal_list.field_resolutions,
-                source_sheet=disposal_list.source_sheet,
-                procedure_code="K.02.2",
-            )
+            assert list_ctx is not None
             list_issues = []
             list_issues.extend(
                 _execute_disposal_list_rule(
@@ -178,6 +190,7 @@ def run_disposal_rules(
             disposal_test=disposal_test,
             disposal_sample_output=disposal_sample_output,
             lead=lead,
+            readiness_ctx=list_ctx,
             recorder=recorder,
         )
         _record_disposal_sampling_observations(
@@ -399,7 +412,7 @@ def _record_if_present(
     rule_id: str,
     observation: dict,
 ) -> None:
-    if rule_id in recorder.executed_rule_ids():
+    if recorder.is_executed(rule_id):
         recorder.record_observation(rule_id, observation)
 
 

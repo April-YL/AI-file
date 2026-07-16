@@ -228,8 +228,28 @@ def _value_evidence(
         negative.append(FieldEvidence(EvidenceType.VALUE_TYPE, "currency-code values cannot serve as an amount column", **location))
     if field == "asset_id":
         text_values = [str(value).strip() for value in values]
-        if len(set(text_values)) / len(text_values) >= 0.8:
-            positive.append(FieldEvidence(EvidenceType.VALUE_DISTRIBUTION, "sample identifiers are predominantly distinct", **location))
+        distinct_ratio = len(set(text_values)) / len(text_values)
+        if distinct_ratio >= 0.8:
+            positive.append(
+                FieldEvidence(
+                    EvidenceType.VALUE_DISTRIBUTION,
+                    f"sample identifiers are predominantly distinct ({distinct_ratio:.0%})",
+                    **location,
+                )
+            )
+        normalized_header = re.sub(r"[\s_\-/]+", "", header).casefold()
+        if (
+            len(text_values) >= 10
+            and distinct_ratio < 0.2
+            and normalized_header in {"编号", "编码", "id", "code"}
+        ):
+            negative.append(
+                FieldEvidence(
+                    EvidenceType.VALUE_DISTRIBUTION,
+                    f"generic identifier has an extremely low distinct ratio ({distinct_ratio:.0%})",
+                    **location,
+                )
+            )
     if field == "useful_life_months" and numeric_ratio >= 0.8:
         positive.append(FieldEvidence(EvidenceType.VALUE_TYPE, "sample useful-life values are numeric", **location))
         if "年" in header and "月" not in header:

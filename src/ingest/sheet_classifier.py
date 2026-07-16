@@ -331,6 +331,8 @@ def resolve_sheet_decision(sheet_name: str, rows: list) -> SheetResolutionDecisi
         acceptance_reason="deterministic name and content evidence agree",
     )
     if (
+        selected == SheetKind.UNCLASSIFIED
+        and
         name_kind != content_kind
         and name_kind != SheetKind.UNCLASSIFIED
         and content_kind != SheetKind.UNCLASSIFIED
@@ -344,4 +346,8 @@ def resolve_sheet_decision(sheet_name: str, rows: list) -> SheetResolutionDecisi
             f"sheet name indicates {name_kind.value} but content indicates {content_kind.value}"
         )
         decision.negative_evidence = list(decision.evidence)
+    elif decision.status == ResolutionStatus.RESOLVED:
+        decision.acceptance_reason = (
+            "deterministic classifier resolved name/content evidence under existing guardrails"
+        )
     return decision

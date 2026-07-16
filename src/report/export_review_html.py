@@ -3,10 +3,13 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
-from report.export_annotated_workbook import COMMENTS_SHEET_NAME, comments_summary_stats
+from report.export_annotated_workbook import (
+    COMMENTS_SHEET_NAME,
+    _finding_issues,
+    comments_summary_stats,
+)
 from report.procedure_labels import procedure_label
 from report.summary import QcReport
-from rules.models import Severity
 
 
 def _esc(text: str | None) -> str:
@@ -24,7 +27,7 @@ def _severity_class(sev: str) -> str:
 
 def _findings_only_html(report: QcReport) -> str:
     """精简 HTML：仅展示 findings 清单与汇总统计。"""
-    issues = [i for i in report.issues if i.severity != Severity.PASS]
+    issues = _finding_issues(report)
     stats = comments_summary_stats(report)
     sev_order = {"FAIL": 0, "WARN": 1, "NEED_REVIEW": 2}
     issues = sorted(

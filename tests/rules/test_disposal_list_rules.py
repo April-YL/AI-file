@@ -381,6 +381,10 @@ def test_disposal_runner_records_evidence_how_for_low_risk_k022_rules():
         "disposal_sale_evidence_complete",
         "disposal_exception_followup",
     ):
+        if items[rule_id]["status"] != "EXECUTED":
+            assert "observation" not in items[rule_id]
+            assert items[rule_id]["status_note"]
+            continue
         observation = items[rule_id]["observation"]
         assert set(observation) == {
             "checked_data",

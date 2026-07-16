@@ -97,6 +97,7 @@ def _run_qc_cached(
 
         llm_config = build_llm_config(
             enabled=use_llm,
+            identification_enabled=use_llm,
             base_url=llm_base_url,
             api_key=llm_api_key,
             model=llm_model,

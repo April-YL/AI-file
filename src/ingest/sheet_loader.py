@@ -8,7 +8,7 @@ from typing import Any
 
 import openpyxl
 
-from ingest.models import SheetKind
+from ingest.models import SheetKind, SheetResolutionDecision
 from ingest.records import FaListDataset, parse_fa_list_rows
 from ingest.sheet_classifier import classify_sheet, score_by_name
 from ingest.sheet_period_routing import choose_sheet_candidate, sort_sheet_candidates
@@ -69,6 +69,7 @@ def load_asset_sheet_from_workbook(
     *,
     sheet_name: str | None = None,
     max_rows: int | None = None,
+    sheet_resolution: SheetResolutionDecision | None = None,
 ) -> FaListDataset:
     """读取指定类型的资产清单 sheet，输出统一 FaListDataset / AssetRecord。"""
     path = Path(path)
@@ -84,6 +85,7 @@ def load_asset_sheet_from_workbook(
             source_file=str(path),
             source_sheet=sheet_name,
             sheet_kind=kind,
+            sheet_resolution=sheet_resolution,
         )
 
     candidates = find_sheets_by_kind(path, kind, max_rows=max_rows or 100)

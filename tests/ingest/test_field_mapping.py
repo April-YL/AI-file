@@ -186,6 +186,39 @@ def test_resolve_fields_keeps_equal_duplicate_candidates_ambiguous():
     assert decisions["asset_id"].status == ResolutionStatus.AMBIGUOUS
 
 
+def test_generic_low_distinct_identifier_is_not_adopted_as_asset_id():
+    rows = [("编号", "名称")]
+    rows.extend(("100000", f"设备{idx}") for idx in range(20))
+
+    decisions = resolve_fields(
+        [(1, "编号"), (2, "名称")],
+        SheetKind.FA_LIST,
+        rows=rows,
+        header_row=1,
+    )
+
+    assert decisions["asset_id"].status == ResolutionStatus.INVALID
+    assert any(
+        "low distinct ratio" in item.description
+        for candidate in decisions["asset_id"].candidates
+        for item in candidate.negative_evidence
+    )
+
+
+def test_explicit_asset_identifier_is_not_blocked_only_because_values_repeat():
+    rows = [("固定资产编号", "固定资产名称")]
+    rows.extend(("FA-GROUP-001", f"设备{idx}") for idx in range(20))
+
+    decisions = resolve_fields(
+        [(1, "固定资产编号"), (2, "固定资产名称")],
+        SheetKind.FA_LIST,
+        rows=rows,
+        header_row=1,
+    )
+
+    assert decisions["asset_id"].status == ResolutionStatus.RESOLVED
+
+
 def test_verified_selection_reorganizes_affected_field_at_most_once(monkeypatch):
     decisions = resolve_fields(
         [(1, "资产编号"), (2, "资产编号")],

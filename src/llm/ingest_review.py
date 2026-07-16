@@ -21,7 +21,12 @@ from ingest.disposal_test_sheet import (
     DisposalTestSheetDataset,
 )
 from ingest.lead_sheet import LeadSheetDataset
-from ingest.models import ResolutionStatus, SheetKind
+from ingest.models import (
+    AmountBusinessRole,
+    AmountGroupStatus,
+    ResolutionStatus,
+    SheetKind,
+)
 from ingest.records import FaListDataset
 from ingest.rollforward_sheet import K01_SECTION_IDS, RollforwardSheetDataset
 from ingest.sheet_classifier import classify_sheet, score_by_name
@@ -242,6 +247,176 @@ rules, or infer PASS/FAIL. A suggestion is advisory and will be revalidated by c
 {"selections":[{"standard_field":"", "column":1, "confidence":0.0, "reason":""}]}.
 If evidence does not distinguish candidates, omit that field."""
 
+SHEET_IDENTIFICATION_SYSTEM_PROMPT = """You select a worksheet only from deterministic candidates
+for one stated list role. Do not invent sheet names, change the requested role, inspect amounts, or
+infer PASS/FAIL. Return JSON: {"sheet":"", "confidence":0.0, "reason":""}. If the supplied
+evidence cannot distinguish the candidates, return an empty sheet."""
+
+AMOUNT_GROUP_IDENTIFICATION_SYSTEM_PROMPT = """Choose one complete amount group only from the
+supplied group IDs for the stated list role. Treat the group as one unit; never mix individual
+columns across groups and never infer PASS/FAIL. Return JSON:
+{"group_id":"", "confidence":0.0, "reason":""}. Return an empty group_id when uncertain."""
+
+
+def run_amount_group_identification_fallback(
+    config: LlmConfig,
+    dataset: FaListDataset,
+    sheet_kind: SheetKind,
+    *,
+    router: LlmRouter | None = None,
+) -> str | None:
+    llm_router = router or LlmRouter(config)
+    selected = next(
+        (
+            group
+            for group in dataset.amount_groups
+            if group.group_id == dataset.selected_amount_group_id
+        ),
+        None,
+    )
+    if (
+        selected is None
+        or selected.status != AmountGroupStatus.AMBIGUOUS
+        or dataset.amount_group_reorganization_count >= 1
+        or not llm_router.is_enabled(LlmCapability.IDENTIFICATION)
+    ):
+        return None
+    target_role = (
+        AmountBusinessRole.ADDITION
+        if sheet_kind == SheetKind.ADDITION_LIST
+        else AmountBusinessRole.DISPOSAL
+    )
+    candidates = {
+        group.group_id: group
+        for group in dataset.amount_groups
+        if group.status in {AmountGroupStatus.AMBIGUOUS, AmountGroupStatus.CONFIRMED}
+        and group.business_role in {target_role, AmountBusinessRole.BALANCE}
+        and group.members
+    }
+    if len(candidates) < 2:
+        return None
+    payload = {
+        "sheet_kind": sheet_kind.value,
+        "source_sheet": dataset.source_sheet,
+        "groups": [
+            {
+                "group_id": group.group_id,
+                "period_role": group.period_role.value,
+                "currency_role": group.currency_role.value,
+                "business_role": group.business_role.value,
+                "members": [
+                    {
+                        "measure": measure,
+                        "column": candidate.column_index,
+                        "header": candidate.source_header[:80],
+                        "evidence": list(candidate.evidence),
+                    }
+                    for measure, candidate in group.members.items()
+                ],
+                "reasons": group.reasons,
+            }
+            for group in candidates.values()
+        ],
+    }
+    try:
+        raw = llm_router.complete_json(
+            capability=LlmCapability.IDENTIFICATION,
+            task="amount_group_candidate_selection_v1",
+            system=AMOUNT_GROUP_IDENTIFICATION_SYSTEM_PROMPT,
+            user=json.dumps(payload, ensure_ascii=False),
+            client=chat_completion_json,
+        )
+    except LlmClientError:
+        return None
+    group_id = str(raw.get("group_id") or "").strip()
+    try:
+        confidence = float(raw.get("confidence", 0))
+    except (TypeError, ValueError):
+        return None
+    group = candidates.get(group_id)
+    if group is None or confidence < getattr(config, "identification_min_confidence", 0.75):
+        return None
+    if len({candidate.column_index for candidate in group.members.values()}) != len(group.members):
+        return None
+    return group_id
+
+
+def run_sheet_identification_fallback(
+    config: LlmConfig,
+    structure: Any,
+    target_kind: SheetKind,
+    *,
+    router: LlmRouter | None = None,
+):
+    """Let LLM narrow an unresolved sheet choice, then verify it deterministically."""
+    llm_router = router or LlmRouter(config)
+    candidates = {
+        name: decision
+        for name, decision in structure.sheet_resolutions.items()
+        if decision.reorganization_count < 1
+        and any(kind == target_kind for kind, _score in decision.candidates)
+    }
+    if not candidates or not llm_router.is_enabled(LlmCapability.IDENTIFICATION):
+        return None
+    payload = {
+        "target_kind": target_kind.value,
+        "candidates": [
+            {
+                "sheet": name,
+                "scores": [
+                    {"kind": kind.value, "score": score}
+                    for kind, score in decision.candidates
+                ],
+                "evidence": [
+                    {
+                        "type": item.evidence_type.value,
+                        "description": item.description[:160],
+                    }
+                    for item in decision.evidence
+                ],
+                "negative_evidence": [
+                    item.description[:160] for item in decision.negative_evidence
+                ],
+            }
+            for name, decision in candidates.items()
+        ],
+    }
+    try:
+        raw = llm_router.complete_json(
+            capability=LlmCapability.IDENTIFICATION,
+            task="sheet_candidate_selection_v1",
+            system=SHEET_IDENTIFICATION_SYSTEM_PROMPT,
+            user=json.dumps(payload, ensure_ascii=False),
+            client=chat_completion_json,
+        )
+    except LlmClientError:
+        return None
+    selected_name = str(raw.get("sheet") or "").strip()
+    try:
+        confidence = float(raw.get("confidence", 0))
+    except (TypeError, ValueError):
+        return None
+    decision = candidates.get(selected_name)
+    if decision is None or confidence < getattr(config, "identification_min_confidence", 0.75):
+        return None
+    target_score = max(
+        (score for kind, score in decision.candidates if kind == target_kind),
+        default=0.0,
+    )
+    evidence_types = {item.evidence_type for item in decision.evidence}
+    if target_score < 0.55 or len(evidence_types) < 2 or decision.negative_evidence:
+        return None
+    return replace(
+        decision,
+        selected_kind=target_kind,
+        status=ResolutionStatus.RESOLVED,
+        resolution_source="llm_candidate_selection",
+        acceptance_reason=(
+            "LLM selected an existing candidate; system revalidated target score and two evidence types"
+        ),
+        reorganization_count=decision.reorganization_count + 1,
+    )
+
 
 def run_field_identification_fallback(
     config: LlmConfig,
@@ -317,7 +492,10 @@ def run_field_identification_fallback(
             confidence = float(item.get("confidence", 0))
         except (TypeError, ValueError):
             continue
-        if column in allowed.get(field_name, set()) and 0 <= confidence <= 1:
+        if (
+            column in allowed.get(field_name, set())
+            and config.identification_min_confidence <= confidence <= 1
+        ):
             selections[field_name] = column
     return selections
 

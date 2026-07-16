@@ -104,6 +104,42 @@ def test_readiness_reports_not_applicable_separately():
     assert result.status == ReadinessStatus.NOT_APPLICABLE
 
 
+def test_readiness_blocks_missing_required_dataset():
+    result = evaluate_rule_readiness(
+        RuleReadinessSpec(rule_id="demo", required_data=("addition_list", "rollforward")),
+        ColumnContext(available_data={"addition_list"}),
+    )
+
+    assert result.status == ReadinessStatus.DATA_INSUFFICIENT
+    assert "rollforward" in result.note()
+
+
+def test_readiness_blocks_unconfirmed_sheet_identity():
+    result = evaluate_rule_readiness(
+        RuleReadinessSpec(rule_id="demo", required_sheet_kind="addition_list"),
+        ColumnContext(
+            sheet_kind="disposal_list",
+            sheet_resolution_status="AMBIGUOUS",
+        ),
+    )
+
+    assert result.status == ReadinessStatus.DATA_INSUFFICIENT
+    assert "sheet identity" in result.note()
+
+
+def test_readiness_blocks_unconfirmed_business_semantics():
+    result = evaluate_rule_readiness(
+        RuleReadinessSpec(
+            rule_id="demo",
+            required_semantics=("addition_amount_group",),
+        ),
+        ColumnContext(semantic_states={}),
+    )
+
+    assert result.status == ReadinessStatus.DATA_INSUFFICIENT
+    assert "addition_amount_group" in result.note()
+
+
 def test_ambiguous_asset_id_does_not_produce_deterministic_fail():
     recorder = RuleExecutionRecorder()
     ctx = ColumnContext(

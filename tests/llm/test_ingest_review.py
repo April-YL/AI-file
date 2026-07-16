@@ -8,11 +8,19 @@ import openpyxl
 from ingest.addition_test_sheet import ModuleAssessment
 from ingest.lead_sheet import LeadSheetDataset
 from ingest.models import (
+    AmountBusinessRole,
+    AmountColumnCandidate,
+    AmountCurrencyRole,
+    AmountFieldGroup,
+    AmountGroupStatus,
+    AmountPeriodRole,
     EvidenceType,
     FieldCandidate,
     FieldEvidence,
     FieldResolutionDecision,
     ResolutionStatus,
+    SheetKind,
+    SheetResolutionDecision,
 )
 from ingest.records import FaListDataset
 from ingest.disposal_test_sheet import (
@@ -40,10 +48,13 @@ from llm.ingest_review import (
     parse_ingest_review_result,
     run_ingest_review,
     run_field_identification_fallback,
+    run_amount_group_identification_fallback,
+    run_sheet_identification_fallback,
     run_workbook_ingest_reviews,
     should_review_k022_disposal_ingest,
     should_review_lead_ingest,
 )
+from ingest.workbook_structure import WorkbookStructure
 
 
 def _config(*, enabled: bool = True) -> LlmConfig:
@@ -547,3 +558,142 @@ def test_identification_disabled_does_not_call_llm():
     with patch("llm.ingest_review.chat_completion_json") as client:
         assert run_field_identification_fallback(_config(), dataset) == {}
     client.assert_not_called()
+
+
+def test_sheet_identification_can_only_select_verified_candidate():
+    evidence = [
+        FieldEvidence(EvidenceType.HEADER_SEMANTIC, "name"),
+        FieldEvidence(EvidenceType.STRUCTURAL_CONTEXT, "headers"),
+    ]
+    structure = WorkbookStructure(
+        source_file="demo.xlsx",
+        sheet_resolutions={
+            "新增清单": SheetResolutionDecision(
+                sheet_name="新增清单",
+                candidates=[(SheetKind.ADDITION_LIST, 0.72)],
+                status=ResolutionStatus.AMBIGUOUS,
+                evidence=evidence,
+            )
+        },
+    )
+    config = LlmConfig(
+        enabled=True,
+        base_url="https://api.example.com/v1",
+        api_key="sk-test",
+        model="test",
+        identification_enabled=True,
+    )
+
+    with patch(
+        "llm.ingest_review.chat_completion_json",
+        return_value={"sheet": "新增清单", "confidence": 0.9},
+    ):
+        result = run_sheet_identification_fallback(
+            config,
+            structure,
+            SheetKind.ADDITION_LIST,
+        )
+
+    assert result is not None
+    assert result.selected_kind == SheetKind.ADDITION_LIST
+    assert result.status == ResolutionStatus.RESOLVED
+    assert result.reorganization_count == 1
+
+
+def test_sheet_identification_rejects_invented_candidate():
+    structure = WorkbookStructure(
+        source_file="demo.xlsx",
+        sheet_resolutions={
+            "新增清单": SheetResolutionDecision(
+                sheet_name="新增清单",
+                candidates=[(SheetKind.ADDITION_LIST, 0.8)],
+                status=ResolutionStatus.AMBIGUOUS,
+                evidence=[
+                    FieldEvidence(EvidenceType.HEADER_SEMANTIC, "name"),
+                    FieldEvidence(EvidenceType.STRUCTURAL_CONTEXT, "headers"),
+                ],
+            )
+        },
+    )
+    config = LlmConfig(
+        enabled=True,
+        base_url="https://api.example.com/v1",
+        api_key="sk-test",
+        model="test",
+        identification_enabled=True,
+    )
+
+    with patch(
+        "llm.ingest_review.chat_completion_json",
+        return_value={"sheet": "不存在", "confidence": 1.0},
+    ):
+        result = run_sheet_identification_fallback(
+            config,
+            structure,
+            SheetKind.ADDITION_LIST,
+        )
+
+    assert result is None
+
+
+def test_amount_group_identification_selects_whole_existing_group():
+    def group(group_id: str, start_col: int, status: AmountGroupStatus):
+        return AmountFieldGroup(
+            group_id=group_id,
+            members={
+                "original_value": AmountColumnCandidate(
+                    measure="original_value",
+                    source_header="本期新增原值",
+                    column_index=start_col,
+                    period_role=AmountPeriodRole.CURRENT_PERIOD,
+                    currency_role=AmountCurrencyRole.REPORTING,
+                    business_role=AmountBusinessRole.ADDITION,
+                    evidence=("header", "shared semantic group"),
+                ),
+                "net_value": AmountColumnCandidate(
+                    measure="net_value",
+                    source_header="本期新增净值",
+                    column_index=start_col + 1,
+                    period_role=AmountPeriodRole.CURRENT_PERIOD,
+                    currency_role=AmountCurrencyRole.REPORTING,
+                    business_role=AmountBusinessRole.ADDITION,
+                    evidence=("header", "shared semantic group"),
+                ),
+            },
+            period_role=AmountPeriodRole.CURRENT_PERIOD,
+            currency_role=AmountCurrencyRole.REPORTING,
+            business_role=AmountBusinessRole.ADDITION,
+            status=status,
+            confidence=0.9,
+        )
+
+    dataset = FaListDataset(
+        source_file="demo.xlsx",
+        source_sheet="新增清单",
+        mapped_fields=[],
+        records=[],
+        amount_groups=[
+            group("addition_list:amount:1", 3, AmountGroupStatus.AMBIGUOUS),
+            group("addition_list:amount:2", 8, AmountGroupStatus.CONFIRMED),
+        ],
+        selected_amount_group_id="addition_list:amount:1",
+    )
+    config = LlmConfig(
+        enabled=True,
+        base_url="https://api.example.com/v1",
+        api_key="sk-test",
+        model="test",
+        identification_enabled=True,
+    )
+
+    with patch(
+        "llm.ingest_review.chat_completion_json",
+        return_value={"group_id": "addition_list:amount:2", "confidence": 0.9},
+    ):
+        result = run_amount_group_identification_fallback(
+            config,
+            dataset,
+            SheetKind.ADDITION_LIST,
+        )
+
+    assert result == "addition_list:amount:2"

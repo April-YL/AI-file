@@ -9,7 +9,9 @@ from ingest.models import AmountGroupStatus
 from ingest.records import DisposalListSummary
 from rules.execution_recorder import RuleExecutionRecorder
 from rules.lead_common import cra_tier, field_values
-from rules.models import QcIssue, Severity
+from rules.models import ColumnContext, QcIssue, Severity
+from rules.readiness import evaluate_rule_readiness, readiness_spec_from_registry
+from rules.registry import get_by_rule_id
 from rules.parsing import amount_tolerance, parse_amount
 
 RULE_IDS = (
@@ -26,6 +28,7 @@ def run_disposal_sampling_rules(
     disposal_test: DisposalTestSheetDataset | None,
     disposal_sample_output: DisposalSampleOutputDataset | None,
     lead: LeadSheetDataset | None,
+    readiness_ctx: ColumnContext | None = None,
     recorder: RuleExecutionRecorder | None = None,
 ) -> list[QcIssue]:
     recorder = recorder or RuleExecutionRecorder()
@@ -39,12 +42,25 @@ def run_disposal_sampling_rules(
             _disposal_sample_output_readability_issue,
             disposal_sample_output,
         )
-    issues = recorder.execute_rule(
-        "disposal_sample_pool_amount_match",
-        check_disposal_sample_pool_amount,
-        disposal_list_summary,
-        disposal_sample_output,
+    spec = get_by_rule_id("disposal_sample_pool_amount_match")
+    decision = (
+        evaluate_rule_readiness(readiness_spec_from_registry(spec), readiness_ctx)
+        if spec is not None and readiness_ctx is not None
+        else None
     )
+    if readiness_ctx is None or (decision is not None and decision.ready):
+        issues = recorder.execute_rule(
+            "disposal_sample_pool_amount_match",
+            check_disposal_sample_pool_amount,
+            disposal_list_summary,
+            disposal_sample_output,
+        )
+    else:
+        recorder.record_data_insufficient(
+            "disposal_sample_pool_amount_match",
+            decision.note() if decision is not None else "rule readiness is unavailable",
+        )
+        issues = []
     issues.extend(recorder.execute_rule("disposal_sampling_te_cra_consistency", check_disposal_sampling_te_cra, disposal_sample_output, lead))
     issues.extend(recorder.execute_rule("disposal_sample_replacement_reason", check_disposal_sample_replacement_reason, disposal_test))
     return issues

@@ -36,7 +36,7 @@ def build_amount_field_groups(
     explicit_domain = any(
         item.business_role in {AmountBusinessRole.ADDITION, AmountBusinessRole.DISPOSAL}
         for item in candidates
-    )
+    ) or _headers_have_business_semantics(header_cells, sheet_kind)
     grouped: dict[tuple[AmountPeriodRole, AmountCurrencyRole, AmountBusinessRole], list[AmountColumnCandidate]] = defaultdict(list)
     for item in candidates:
         key = (item.period_role, item.currency_role, item.business_role)
@@ -179,6 +179,20 @@ def _target_business_role(sheet_kind: SheetKind) -> AmountBusinessRole:
     if sheet_kind == SheetKind.ADDITION_LIST:
         return AmountBusinessRole.ADDITION
     return AmountBusinessRole.BALANCE
+
+
+def _headers_have_business_semantics(
+    header_cells: list[tuple[int, str]],
+    sheet_kind: SheetKind,
+) -> bool:
+    text = " ".join(_norm(header) for _column, header in header_cells)
+    if sheet_kind == SheetKind.ADDITION_LIST:
+        tokens = ("\u65b0\u589e", "\u8d2d\u7f6e", "\u8f6c\u5165", "\u8d44\u672c\u5316")
+    elif sheet_kind == SheetKind.DISPOSAL_LIST:
+        tokens = ("\u5904\u7f6e", "\u51cf\u5c11", "\u62a5\u5e9f", "\u51fa\u552e", "\u6838\u9500")
+    else:
+        return False
+    return any(token in text for token in tokens)
 
 
 def _group_priority(group: AmountFieldGroup, sheet_kind: SheetKind) -> int:

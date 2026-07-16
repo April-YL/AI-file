@@ -7,7 +7,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from ingest.models import SheetClassification, SheetKind, WorkbookDiagnostic
+from ingest.models import (
+    ResolutionStatus,
+    SheetClassification,
+    SheetKind,
+    SheetResolutionDecision,
+    WorkbookDiagnostic,
+)
 from ingest.workbook_reader import diagnose_workbook
 
 # 标准程序流（与 docs/audit-workflow.md 一致）
@@ -58,6 +64,7 @@ class WorkbookStructure:
     sheets_by_kind: dict[str, list[SheetClassification]] = field(default_factory=dict)
     program_flow: list[dict[str, Any]] = field(default_factory=list)
     issues: list[StructureIssue] = field(default_factory=list)
+    sheet_resolutions: dict[str, SheetResolutionDecision] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +91,12 @@ def _group_sheets(diag: WorkbookDiagnostic) -> dict[str, list[SheetClassificatio
     grouped: dict[str, list[SheetClassification]] = {}
     for sheet in diag.sheets:
         if sheet.kind in (SheetKind.SKIP,):
+            continue
+        decision = sheet.resolution_decision
+        if decision is not None and (
+            decision.status != ResolutionStatus.RESOLVED
+            or decision.selected_kind != sheet.kind
+        ):
             continue
         key = sheet.kind.value
         grouped.setdefault(key, []).append(sheet)
@@ -169,4 +182,9 @@ def analyze_workbook_structure(
         sheets_by_kind=grouped,
         program_flow=program_flow,
         issues=issues,
+        sheet_resolutions={
+            sheet.sheet_name: sheet.resolution_decision
+            for sheet in diag.sheets
+            if sheet.resolution_decision is not None
+        },
     )

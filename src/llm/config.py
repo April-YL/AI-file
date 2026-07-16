@@ -21,6 +21,7 @@ class LlmConfig:
     proxy: str | None = None
     trust_env: bool = True
     identification_enabled: bool = False
+    identification_min_confidence: float = 0.75
     rule_review_enabled: bool | None = None
     hybrid_rule_enabled: bool | None = None
     narrative_enabled: bool | None = None
@@ -100,6 +101,9 @@ def load_llm_config(*, cli_enabled: bool | None = None) -> LlmConfig:
     proxy = os.getenv("FA_QC_LLM_PROXY", "").strip() or None
     trust_env = _env_bool("FA_QC_LLM_TRUST_ENV", True)
     identification_enabled = _env_bool("FA_QC_LLM_IDENTIFICATION_ENABLED", False)
+    identification_min_confidence = _env_float(
+        "FA_QC_LLM_IDENTIFICATION_MIN_CONFIDENCE", 0.75
+    )
     rule_review_enabled = _env_optional_bool("FA_QC_LLM_RULE_REVIEW_ENABLED")
     hybrid_rule_enabled = _env_optional_bool("FA_QC_LLM_HYBRID_RULE_ENABLED")
     narrative_enabled = _env_optional_bool("FA_QC_LLM_NARRATIVE_ENABLED")
@@ -123,6 +127,10 @@ def load_llm_config(*, cli_enabled: bool | None = None) -> LlmConfig:
         raise LlmConfigError("FA_QC_LLM_MAX_RETRIES must be 0 or greater.")
     if retry_backoff < 0:
         raise LlmConfigError("FA_QC_LLM_RETRY_BACKOFF must be 0 or greater.")
+    if not 0 <= identification_min_confidence <= 1:
+        raise LlmConfigError(
+            "FA_QC_LLM_IDENTIFICATION_MIN_CONFIDENCE must be between 0 and 1."
+        )
 
     return LlmConfig(
         enabled=enabled,
@@ -136,6 +144,7 @@ def load_llm_config(*, cli_enabled: bool | None = None) -> LlmConfig:
         proxy=proxy,
         trust_env=trust_env,
         identification_enabled=identification_enabled,
+        identification_min_confidence=identification_min_confidence,
         rule_review_enabled=rule_review_enabled,
         hybrid_rule_enabled=hybrid_rule_enabled,
         narrative_enabled=narrative_enabled,
@@ -156,6 +165,7 @@ def build_llm_config(
     proxy: str | None = None,
     trust_env: bool = True,
     identification_enabled: bool = False,
+    identification_min_confidence: float = 0.75,
     rule_review_enabled: bool | None = None,
     hybrid_rule_enabled: bool | None = None,
     narrative_enabled: bool | None = None,
@@ -179,6 +189,8 @@ def build_llm_config(
         raise LlmConfigError("重试次数不能小于 0。")
     if retry_backoff < 0:
         raise LlmConfigError("重试等待时间不能小于 0。")
+    if not 0 <= identification_min_confidence <= 1:
+        raise LlmConfigError("字段识别最低置信度必须在 0 到 1 之间。")
 
     return LlmConfig(
         enabled=enabled,
@@ -192,6 +204,7 @@ def build_llm_config(
         proxy=proxy,
         trust_env=trust_env,
         identification_enabled=identification_enabled,
+        identification_min_confidence=identification_min_confidence,
         rule_review_enabled=rule_review_enabled,
         hybrid_rule_enabled=hybrid_rule_enabled,
         narrative_enabled=narrative_enabled,

@@ -15,7 +15,9 @@ from ingest.models import AmountGroupStatus
 from ingest.rollforward_sheet import RollforwardSheetDataset, get_movement_transaction_amount
 from rules.execution_recorder import RuleExecutionRecorder
 from rules.lead_common import field_values
-from rules.models import QcIssue, Severity
+from rules.models import ColumnContext, QcIssue, Severity
+from rules.readiness import evaluate_rule_readiness, readiness_spec_from_registry
+from rules.registry import get_by_rule_id
 from rules.parsing import amount_tolerance, parse_amount
 
 RULE_IDS = (
@@ -41,6 +43,7 @@ def run_disposal_reconciliation_rules(
     disposal_execution_path: DisposalExecutionPathDataset | None,
     rollforward: RollforwardSheetDataset | None,
     lead: LeadSheetDataset | None,
+    readiness_ctx: ColumnContext | None = None,
     recorder: RuleExecutionRecorder | None = None,
 ) -> list[QcIssue]:
     recorder = recorder or RuleExecutionRecorder()
@@ -79,17 +82,29 @@ def run_disposal_reconciliation_rules(
             disposal_test.source_sheet,
         )
     )
-    issues.extend(
-        recorder.execute_rule(
-            "disposal_rollforward_reconciliation",
-            check_disposal_rollforward_reconciliation,
-            disposal_list_summary=disposal_list_summary,
-            matrix=matrix,
-            source_sheet=disposal_test.source_sheet,
-            rollforward=rollforward,
-            lead=lead,
-        )
+    spec = get_by_rule_id("disposal_rollforward_reconciliation")
+    decision = (
+        evaluate_rule_readiness(readiness_spec_from_registry(spec), readiness_ctx)
+        if spec is not None and readiness_ctx is not None
+        else None
     )
+    if readiness_ctx is None or (decision is not None and decision.ready):
+        issues.extend(
+            recorder.execute_rule(
+                "disposal_rollforward_reconciliation",
+                check_disposal_rollforward_reconciliation,
+                disposal_list_summary=disposal_list_summary,
+                matrix=matrix,
+                source_sheet=disposal_test.source_sheet,
+                rollforward=rollforward,
+                lead=lead,
+            )
+        )
+    else:
+        recorder.record_data_insufficient(
+            "disposal_rollforward_reconciliation",
+            decision.note() if decision is not None else "rule readiness is unavailable",
+        )
     issues.extend(
         recorder.execute_rule(
             "disposal_difference_investigation",

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TypedDict
 
 
-PILOT_BUILD = "PILOT-20260715.01"
+PILOT_BUILD = "PILOT-20260716.01"
 _DISTRIBUTION_NAME = "fixed-asset-qc-agent"
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 

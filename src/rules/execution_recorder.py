@@ -234,6 +234,10 @@ class RuleExecutionRecorder:
         """Return observed checkpoint ids, kept for report.rule_ids compatibility."""
         return list(self._records.keys())
 
+    def is_executed(self, rule_id: str) -> bool:
+        record = self._records.get(rule_id)
+        return record is not None and record.status == STATUS_EXECUTED
+
     def to_ledger(self) -> dict:
         items = []
         for record in self._records.values():

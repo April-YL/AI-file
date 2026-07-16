@@ -5,6 +5,7 @@ import pytest
 
 from ingest.models import SheetKind
 from ingest.records import (
+    _number_format_samples,
     find_fa_list_sheets,
     load_fa_list_csv,
     load_fa_list_from_workbook,
@@ -13,6 +14,18 @@ from ingest.records import (
 from ingest.sheet_loader import load_asset_sheet_from_workbook
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+
+
+def test_number_format_sampling_handles_unknown_worksheet_max_row():
+    class Worksheet:
+        max_row = None
+
+        def iter_rows(self, *, min_row, max_row):
+            assert min_row == 1
+            assert max_row == 250
+            return []
+
+    assert _number_format_samples(Worksheet(), max_rows=None) == {}
 
 
 @pytest.fixture

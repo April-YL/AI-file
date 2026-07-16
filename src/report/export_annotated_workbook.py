@@ -257,7 +257,56 @@ def _answer_for_preparer() -> None:
 
 
 def _finding_issues(report: QcReport) -> list[QcIssue]:
-    return [i for i in report.issues if i.severity != Severity.PASS]
+    raw = [i for i in report.issues if i.severity != Severity.PASS]
+    guard = (report.runtime_timings or {}).get("delivery_guard") or {}
+    if guard.get("disposition") != "REVIEW_REQUIRED":
+        return raw
+    held_indexes = {
+        index
+        for cluster in guard.get("clusters", [])
+        for index in cluster.get("held_issue_indexes", [])
+        if isinstance(index, int)
+    }
+    deliverable = [
+        issue
+        for index, issue in enumerate(report.issues)
+        if issue.severity != Severity.PASS and index not in held_indexes
+    ]
+    for cluster in guard.get("clusters", []):
+        indexes = [
+            index
+            for index in cluster.get("held_issue_indexes", [])
+            if isinstance(index, int) and 0 <= index < len(report.issues)
+        ]
+        if not indexes:
+            continue
+        representative = report.issues[indexes[0]]
+        deliverable.append(
+            QcIssue(
+                asset_id=None,
+                rule_id=representative.rule_id,
+                field=cluster.get("dominant_field") or representative.field,
+                severity=Severity.NEED_REVIEW,
+                message=(
+                    f"批量异常问题簇待复核：{cluster.get('finding_count', len(indexes))} 条原始 findings "
+                    f"集中于同一字段/列，已暂停逐条对外交付。"
+                ),
+                suggestion="先复核 Sheet 身份、字段映射和金额组语义；原始定位仍保留在系统 JSON。",
+                procedure_code=representative.procedure_code,
+                source_sheet=representative.source_sheet,
+                source_row=None,
+                source_col=cluster.get("dominant_source_col"),
+                dict_rule_code=representative.dict_rule_code,
+                rule_name=representative.rule_name,
+                problem_category=representative.problem_category,
+                reviewer_role=representative.reviewer_role,
+                qc_checkpoint=representative.qc_checkpoint,
+                automation_level=representative.automation_level,
+                k1_checklist_ref=representative.k1_checklist_ref,
+                review_source="交付止损",
+            )
+        )
+    return deliverable
 
 
 def split_fa_list_issues(issues: list[QcIssue]) -> tuple[list[QcIssue], list[QcIssue]]:

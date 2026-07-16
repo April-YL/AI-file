@@ -82,6 +82,37 @@ def test_disposal_amount_group_does_not_mix_ending_and_disposal_columns():
     assert dataset.records[0].disposal_method == "处置或报废"
 
 
+def test_disposal_balance_group_is_not_confirmed_when_occurrence_headers_exist():
+    rows = [
+        (
+            "固定资产编号",
+            "原值",
+            "累计折旧",
+            "累计减值",
+            "净值",
+            "报废",
+            "本年折旧",
+            "处置日期",
+            "减少方式",
+        ),
+        ("FA-D-001", 0, -80, 0, 0, -80, -20, "2025-12-31", "报废"),
+    ]
+
+    dataset = parse_fa_list_rows(
+        rows,
+        source_sheet="处置清单",
+        sheet_kind=SheetKind.DISPOSAL_LIST,
+    )
+    selected = next(
+        group
+        for group in dataset.amount_groups
+        if group.group_id == dataset.selected_amount_group_id
+    )
+
+    assert selected.business_role.value == "balance"
+    assert selected.status == AmountGroupStatus.INCOMPLETE
+
+
 def test_disposal_amount_group_marks_duplicate_semantic_blocks_as_conflicted():
     headers = [
         (1, "处置原值-CNY"), (2, "处置累计折旧-CNY"),

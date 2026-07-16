@@ -119,6 +119,13 @@ def render_findings_viewer() -> None:
         unsafe_allow_html=True,
     )
 
+    delivery_guard = (data.get("runtime_timings") or {}).get("delivery_guard") or {}
+    if delivery_guard.get("disposition") == "REVIEW_REQUIRED":
+        st.warning(
+            "检测到批量异常问题簇：逐条 findings 已保留供追溯，但标注底稿和 HTML "
+            "仅交付聚合待复核提示。请先确认 Sheet、字段映射和金额组口径。"
+        )
+
     # --- 底稿交付物下载（仅在有真实数据时显示）---
     if json_bytes and html_bytes and json_bytes != b"{}" and html_bytes != b"<html></html>":
         render_download_bar(filename, run_id, json_bytes, html_bytes, annotated_bytes)

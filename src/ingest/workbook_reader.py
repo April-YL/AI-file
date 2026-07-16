@@ -8,7 +8,7 @@ import openpyxl
 from ingest.field_mapping import check_required_fields, map_headers
 from ingest.header_detection import scan_rows_for_headers
 from ingest.models import SheetClassification, SheetKind, WorkbookDiagnostic
-from ingest.sheet_classifier import classify_sheet, score_by_name
+from ingest.sheet_classifier import classify_sheet, resolve_sheet_decision, score_by_name
 
 
 def read_worksheet_rows(
@@ -89,6 +89,7 @@ def diagnose_workbook(path: str | Path, max_rows: int = 100) -> WorkbookDiagnost
         kind, confidence, name_score, content_score, name_hint, header_row = classify_sheet(
             title, rows
         )
+        resolution_decision = resolve_sheet_decision(title, rows)
 
         notes: list[str] = []
         if kind != SheetKind.SKIP:
@@ -124,6 +125,7 @@ def diagnose_workbook(path: str | Path, max_rows: int = 100) -> WorkbookDiagnost
                 missing_recommended=missing_rec,
                 unmapped_headers=unmapped[:24],
                 notes=notes,
+                resolution_decision=resolution_decision,
             )
         )
 

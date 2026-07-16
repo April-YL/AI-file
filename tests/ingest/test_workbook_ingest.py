@@ -157,6 +157,11 @@ def test_workbook_structure_core_sheets(reconciliation_workbook: Path):
         i for i in structure.issues if i.code == StructureIssueCode.MISSING_CORE_SHEET
     ]
     assert not missing_core
+    assert structure.sheet_resolutions
+    for sheets in structure.sheets_by_kind.values():
+        for sheet in sheets:
+            assert sheet.resolution_decision is not None
+            assert sheet.resolution_decision.status.value == "RESOLVED"
 
 
 def test_workbook_structure_skips_internal_storage_sheet(tmp_path: Path):

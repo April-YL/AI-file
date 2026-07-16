@@ -20,6 +20,7 @@ from ingest.fa_list_routing import choose_fa_list_route
 from ingest.header_detection import scan_rows_for_headers
 from ingest.amount_field_groups import build_amount_field_groups, select_amount_field_group
 from ingest.models import (
+    AmountBusinessRole,
     AmountFieldGroup,
     AmountGroupStatus,
     AssetRecord,
@@ -35,6 +36,7 @@ from ingest.models import (
     FieldMapping,
     FieldResolutionDecision,
     ResolutionStatus,
+    SheetResolutionDecision,
     SheetKind,
 )
 from ingest.sheet_classifier import classify_sheet, score_by_name
@@ -72,6 +74,9 @@ class FaListDataset:
     amount_basis: FaListAmountBasis | None = None
     fa_profile: FaListReviewProfile | None = None
     field_resolutions: dict[str, FieldResolutionDecision] = field(default_factory=dict)
+    sheet_resolution: SheetResolutionDecision | None = None
+    amount_group_resolution_source: str = "deterministic"
+    amount_group_reorganization_count: int = 0
 
 
 @dataclass
@@ -407,15 +412,57 @@ def _confirm_profile_mapping(
     decision.rejection_reasons = []
 
 
+def _apply_system_verified_selections(
+    decisions: dict[str, FieldResolutionDecision],
+    mapped_fields: list[FieldMapping],
+    selections: dict[str, int],
+) -> list[FieldMapping]:
+    updated = list(mapped_fields)
+    for field_name, column in selections.items():
+        decision = decisions.get(field_name)
+        if decision is None:
+            continue
+        candidate = next(
+            (item for item in decision.candidates if item.column_index == column),
+            None,
+        )
+        if (
+            candidate is None
+            or candidate.negative_evidence
+            or len({item.evidence_type for item in candidate.evidence}) < 2
+        ):
+            continue
+        updated = [item for item in updated if item.standard_field != field_name]
+        updated.append(
+            FieldMapping(field_name, candidate.source_header, candidate.column_index)
+        )
+        decision.selected_candidate = candidate
+        decision.status = ResolutionStatus.RESOLVED
+        decision.evidence = list(candidate.evidence)
+        decision.negative_evidence = []
+        decision.header = candidate.source_header
+        decision.column = candidate.column_index
+        decision.resolution_source = "llm_suggestion_system_verified"
+        decision.acceptance_reason = (
+            "LLM selected an existing candidate; system evidence revalidated"
+        )
+        decision.rejection_reasons = []
+        decision.reorganization_count = 1
+    return updated
+
+
 def parse_fa_list_rows(
     rows: list[tuple[Any, ...]],
     *,
     source_file: str = "",
     source_sheet: str = "FA list",
     sheet_kind: SheetKind = SheetKind.FA_LIST,
+    sheet_resolution: SheetResolutionDecision | None = None,
     amount_basis: FaListAmountBasis | None = None,
     routing: FaListRoutingDecision | None = None,
     number_formats: dict[int, list[str]] | None = None,
+    verified_selections: dict[str, int] | None = None,
+    verified_amount_group_id: str | None = None,
 ) -> FaListDataset:
     header_row, header_cells, _ = scan_rows_for_headers(rows, sheet_kind=sheet_kind)
     if not header_cells:
@@ -452,6 +499,7 @@ def parse_fa_list_rows(
             records=[],
             amount_basis=profile.amount_basis if profile else amount_basis,
             fa_profile=profile,
+            sheet_resolution=sheet_resolution,
         )
 
     field_resolutions: dict[str, FieldResolutionDecision] = {}
@@ -465,6 +513,12 @@ def parse_fa_list_rows(
             source_sheet=source_sheet,
         )
         mapped_fields = resolved_mappings(field_resolutions)
+        if verified_selections:
+            mapped_fields = _apply_system_verified_selections(
+                field_resolutions,
+                mapped_fields,
+                verified_selections,
+            )
     else:
         mapped_fields, _ = map_headers(header_cells, sheet_kind=sheet_kind)
     salvage_basis = None
@@ -534,11 +588,34 @@ def parse_fa_list_rows(
                     )
     amount_groups = (
         build_amount_field_groups(header_cells, sheet_kind=sheet_kind)
-        if sheet_kind == SheetKind.DISPOSAL_LIST
+        if sheet_kind in {SheetKind.ADDITION_LIST, SheetKind.DISPOSAL_LIST}
         else []
     )
     selected_amount_group = select_amount_field_group(amount_groups)
-    if selected_amount_group is not None:
+    if verified_amount_group_id:
+        verified_group = next(
+            (group for group in amount_groups if group.group_id == verified_amount_group_id),
+            None,
+        )
+        if verified_group is not None and verified_group.status in {
+            AmountGroupStatus.CONFIRMED,
+            AmountGroupStatus.AMBIGUOUS,
+        }:
+            selected_amount_group = verified_group
+            if selected_amount_group.status == AmountGroupStatus.AMBIGUOUS:
+                selected_amount_group.status = AmountGroupStatus.CONFIRMED
+    if (
+        selected_amount_group is not None
+        and selected_amount_group.status
+        in {AmountGroupStatus.CONFIRMED, AmountGroupStatus.INCOMPLETE}
+        and selected_amount_group.business_role
+        in {
+            AmountBusinessRole.ADDITION
+            if sheet_kind == SheetKind.ADDITION_LIST
+            else AmountBusinessRole.DISPOSAL,
+            AmountBusinessRole.BALANCE,
+        }
+    ):
         amount_names = {"original_value", "accumulated_depreciation", "impairment_provision", "net_value"}
         mapped_fields = [item for item in mapped_fields if item.standard_field not in amount_names]
         group_mappings = [
@@ -556,7 +633,7 @@ def parse_fa_list_rows(
                 mapping,
                 source_sheet=source_sheet,
                 header_row=header_row,
-                reason="confirmed by the existing disposal amount-group profile",
+                reason=f"confirmed by the existing {sheet_kind.value} amount-group profile",
             )
     col_by_field = {m.standard_field: m.column_index for m in mapped_fields}
 
@@ -606,6 +683,13 @@ def parse_fa_list_rows(
         amount_basis=amount_basis,
         fa_profile=fa_profile,
         field_resolutions=field_resolutions,
+        sheet_resolution=sheet_resolution,
+        amount_group_resolution_source=(
+            "llm_suggestion_system_verified"
+            if verified_amount_group_id
+            else "deterministic"
+        ),
+        amount_group_reorganization_count=1 if verified_amount_group_id else 0,
     )
 
 
@@ -677,6 +761,66 @@ def apply_verified_field_selections(
     return applied
 
 
+def rebuild_list_dataset_after_verified_selections(
+    dataset: FaListDataset,
+    *,
+    workbook_path: str | Path,
+    sheet_kind: SheetKind,
+    applied_fields: list[str],
+    verified_amount_group_id: str | None = None,
+) -> bool:
+    """Reread one affected sheet and rebuild every derivative exactly once."""
+    if (not applied_fields and not verified_amount_group_id) or not dataset.source_sheet:
+        return False
+    selections = {
+        field_name: decision.selected_candidate.column_index
+        for field_name in applied_fields
+        if (decision := dataset.field_resolutions.get(field_name)) is not None
+        and decision.selected_candidate is not None
+    }
+    if not selections and not verified_amount_group_id:
+        return False
+
+    wb = openpyxl.load_workbook(
+        workbook_path,
+        read_only=True,
+        data_only=True,
+    )
+    try:
+        if dataset.source_sheet not in wb.sheetnames:
+            return False
+        ws = wb[dataset.source_sheet]
+        rows = read_worksheet_rows(ws, max_rows=None)
+        number_formats = _number_format_samples(ws, max_rows=None)
+    finally:
+        wb.close()
+
+    routing = dataset.fa_profile.routing if dataset.fa_profile is not None else None
+    rebuilt = parse_fa_list_rows(
+        rows,
+        source_file=dataset.source_file,
+        source_sheet=dataset.source_sheet,
+        sheet_kind=sheet_kind,
+        sheet_resolution=dataset.sheet_resolution,
+        amount_basis=dataset.amount_basis,
+        routing=routing,
+        number_formats=number_formats,
+        verified_selections=selections,
+        verified_amount_group_id=verified_amount_group_id,
+    )
+    dataset.mapped_fields = rebuilt.mapped_fields
+    dataset.records = rebuilt.records
+    dataset.amount_groups = rebuilt.amount_groups
+    dataset.selected_amount_group_id = rebuilt.selected_amount_group_id
+    dataset.amount_basis = rebuilt.amount_basis
+    dataset.fa_profile = rebuilt.fa_profile
+    dataset.field_resolutions = rebuilt.field_resolutions
+    dataset.sheet_resolution = rebuilt.sheet_resolution
+    dataset.amount_group_resolution_source = rebuilt.amount_group_resolution_source
+    dataset.amount_group_reorganization_count = rebuilt.amount_group_reorganization_count
+    return True
+
+
 @dataclass
 class FaListSheetCandidate:
     sheet_name: str
@@ -728,6 +872,7 @@ def load_fa_list_from_workbook(
     k01_sheet_name: str | None = None,
     routing: FaListRoutingDecision | None = None,
     k01_route_reason: str | None = None,
+    sheet_resolution: SheetResolutionDecision | None = None,
 ) -> FaListDataset:
     """从 Excel 底稿读取 FA list 工作表并解析为 AssetRecord 列表。"""
     path = Path(path)
@@ -758,6 +903,7 @@ def load_fa_list_from_workbook(
             amount_basis=amount_basis,
             routing=route,
             number_formats=number_formats,
+            sheet_resolution=sheet_resolution,
         )
 
     candidates = find_fa_list_sheets(path, max_rows=max_rows)
@@ -787,11 +933,13 @@ def load_fa_list_from_workbook(
         amount_basis=amount_basis,
         routing=routing,
         number_formats=chosen.number_formats,
+        sheet_resolution=sheet_resolution,
     )
 
 
 def _number_format_samples(ws, *, max_rows: int | None) -> dict[int, list[str]]:
-    last_row = min(ws.max_row, max_rows) if max_rows else ws.max_row
+    worksheet_rows = ws.max_row or max_rows or 250
+    last_row = min(worksheet_rows, max_rows) if max_rows else worksheet_rows
     samples: dict[int, list[str]] = {}
     for row in ws.iter_rows(min_row=1, max_row=min(last_row, 250)):
         for cell in row:

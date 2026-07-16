@@ -6,6 +6,7 @@ from ingest.addition_test_sheet import (
     AdditionTestSheetDataset,
 )
 from ingest.lead_sheet import LeadSheetDataset
+from ingest.models import SheetKind
 from ingest.records import FaListDataset
 from ingest.rollforward_sheet import RollforwardSheetDataset
 from rules.addition_consistency import check_addition_sample_match
@@ -30,6 +31,7 @@ from rules.addition_sampling_output import (
     check_addition_sampling_te_cra_consistency,
 )
 from rules.execution_recorder import RuleExecutionRecorder
+from rules.list_readiness_context import build_list_column_context
 from rules.models import ColumnContext, QcIssue
 from rules.readiness import evaluate_rule_readiness, readiness_spec_from_registry
 from rules.registry import get_by_rule_id
@@ -87,13 +89,20 @@ def run_addition_rules(
                 build_addition_data_insufficient_observation(rule_id, reason),
             )
     if addition_list is not None:
-        ctx = ColumnContext(
-            mapped_fields={m.standard_field for m in addition_list.mapped_fields},
-            mapped_headers={m.standard_field: m.source_header for m in addition_list.mapped_fields},
-            mapped_columns={m.standard_field: m.column_index for m in addition_list.mapped_fields},
-            field_resolutions=addition_list.field_resolutions,
-            source_sheet=addition_list.source_sheet,
+        available_data = {"addition_list"}
+        if rollforward is not None:
+            available_data.add("rollforward")
+        if lead is not None:
+            available_data.add("lead")
+        if addition_test is not None:
+            available_data.add("addition_test")
+        if addition_sample_output is not None:
+            available_data.add("addition_sample_output")
+        ctx = build_list_column_context(
+            addition_list,
+            expected_kind=SheetKind.ADDITION_LIST,
             procedure_code="K.02.1",
+            available_data=available_data,
         )
         required_decision = _readiness("addition_required_fields", ctx)
         if required_decision.ready:
@@ -176,14 +185,22 @@ def run_addition_rules(
         ):
             recorder.record_not_applicable(rule_id, "新增测试已豁免或测试表注明不执行")
         return issues
-    sample_pool_issues = recorder.execute_rule(
+    sample_pool_decision = _readiness(
         "addition_sample_pool_purchase_amount_match",
-        check_addition_sample_pool_purchase_amount_match,
-        addition_list,
-        addition_sample_output,
-        rollforward=rollforward,
-        addition_test=addition_test,
+        ctx if addition_list is not None else None,
     )
+    if sample_pool_decision.ready:
+        sample_pool_issues = recorder.execute_rule(
+            "addition_sample_pool_purchase_amount_match",
+            check_addition_sample_pool_purchase_amount_match,
+            addition_list,
+            addition_sample_output,
+            rollforward=rollforward,
+            addition_test=addition_test,
+        )
+    else:
+        _record_readiness_insufficient(recorder, sample_pool_decision)
+        sample_pool_issues = []
     recorder.record_observation(
         "addition_sample_pool_purchase_amount_match",
         build_addition_sample_pool_observation(

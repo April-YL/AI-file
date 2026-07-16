@@ -53,6 +53,11 @@ class ColumnContext:
     mapped_headers: dict[str, str] = field(default_factory=dict)
     mapped_columns: dict[str, int] = field(default_factory=dict)
     field_resolutions: dict[str, Any] = field(default_factory=dict)
+    available_data: set[str] = field(default_factory=lambda: {"fa_list"})
+    sheet_kind: str = "fa_list"
+    sheet_resolution_status: str = "RESOLVED"
+    semantic_states: dict[str, str] = field(default_factory=dict)
+    derivatives_current: bool = True
 
 
 @dataclass

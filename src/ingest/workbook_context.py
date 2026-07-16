@@ -7,16 +7,18 @@ from ingest.addition_test_sheet import (
     AdditionExecutionPathDataset,
     AdditionSampleOutputDataset,
     AdditionTestSheetDataset,
+    build_addition_execution_path,
 )
 from ingest.disposal_test_sheet import (
     DisposalExecutionPathDataset,
     DisposalSampleOutputDataset,
     DisposalTestSheetDataset,
+    build_disposal_execution_path,
 )
 from ingest.k03_sheet import K03ExecutionProfile, K03SheetDataset
 from ingest.lead_sheet import LeadSheetDataset
-from ingest.reconciliation import ReconciliationCheck
-from ingest.records import DisposalListSummary, FaListDataset
+from ingest.reconciliation import ReconciliationCheck, run_workbook_reconciliations
+from ingest.records import DisposalListSummary, FaListDataset, build_disposal_list_summary
 from ingest.rollforward_sheet import RollforwardSheetDataset
 from ingest.summary_sheet import SummarySheetDataset
 from ingest.workbook_ingest import load_workbook_ingest
@@ -88,4 +90,27 @@ def load_workbook_context(
         k03_execution_profile=ing.k03_execution_profile,
         structure=ing.structure,
         reconciliations=list(ing.reconciliations),
+    )
+
+
+def refresh_list_context_derivatives(ctx: WorkbookQcContext) -> None:
+    """Refresh workbook-level objects that depend on list field mappings."""
+    ctx.disposal_list_summary = build_disposal_list_summary(ctx.disposal_list)
+    ctx.reconciliations = run_workbook_reconciliations(
+        fa_list=ctx.fa_list,
+        rollforward=ctx.rollforward,
+        addition_list=ctx.addition_list,
+        disposal_list=ctx.disposal_list,
+    )
+    ctx.addition_execution_path = build_addition_execution_path(
+        summary=ctx.summary,
+        addition_list=ctx.addition_list,
+        addition_test=ctx.addition_test,
+        addition_sample_output=ctx.addition_sample_output,
+    )
+    ctx.disposal_execution_path = build_disposal_execution_path(
+        summary=ctx.summary,
+        disposal_list=ctx.disposal_list,
+        disposal_test=ctx.disposal_test,
+        disposal_sample_output=ctx.disposal_sample_output,
     )

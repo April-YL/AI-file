@@ -12,6 +12,8 @@ class RuleReadinessSpec:
     execution_mode: RuleExecutionMode = RuleExecutionMode.DETERMINISTIC
     required_data: tuple[str, ...] = ()
     required_fields: tuple[str, ...] = ()
+    required_sheet_kind: str | None = None
+    required_semantics: tuple[str, ...] = ()
     minimum_evidence: int = 0
     allowed_llm_capability: str | None = None
     insufficient_action: str = "DATA_INSUFFICIENT"
@@ -43,6 +45,8 @@ def readiness_spec_from_registry(spec) -> RuleReadinessSpec:
         execution_mode=spec.execution_mode,
         required_data=spec.required_data,
         required_fields=spec.required_fields,
+        required_sheet_kind=spec.required_sheet_kind,
+        required_semantics=spec.required_semantics,
         minimum_evidence=spec.minimum_evidence,
         allowed_llm_capability=spec.allowed_llm_capability,
         insufficient_action=spec.insufficient_action,
@@ -68,6 +72,47 @@ def evaluate_rule_readiness(
             spec.rule_id,
             ReadinessStatus.DATA_INSUFFICIENT,
             reasons=["required dataset or column context is unavailable"],
+        )
+
+    missing_data = [item for item in spec.required_data if item not in ctx.available_data]
+    if missing_data:
+        return ReadinessDecision(
+            spec.rule_id,
+            ReadinessStatus.DATA_INSUFFICIENT,
+            reasons=["required data is unavailable: " + ", ".join(missing_data)],
+        )
+    if spec.required_sheet_kind and (
+        ctx.sheet_resolution_status != "RESOLVED"
+        or ctx.sheet_kind != spec.required_sheet_kind
+    ):
+        return ReadinessDecision(
+            spec.rule_id,
+            ReadinessStatus.DATA_INSUFFICIENT,
+            reasons=[
+                "required sheet identity is not confirmed: "
+                f"expected {spec.required_sheet_kind}, got "
+                f"{ctx.sheet_kind}/{ctx.sheet_resolution_status}"
+            ],
+        )
+    if not ctx.derivatives_current:
+        return ReadinessDecision(
+            spec.rule_id,
+            ReadinessStatus.DATA_INSUFFICIENT,
+            reasons=["derived list profiles or summaries are stale"],
+        )
+    missing_semantics = [
+        item
+        for item in spec.required_semantics
+        if ctx.semantic_states.get(item) != "CONFIRMED"
+    ]
+    if missing_semantics:
+        return ReadinessDecision(
+            spec.rule_id,
+            ReadinessStatus.DATA_INSUFFICIENT,
+            reasons=[
+                "required business semantics are not confirmed: "
+                + ", ".join(missing_semantics)
+            ],
         )
 
     blocking_fields: list[str] = []

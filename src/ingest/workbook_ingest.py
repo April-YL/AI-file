@@ -31,7 +31,12 @@ from ingest.k03_sheet import (
     load_k03_sheets_from_workbook,
 )
 from ingest.lead_sheet import LeadSheetDataset, load_lead_from_workbook
-from ingest.models import SheetKind
+from ingest.models import (
+    FaListRoutingDecision,
+    FaListRoutingStatus,
+    ResolutionStatus,
+    SheetKind,
+)
 from ingest.reconciliation import ReconciliationCheck, run_workbook_reconciliations
 from ingest.records import (
     DisposalListSummary,
@@ -40,6 +45,7 @@ from ingest.records import (
     load_fa_list_from_workbook,
 )
 from ingest.fa_list_routing import choose_fa_list_route
+from ingest.list_sheet_routing import resolve_list_sheet_route
 from ingest.rollforward_sheet import RollforwardSheetDataset, load_rollforward_from_workbook
 from ingest.sheet_loader import load_asset_sheet_from_workbook
 from ingest.summary_sheet import SummarySheetDataset, load_summary_from_workbook
@@ -381,7 +387,12 @@ def _load_fa_list_candidate_sheets(
 ) -> list[FaListDataset]:
     datasets: list[FaListDataset] = []
     for name in _candidate_sheet_names(structure, SheetKind.FA_LIST):
-        dataset = load_fa_list_from_workbook(path, sheet_name=name, max_rows=max_rows)
+        dataset = load_fa_list_from_workbook(
+            path,
+            sheet_name=name,
+            max_rows=max_rows,
+            sheet_resolution=structure.sheet_resolutions.get(name),
+        )
         if dataset.records or dataset.mapped_fields:
             datasets.append(dataset)
     return datasets
@@ -401,6 +412,7 @@ def _load_asset_candidate_sheets(
             kind,
             sheet_name=name,
             max_rows=max_rows,
+            sheet_resolution=structure.sheet_resolutions.get(name),
         )
         if dataset.records or dataset.mapped_fields:
             datasets.append(dataset)
@@ -421,9 +433,25 @@ def load_workbook_ingest(
     path = Path(path)
     structure = analyze_workbook_structure(path, max_rows=max_rows)
 
-    fa_candidates = _candidate_sheet_names(structure, SheetKind.FA_LIST)
-    fa_routing = choose_fa_list_route(fa_candidates, explicit_sheet=fa_sheet)
-    fa_sheet = fa_routing.selected_sheet
+    fa_sheet_route = resolve_list_sheet_route(
+        structure,
+        SheetKind.FA_LIST,
+        explicit_sheet=fa_sheet,
+    )
+    fa_sheet = fa_sheet_route.selected_sheet if fa_sheet_route.confirmed else None
+    fa_routing = (
+        choose_fa_list_route([fa_sheet], explicit_sheet=fa_sheet)
+        if fa_sheet
+        else FaListRoutingDecision(
+            status=(
+                FaListRoutingStatus.NOT_FOUND
+                if fa_sheet_route.status == ResolutionStatus.MISSING
+                else FaListRoutingStatus.AMBIGUOUS
+            ),
+            candidates=list(fa_sheet_route.candidates),
+            reason="; ".join(fa_sheet_route.reasons),
+        )
+    )
     summary_sheet = _first_sheet_name(structure, SheetKind.SUMMARY, summary_sheet)
     lead_sheet = _first_sheet_name(structure, SheetKind.LEAD, lead_sheet)
     rollforward_sheet, k01_route_reason = _select_rollforward_sheet(
@@ -432,12 +460,26 @@ def load_workbook_ingest(
         fa_sheet=fa_sheet,
         explicit_name=rollforward_sheet,
     )
-    addition_sheet = _first_sheet_name(structure, SheetKind.ADDITION_LIST, addition_sheet)
+    addition_sheet_route = resolve_list_sheet_route(
+        structure,
+        SheetKind.ADDITION_LIST,
+        explicit_sheet=addition_sheet,
+    )
+    addition_sheet = (
+        addition_sheet_route.selected_sheet if addition_sheet_route.confirmed else None
+    )
     addition_test_sheet = _first_sheet_name(structure, SheetKind.ADDITION_TEST)
     addition_sample_output_sheet = _first_sheet_name(
         structure, SheetKind.ADDITION_SAMPLE_OUTPUT
     )
-    disposal_sheet = _first_sheet_name(structure, SheetKind.DISPOSAL_LIST, disposal_sheet)
+    disposal_sheet_route = resolve_list_sheet_route(
+        structure,
+        SheetKind.DISPOSAL_LIST,
+        explicit_sheet=disposal_sheet,
+    )
+    disposal_sheet = (
+        disposal_sheet_route.selected_sheet if disposal_sheet_route.confirmed else None
+    )
     disposal_test_sheet = _first_sheet_name(structure, SheetKind.DISPOSAL_TEST)
     disposal_sample_output_sheet = _first_sheet_name(
         structure, SheetKind.DISPOSAL_SAMPLE_OUTPUT
@@ -452,6 +494,9 @@ def load_workbook_ingest(
         k01_sheet_name=rollforward_sheet,
         routing=fa_routing,
         k01_route_reason=k01_route_reason,
+        sheet_resolution=(
+            structure.sheet_resolutions.get(fa_sheet) if fa_sheet else None
+        ),
     )
     if (
         not fa_list.records
@@ -484,6 +529,7 @@ def load_workbook_ingest(
             SheetKind.ADDITION_LIST,
             sheet_name=addition_sheet,
             max_rows=None,
+            sheet_resolution=structure.sheet_resolutions.get(addition_sheet),
         )
         if addition_sheet
         else None
@@ -526,6 +572,7 @@ def load_workbook_ingest(
             SheetKind.DISPOSAL_LIST,
             sheet_name=disposal_sheet,
             max_rows=None,
+            sheet_resolution=structure.sheet_resolutions.get(disposal_sheet),
         )
         if disposal_sheet
         else None

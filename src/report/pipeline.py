@@ -156,6 +156,7 @@ def _run_workbook_qc_core(
             ]
 
     if ctx.fa_list:
+        fa_sheet_decision = ctx.fa_list.sheet_resolution
         fa_ctx = ColumnContext(
             mapped_fields={m.standard_field for m in ctx.fa_list.mapped_fields},
             mapped_headers={m.standard_field: m.source_header for m in ctx.fa_list.mapped_fields},
@@ -163,6 +164,15 @@ def _run_workbook_qc_core(
             field_resolutions=ctx.fa_list.field_resolutions,
             source_sheet=ctx.fa_list.source_sheet,
             procedure_code="FA_LIST",
+            available_data={"fa_list"},
+            sheet_kind=(
+                fa_sheet_decision.selected_kind.value
+                if fa_sheet_decision and fa_sheet_decision.selected_kind
+                else "fa_list"
+            ),
+            sheet_resolution_status=(
+                fa_sheet_decision.status.value if fa_sheet_decision else "RESOLVED"
+            ),
         )
         issues.extend(
             run_fa_list_rules(
@@ -175,6 +185,22 @@ def _run_workbook_qc_core(
         )
         records = ctx.fa_list.records
         source_sheet = ctx.fa_list.source_sheet
+    else:
+        missing_fa_ctx = ColumnContext(
+            mapped_fields=set(),
+            source_sheet="workbook",
+            procedure_code="FA_LIST",
+            available_data=set(),
+            sheet_kind="fa_list",
+            sheet_resolution_status="MISSING",
+        )
+        issues.extend(
+            run_fa_list_rules(
+                [],
+                missing_fa_ctx,
+                recorder=recorder,
+            )
+        )
 
     if ctx.summary:
         wb_for_psp: str | None = wb_for_semantic
@@ -418,18 +444,18 @@ def _run_workbook_qc_core(
             source_sheet = ctx.lead.source_sheet
 
     addition_llm_issues = []
-    if ctx.addition_list:
-        addition_issues = attach_rule_metadata(
-            run_addition_rules(
-                ctx.addition_list,
-                rollforward=ctx.rollforward,
-                lead=ctx.lead,
-                addition_test=ctx.addition_test,
-                addition_sample_output=ctx.addition_sample_output,
-                addition_execution_path=ctx.addition_execution_path,
-                recorder=recorder,
-            )
+    addition_issues = attach_rule_metadata(
+        run_addition_rules(
+            ctx.addition_list,
+            rollforward=ctx.rollforward,
+            lead=ctx.lead,
+            addition_test=ctx.addition_test,
+            addition_sample_output=ctx.addition_sample_output,
+            addition_execution_path=ctx.addition_execution_path,
+            recorder=recorder,
         )
+    )
+    if ctx.addition_list:
         if router.is_enabled(LlmCapability.RULE_REVIEW, rule_id="addition_semantic_review"):
             llm_t0 = perf_counter()
             from llm.addition_review import (
@@ -471,7 +497,6 @@ def _run_workbook_qc_core(
         if not source_sheet:
             source_sheet = ctx.addition_list.source_sheet
     else:
-        addition_issues = []
         if router.is_enabled(LlmCapability.RULE_REVIEW, rule_id="addition_semantic_review") and (
             ctx.addition_test or ctx.addition_sample_output or ctx.addition_execution_path
         ):
@@ -498,7 +523,6 @@ def _run_workbook_qc_core(
                 capability=LlmCapability.RULE_REVIEW,
             )
             addition_issues.extend(addition_llm_issues)
-            issues.extend(addition_llm_issues)
             elapsed = perf_counter() - llm_t0
             llm_seconds += elapsed
             record_llm_detail(
@@ -506,6 +530,7 @@ def _run_workbook_qc_core(
                 "K.02.1 addition semantic review",
                 elapsed,
             )
+        issues.extend(addition_issues)
         addition_sheet_section = build_addition_sheet_section(
             ctx.addition_test,
             ctx.addition_sample_output,
